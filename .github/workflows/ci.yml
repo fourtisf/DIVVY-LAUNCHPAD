@@ -128,9 +128,20 @@ jobs:
       - name: Check the worker bundle loads
         run: |
           out=$(env -i PATH="$PATH" node apps/worker/dist/index.js 2>&1 || true)
-          if echo "$out" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (package|module)|Dynamic require|does not provide an export|Named export|SyntaxError"; then
+          if echo "$out" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (package|module)|Dynamic require|does not provide an export|Named export|SyntaxError|ReferenceError"; then
             echo "$out" | head -n 30
             echo "::error::apps/worker/dist/index.js failed to load"
+            exit 1
+          fi
+
+      # An unreachable Redis makes the API log connection errors. Building those errors' stacks must
+      # not crash the bundle (bundled CommonJS once broke Error.prepareStackTrace).
+      - name: Check the API bundle survives a Redis outage
+        run: |
+          out=$(env -i PATH="$PATH" API_MODE=mock API_PORT=4011 API_HOST=127.0.0.1 REDIS_URL=redis://127.0.0.1:1 timeout 5 node apps/api/dist/server.js 2>&1 || true)
+          if echo "$out" | grep -qE "ReferenceError|is not defined|ERR_MODULE_NOT_FOUND|SyntaxError"; then
+            echo "$out" | head -n 30
+            echo "::error::apps/api/dist/server.js crashed with Redis unreachable"
             exit 1
           fi
 
