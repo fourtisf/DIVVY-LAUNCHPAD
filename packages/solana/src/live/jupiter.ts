@@ -5,6 +5,7 @@
  * - /build has no CU-limit instruction (swap.yaml:604-608): we add one.
  * - priceImpactPct on /build is a decimal ratio ("0.001" = 0.1%) (swap.yaml:597-599).
  * - GET /price/v3?ids= (price/v3/price.yaml:8,24), up to 50 ids.
+ * - GET /tokens/v2/{category}/{interval} (tokens/v2/tokens.yaml:7-8,163-215) for the reserved-ticker list.
  */
 import {
   AddressLookupTableAccount,
@@ -118,13 +119,28 @@ export class JupiterClient {
 
   /** USD prices keyed by mint (Price API v3). Missing mints are left out. */
   async prices(mints: string[]): Promise<Record<string, number>> {
-    const out: Record<string, number> = {};
+    const full = await this.priceDetails(mints);
+    return Object.fromEntries(Object.entries(full).map(([m, v]) => [m, v.usdPrice]));
+  }
+
+  /** Price API v3 with the 24h change (price/v3/price.yaml:53-73: usdPrice, priceChange24h). */
+  async priceDetails(mints: string[]): Promise<Record<string, { usdPrice: number; priceChange24h: number | null }>> {
+    const out: Record<string, { usdPrice: number; priceChange24h: number | null }> = {};
     for (let i = 0; i < mints.length; i += 50) {
       const chunk = mints.slice(i, i + 50);
-      const r = await this.get<Record<string, { usdPrice?: number } | null>>(`/price/v3?ids=${chunk.join(",")}`);
-      for (const [mint, v] of Object.entries(r)) if (v?.usdPrice) out[mint] = v.usdPrice;
+      const r = await this.get<Record<string, { usdPrice?: number; priceChange24h?: number | null } | null>>(`/price/v3?ids=${chunk.join(",")}`);
+      for (const [mint, v] of Object.entries(r)) if (v?.usdPrice) out[mint] = { usdPrice: v.usdPrice, priceChange24h: v.priceChange24h ?? null };
     }
     return out;
+  }
+
+  /**
+   * Tokens API v2 top lists (tokens/v2/tokens.yaml:163-215): /tokens/v2/{toporganicscore|toptraded|toptrending}/{5m|1h|6h|24h},
+   * limit ≤ 100. Generic tokens like SOL and USDC are filtered out by Jupiter.
+   */
+  async topTokens(category: "toporganicscore" | "toptraded" | "toptrending", interval: "5m" | "1h" | "6h" | "24h", limit = 100): Promise<{ id: string; symbol: string }[]> {
+    const r = await this.get<{ id: string; symbol: string }[]>(`/tokens/v2/${category}/${interval}?limit=${Math.min(100, Math.max(1, limit))}`);
+    return Array.isArray(r) ? r.filter((t) => typeof t?.symbol === "string") : [];
   }
 }
 

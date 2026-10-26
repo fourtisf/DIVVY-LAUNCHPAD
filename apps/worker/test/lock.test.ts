@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Redis } from "ioredis";
 import { withLock } from "../src/lock";
-import { roundHour } from "../src/jobs";
+import { topOfHour as roundHour } from "../src/payouts/engine";
 
 describe("roundHour", () => {
   it("floors to the top of the UTC hour", () => {

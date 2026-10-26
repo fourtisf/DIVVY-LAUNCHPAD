@@ -23,6 +23,10 @@ import {
   quoteSell,
   snapshotHolders,
   TRADE_EVENT_DISC,
+  CPMM_SWAP_EVENT_DISC,
+  CPMM_SWAP_EVENT_LEN,
+  cpmmPoolPda,
+  parseCpmmSwaps,
   type GlobalConfigState,
   type PoolState,
 } from "../src/live";
@@ -257,5 +261,55 @@ describe("snapshotHolders (DAS)", () => {
       { owner: "A", amount: 9007199254740995n },
       { owner: "B", amount: 5n },
     ]);
+  });
+});
+
+describe("CPMM swaps", () => {
+  const poolId = Keypair.generate().publicKey;
+  const coin = Keypair.generate().publicKey;
+  const wsol = new PublicKey("So11111111111111111111111111111111111111112");
+  function swapEventData(): Buffer {
+    const b = Buffer.alloc(CPMM_SWAP_EVENT_LEN);
+    let o = 0;
+    poolId.toBuffer().copy(b, o);
+    o += 32;
+    for (const v of [1_000n, 2_000n, 500_000_000n, 2_000_000n, 0n, 0n]) {
+      b.writeBigUInt64LE(v, o);
+      o += 8;
+    }
+    b[o++] = 1;
+    wsol.toBuffer().copy(b, o);
+    o += 32;
+    coin.toBuffer().copy(b, o);
+    o += 32;
+    b.writeBigUInt64LE(1_250_000n, o);
+    o += 8;
+    b.writeBigUInt64LE(250_000n, o);
+    o += 8;
+    b[o] = 1;
+    return Buffer.concat([CPMM_SWAP_EVENT_DISC, b]);
+  }
+  const txWith = (logs: string[]) => ({ slot: 1, transaction: { message: {}, signatures: ["x"] }, meta: { err: null, logMessages: logs } }) as unknown as VersionedTransactionResponse;
+
+  it("decodes SwapEvent from the CPMM program's own log lines", () => {
+    const data = swapEventData().toString("base64");
+    const r = parseCpmmSwaps(txWith([`Program ${P.cpmm.toBase58()} invoke [2]`, `Program data: ${data}`, `Program ${P.cpmm.toBase58()} success`]), P.cpmm);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.event).toMatchObject({ inputAmount: 500_000_000n, outputAmount: 2_000_000n, baseInput: true, tradeFee: 1_250_000n, creatorFee: 250_000n, creatorFeeOnInput: true });
+    expect(r[0]!.event.poolId.equals(poolId)).toBe(true);
+    expect(r[0]!.event.outputMint.equals(coin)).toBe(true);
+  });
+  it("ignores look-alike lines printed by other programs", () => {
+    const data = swapEventData().toString("base64");
+    const other = Keypair.generate().publicKey.toBase58();
+    const r = parseCpmmSwaps(
+      txWith([`Program ${P.cpmm.toBase58()} invoke [1]`, `Program ${other} invoke [2]`, `Program data: ${data}`, `Program ${other} success`, `Program ${P.cpmm.toBase58()} success`]),
+      P.cpmm,
+    );
+    expect(r).toHaveLength(0);
+  });
+  it("derives the pool PDA independent of mint order", () => {
+    const cfg = Keypair.generate().publicKey;
+    expect(cpmmPoolPda(P.cpmm, cfg, coin, wsol).equals(cpmmPoolPda(P.cpmm, cfg, wsol, coin))).toBe(true);
   });
 });

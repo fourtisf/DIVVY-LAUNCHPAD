@@ -1,38 +1,103 @@
+/**
+ * Divvy worker: launch pipeline, claim builder, indexer, hourly dividend engine and ops jobs.
+ * WORKER_ROLES picks which parts run in this process (all by default).
+ * Payouts are dry-run unless PAYOUTS_DRY_RUN=false (CLAUDE.md rule 7), and nothing is ever sent on
+ * mainnet unless DIVVY_MAINNET_ENABLED=true (set only after the audit sign-off).
+ */
 import { Cron } from "croner";
-import { Redis } from "ioredis";
-import { indexerHeartbeat, payoutsJob, reservedTickersJob, type JobContext } from "./jobs";
+import { Queue, Worker } from "bullmq";
+import { bullConnection } from "@divvy/server";
+import { QUEUES, type ClaimJob, type ClaimJobResult, type LaunchJob } from "@divvy/shared";
+import { buildClaim, reconcileClaims } from "./claims";
+import { createWorkerDeps, jsonLog } from "./deps";
+import { loadWorkerEnv } from "./env";
+import { Indexer } from "./indexer";
+import { processLaunch, reconcileLaunches } from "./launch";
 import { withLock } from "./lock";
+import { pricesJob, reservedTickersJob, statusJob } from "./ops";
+import { liveChain } from "./payouts/chain";
+import { reconcileTransfers } from "./payouts/deliver";
+import { runPayouts, topOfHour } from "./payouts/engine";
+import { refreshMarketStats } from "./stats";
 
-const dryRun = process.env.PAYOUTS_DRY_RUN !== "false"; // dry-run unless explicitly turned off (CLAUDE.md rule 7)
-const redisUrl = process.env.REDIS_URL;
-if (!redisUrl) throw new Error("REDIS_URL is required for job locking");
-const redis = new Redis(redisUrl, { maxRetriesPerRequest: 2 });
+const env = loadWorkerEnv();
+const d = createWorkerDeps(env);
+const roles = env.WORKER_ROLES;
+const stops: (() => unknown)[] = [];
+const crons: Cron[] = [];
 
-const log = (msg: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), msg, ...extra }));
-const ctx: JobContext = { dryRun, log };
-
-const run = (name: string, ttlMs: number, fn: () => Promise<void>) => async () => {
+const guarded = (name: string, ttlMs: number, fn: () => Promise<unknown>) => async () => {
   try {
-    const r = await withLock(redis, name, ttlMs, async () => (await fn(), true));
-    if (r === null) log(`${name}: another worker holds the lock, skipping`);
+    const r = await withLock(d.redis, name, ttlMs, async () => (await fn(), true));
+    if (r === null) jsonLog(`${name}: another worker holds the lock, skipping`);
   } catch (e) {
-    log(`${name}: failed`, { error: e instanceof Error ? e.message : String(e) });
+    jsonLog(`${name}: failed`, { error: e instanceof Error ? e.message : String(e) });
   }
 };
+const every = (pattern: string, name: string, ttlMs: number, fn: () => Promise<unknown>) =>
+  crons.push(new Cron(pattern, { timezone: "UTC", protect: true }, guarded(name, ttlMs, fn)));
 
-// Minute 0 of every hour, UTC. A round has 60 minutes plus 15 of grace (HANDOFF §3.3).
-const jobs = [
-  new Cron("0 * * * *", { timezone: "UTC", protect: true }, run("payouts", 75 * 60_000, () => payoutsJob(ctx))),
-  new Cron("17 3 * * *", { timezone: "UTC", protect: true }, run("reserved-tickers", 30 * 60_000, () => reservedTickersJob(ctx))),
-  new Cron("*/5 * * * *", { timezone: "UTC", protect: true }, run("indexer-heartbeat", 60_000, () => indexerHeartbeat(ctx))),
-];
+if (roles.has("launch")) {
+  const queue = new Queue<LaunchJob>(QUEUES.launch, { connection: bullConnection(env.REDIS_URL) });
+  // One create per launch at a time, even if a job is re-queued while the first is still running.
+  const worker = new Worker<LaunchJob>(QUEUES.launch, async (job) => withLock(d.redis, `launch:${job.data.launchId}`, 10 * 60_000, () => processLaunch(d, job.data.launchId)), {
+    connection: bullConnection(env.REDIS_URL),
+    concurrency: 4,
+  });
+  stops.push(() => worker.close(), () => queue.close());
+  every("* * * * *", "launch-reconcile", 55_000, () =>
+    reconcileLaunches(d, async (id) => void (await queue.add("create", { launchId: id }, { jobId: `${id}-requeue-${Math.floor(Date.now() / 600_000)}`, removeOnComplete: 1000, removeOnFail: 1000 }))),
+  );
+}
 
-log("worker started", { dryRun, jobs: jobs.map((j) => j.getPattern()) });
+if (roles.has("claims")) {
+  const worker = new Worker<ClaimJob, ClaimJobResult>(QUEUES.claims, (job) => buildClaim(d, job.data), { connection: bullConnection(env.REDIS_URL), concurrency: 8 });
+  stops.push(() => worker.close());
+  every("* * * * *", "claims-reconcile", 55_000, () => reconcileClaims(d));
+}
+
+if (roles.has("indexer")) {
+  const indexer = new Indexer(d);
+  stops.push(indexer.start());
+  every("* * * * *", "market-stats", 55_000, async () => {
+    const { migrating } = await refreshMarketStats(d);
+    await indexer.checkMigrations(migrating);
+  });
+}
+
+if (roles.has("payouts")) {
+  const chain = liveChain(d);
+  // Minute 0 starts the hour's run; every 10 minutes resumes anything unfinished (each step is idempotent).
+  every("*/10 * * * *", "payouts", 15 * 60_000, async () => {
+    const hour = topOfHour();
+    const prev = new Date(hour.getTime() - 3_600_000);
+    if (await d.prisma.payoutRound.count({ where: { hour: prev, dryRun: d.params.dryRun, step: { not: "delivered" } } })) {
+      jsonLog("payouts: resuming the previous hour", { hour: prev });
+      await runPayouts(d, chain, prev, d.params.dryRun);
+    }
+    const summary = await runPayouts(d, chain, hour, d.params.dryRun);
+    jsonLog("payouts: run", { ...summary });
+  });
+  every("* * * * *", "transfers-reconcile", 55_000, () => reconcileTransfers(d));
+}
+
+if (roles.has("prices")) every("* * * * *", "prices", 55_000, () => pricesJob(d));
+if (roles.has("status")) every("* * * * *", "status", 55_000, () => statusJob(d));
+if (roles.has("reserved")) every("17 3 * * *", "reserved-tickers", 30 * 60_000, () => reservedTickersJob(d));
+
+jsonLog("worker started", {
+  roles: [...roles],
+  cluster: d.sol.cluster,
+  mainnetEnabled: d.sol.mainnetEnabled,
+  payoutsDryRun: d.params.dryRun,
+  delivery: d.params.delivery,
+});
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, async () => {
-    jobs.forEach((j) => j.stop());
-    await redis.quit();
+    crons.forEach((c) => c.stop());
+    await Promise.allSettled(stops.map((s) => s()));
+    await d.close();
     process.exit(0);
   });
 }

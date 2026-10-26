@@ -12,3 +12,4 @@ coverage/
 *.keypair.json
 id.json
 /artifacts/
+dump.rdb

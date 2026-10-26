@@ -67,6 +67,14 @@ enum ClaimStatus {
   expired
 }
 
+/// A push transfer the payout vault signed. The credit is debited before sending and given back if
+/// the transaction expires without landing.
+enum TransferStatus {
+  pending
+  confirmed
+  expired
+}
+
 enum ReportStatus {
   open
   resolved
@@ -123,12 +131,12 @@ model Session {
 }
 
 model DividendAsset {
-  id           String       @id @default(cuid())
-  symbol       String       @unique
+  id           String           @id @default(cuid())
+  symbol       String           @unique
   name         String
   kind         AssetKind
   /// Fetched from the official list or the Jupiter token API. Never typed by hand.
-  mint         String       @unique
+  mint         String           @unique
   decimals     Int
   tokenProgram TokenProgram
   logoUrl      String?
@@ -136,9 +144,9 @@ model DividendAsset {
   mono         String
   chipBg       String
   chipFg       String
-  featured     Boolean      @default(false)
-  enabled      Boolean      @default(true)
-  sortOrder    Int          @default(0)
+  featured     Boolean          @default(false)
+  enabled      Boolean          @default(true)
+  sortOrder    Int              @default(0)
   /// Where the mint was fetched from, for audit (e.g. "jupiter-tokens-v2").
   source       String
   fetchedAt    DateTime
@@ -146,6 +154,7 @@ model DividendAsset {
   swapBatches  SwapBatch[]
   credits      Credit[]
   claims       Claim[]
+  transfers    PayoutTransfer[]
 }
 
 model Coin {
@@ -255,24 +264,26 @@ model Upload {
 }
 
 model Launch {
-  id         String     @id @default(cuid())
-  userId     String
-  user       User       @relation(fields: [userId], references: [id])
-  coinId     String?    @unique
-  coin       Coin?      @relation(fields: [coinId], references: [id])
-  step       LaunchStep @default(checking)
+  id                   String     @id @default(cuid())
+  userId               String
+  user                 User       @relation(fields: [userId], references: [id])
+  coinId               String?    @unique
+  coin                 Coin?      @relation(fields: [coinId], references: [id])
+  step                 LaunchStep @default(checking)
   /// Public key only, set by the worker. Secret until the create lands: the API must not return it
   /// before step = landed. The mint secret key lives in worker memory for the bundle and is never stored.
-  mintPubkey String?    @unique
-  bundleId   String?
-  attempts   Int        @default(0)
-  signature  String?
+  mintPubkey           String?    @unique
+  bundleId             String?
+  attempts             Int        @default(0)
+  /// Block height after which the sent create can no longer land (crash recovery).
+  lastValidBlockHeight BigInt?
+  signature            String?
   /// { code, message, collidesWith } when step = failed.
-  error      Json?
+  error                Json?
   /// The validated launch form.
-  request    Json
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  request              Json
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   @@index([userId, createdAt])
   @@index([createdAt])
@@ -354,6 +365,9 @@ model VaultClaim {
   toSlot               BigInt
   /// lamports minus the indexed platform fees in range. Non-zero means missed trades: alert.
   unattributedLamports BigInt          @default(0)
+  /// Set once the claim's lamports were split into FeeAllocations. A row without it was signed (or
+  /// sent) but not yet attributed, and is resumed on the next run.
+  attributedAt         DateTime?
   createdAt            DateTime        @default(now())
   allocations          FeeAllocation[]
 
@@ -518,6 +532,26 @@ model Claim {
 
   @@index([wallet, status])
   @@index([status, createdAt])
+}
+
+/// One recipient of a push transaction (a transaction can carry several transfers).
+model PayoutTransfer {
+  id                   String         @id @default(cuid())
+  sig                  String
+  wallet               String
+  assetId              String
+  asset                DividendAsset  @relation(fields: [assetId], references: [id])
+  amount               BigInt
+  /// The payout vault paid this wallet's ATA rent.
+  createdAta           Boolean        @default(false)
+  status               TransferStatus @default(pending)
+  lastValidBlockHeight BigInt
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@unique([sig, wallet])
+  @@index([status, createdAt])
+  @@index([wallet, assetId])
 }
 
 /// Where each indexer stream has read up to.

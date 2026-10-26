@@ -6,3 +6,4 @@ export * from "./jupiter";
 export * from "./tokens";
 export * from "./holders";
 export * from "./send";
+export * from "./cpmm";
