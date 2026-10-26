@@ -4,6 +4,7 @@ Production runs on one Hostinger VPS (Ubuntu 24.04) with PM2 and Nginx (CLAUDE.m
 
 | File | What it is |
 |---|---|
+| [`preview/`](preview/README.md) | Password-protected preview at uspad.fun: web and API in demo mode with PM2 and Nginx, no database, worker or keys. The first step online. |
 | [`setup-vps.md`](setup-vps.md) | One-time server setup: users, firewall, Node, PostgreSQL, Redis, Nginx, TLS, env files and keys, PM2 at boot, backups, and moving a server from the older single-user layout |
 | [`ecosystem.config.cjs`](ecosystem.config.cjs) | PM2 apps `divvy-web` (cluster ×2), `divvy-api` (cluster ×1) and `divvy-worker` (fork, exactly one). Each runs as the OS user of the same name, under its own PM2 daemon, as `node --env-file=/etc/divvy/<web\|api\|worker>.env`, and logs to `/var/log/divvy/<web\|api\|worker>/`. Always started with `--only <app>`. |
 | [`nginx/divvy.conf`](nginx/divvy.conf) | TLS, the proxy to :3000 and :4000 (WebSocket `/api/live`), CSP and security headers, `X-Geo-Country`, per-IP rate limits (pages, API, uploads, launches), 404 for any `/api` spelling but lowercase, the launch pause switch |

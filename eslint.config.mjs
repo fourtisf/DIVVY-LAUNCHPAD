@@ -25,4 +25,15 @@ export default tseslint.config(
     files: ["packages/solana/scripts/**"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
+  {
+    // .cjs files (PM2 configs, brand and load-test scripts) are CommonJS by definition.
+    files: ["**/*.cjs"],
+    languageOptions: { sourceType: "commonjs" },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    // Brand scripts drive a browser; their page.evaluate callbacks run there.
+    files: ["brand/**/*.cjs"],
+    languageOptions: { globals: { ...globals.browser } },
+  },
 );

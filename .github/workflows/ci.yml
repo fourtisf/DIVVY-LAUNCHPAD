@@ -123,6 +123,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # dist/ is what production runs, and tests run from source, so check the worker bundle loads.
+      # Without settings it stops at its config check; a module or bundling error means it's broken.
+      - name: Check the worker bundle loads
+        run: |
+          out=$(env -i PATH="$PATH" node apps/worker/dist/index.js 2>&1 || true)
+          if echo "$out" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (package|module)|Dynamic require|does not provide an export|Named export|SyntaxError"; then
+            echo "$out" | head -n 30
+            echo "::error::apps/worker/dist/index.js failed to load"
+            exit 1
+          fi
+
       # The mock API needs no database. Without REDIS_URL it keeps SIWS nonces in memory, which is
       # fine for one process.
       - name: Start the API (mock mode)

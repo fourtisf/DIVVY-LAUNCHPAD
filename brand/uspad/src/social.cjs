@@ -51,7 +51,7 @@ const header = `<div style="width:1500px;height:500px;position:relative;overflow
 (async () => {
   const b = await chromium.launch();
   const page = await b.newPage({ deviceScaleFactor: 2 });
-  const shot = async (html, w, h, file, scale = 2) => {
+  const shot = async (html, w, h, file) => {
     await page.setViewportSize({ width: w, height: h });
     await page.setContent(`<!doctype html><meta charset="utf-8"><style>${base}</style>${html}`);
     await page.evaluate(() => document.fonts.ready);
@@ -75,6 +75,6 @@ const header = `<div style="width:1500px;height:500px;position:relative;overflow
         <div style="position:absolute;left:16px;top:80px"><div style="font:700 20px Inter;color:#E7E9EA">uspad.fun</div>
         <div style="font:400 15px Inter;color:#71767B;margin-top:2px">Memecoins that pay us. In US stocks.</div></div>
       </div></div></div>`).join("")}</div>`;
-  await shot(preview, 1340, 470, "x-preview.png", 2);
+  await shot(preview, 1340, 470, "x-preview.png");
   await b.close();
 })();

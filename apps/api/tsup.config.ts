@@ -7,6 +7,8 @@ export default defineConfig({
   target: "node20",
   clean: true,
   splitting: false,
-  noExternal: [/^@divvy\//],
+  noExternal: [/^@divvy\//, "bn.js"],
+  // Bundled CommonJS code (bn.js, parts of the Raydium SDK) calls require(); give the ESM bundle one.
+  banner: { js: 'import { createRequire as __divvyCreateRequire } from "node:module"; const require = __divvyCreateRequire(import.meta.url);' },
   external: ["@prisma/client", "sharp"],
 });
