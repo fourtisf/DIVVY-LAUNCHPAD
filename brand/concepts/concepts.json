@@ -1,0 +1,32 @@
+[
+ {
+  "key": "split",
+  "label": "Koin belah",
+  "desc": "Satu koin dibelah dua, separuh kanan terangkat: nilai yang dibagi, sekaligus huruf d."
+ },
+ {
+  "key": "share",
+  "label": "Potongan",
+  "desc": "Koin dengan satu potongan terangkat keluar: bagian holder yang dibagikan tiap jam."
+ },
+ {
+  "key": "dial",
+  "label": "Jam",
+  "desc": "Muka jam tangan mewah: 12 jam, 12 kali bayar. Koin duduk di puncak jam."
+ },
+ {
+  "key": "seal",
+  "label": "Segel",
+  "desc": "Medali berukir guilloche seperti segel sertifikat saham, huruf d di tengah."
+ },
+ {
+  "key": "facet",
+  "label": "Permata",
+  "desc": "Koin dipotong seperti batu permata; tiap sisi menangkap cahaya seperti foil."
+ },
+ {
+  "key": "rise",
+  "label": "Naik",
+  "desc": "Grafik yang naik turun lalu naik lagi, dan berakhir di koin: dividen yang terus jalan."
+ }
+]

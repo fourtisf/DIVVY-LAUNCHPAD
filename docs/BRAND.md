@@ -149,3 +149,40 @@ PNGs are Chromium screenshots of the SVGs placed inline in a page that loads Plu
 2. The dashed ring and the `✦` star follow Chromium on Linux. Other browsers and systems draw the prototype's dashes and its fallback star a little differently.
 3. The coin emblem is the flat face texture. The hero shows it on a 3D coin with a metallic rim, lighting and motion.
 4. `logo-horizontal-ink.svg`, the app icon tile layout and the share image layout are put together from prototype parts. The prototype has no light theme, app icons or share image of its own.
+
+## Premium logo concepts (proposals, 2026-10-26)
+
+The owner asked for several premium logo options. They live in [`brand/concepts/`](../brand/concepts/) and are proposals only: the site still uses the prototype's mark above (CLAUDE.md rule 1) until the owner picks one.
+
+Open `brand/concepts/boards/00-overview.png` for all six, and `01-…` to `06-…` for each concept on dark and light backgrounds, as an app icon, as a token avatar, at 64/32/16 px and in one color.
+
+| # | Folder | Name | Idea |
+|---|---|---|---|
+| 01 | `split/` | Koin belah | One coin cut in two, the right half lifted: value being divided, and a lowercase d. |
+| 02 | `share/` | Potongan | A coin with one slice lifted out: the holders' share, paid every hour. |
+| 03 | `dial/` | Jam | A watch dial: twelve hours, twelve payouts, a coin at the top of the hour, the d at the centre. |
+| 04 | `seal/` | Segel | An engraved medallion with a bead border and guilloche, like the seal on a share certificate. Has `mark-small.svg` for 32 px and below. |
+| 05 | `facet/` | Permata | The coin cut like a gem, with the d on its table. |
+| 06 | `rise/` | Naik | A chart that dips and climbs, ending in a coin. |
+
+All six share one custom wordmark (`wordmark-dark.svg`, `wordmark-light.svg`): geometric lowercase "divvy", drawn as paths with pointed v's and a foil coin for the dot of the i. Because it's drawn, not typeset, it needs no font file or license, unlike the Clash Display wordmark above. Colors are the prototype's tokens: the foil gradient and `--bg`, `--text` and `--g-ink`, plus a darker "struck" foil (`#14532D` to `#4ADE80`) so the marks keep their contrast on light backgrounds.
+
+Each concept folder holds:
+
+| File | Use |
+|---|---|
+| `mark.svg`, `mark-512.png` | The mark in foil, for dark backgrounds |
+| `mark-light.svg` | The mark in the darker foil, for light backgrounds |
+| `mark-mono.svg`, `mark-ink.svg` | One color: `--text` for dark, `--g-ink` for light (stamps, print, embossing) |
+| `lockup-dark.svg`, `lockup-dark-1200.png` | Mark and wordmark for dark backgrounds |
+| `lockup-light.svg`, `lockup-light-1200.png` | Mark and wordmark for light backgrounds |
+| `app-icon.svg`, `app-icon-512.png` | 512 px rounded tile; the mark stays inside the maskable safe zone |
+
+To change a concept, edit `brand/concepts/src/gen.py`, then regenerate the SVGs and boards from the repo root:
+
+```sh
+python3 -I brand/concepts/src/gen.py brand/concepts
+node brand/concepts/src/boards.cjs brand/concepts brand/concepts/boards
+```
+
+Once the owner picks one, it replaces the mark, favicons, app icons and share image above, and the site header and `Coin3D` face are updated to match.
