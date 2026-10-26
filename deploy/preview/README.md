@@ -38,36 +38,28 @@ ufw --force enable
 curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
 bash /tmp/nodesource_setup.sh
 apt-get install -y nodejs
-npm install -g pnpm@10.28.0 pm2@7
+npm install -g --force pnpm@10.28.0 pm2@7             # --force replaces an older pnpm left in /usr/bin
 node --version && pnpm --version && pm2 --version      # v22.x, 10.28.0, 7.x
 
 dig +short uspad.fun A                                  # this server's IPv4
 dig +short uspad.fun AAAA                               # empty, or this server's IPv6
 ```
 
-## 3. The `divvy` user and a read-only GitHub deploy key (as root)
+## 3. The `divvy` user (as root)
 
 ```bash
 adduser --disabled-password --gecos "" divvy
 mkdir -p /srv/divvy && chown divvy:divvy /srv/divvy
-
-sudo -iu divvy bash -c '
-  mkdir -p ~/.ssh && chmod 700 ~/.ssh
-  ssh-keygen -t ed25519 -N "" -C "uspad-server" -f ~/.ssh/github_deploy
-  printf "Host github.com\n  IdentityFile ~/.ssh/github_deploy\n  IdentitiesOnly yes\n" > ~/.ssh/config
-  chmod 600 ~/.ssh/config
-  cat ~/.ssh/github_deploy.pub'
 ```
 
-Copy the printed line (`ssh-ed25519 ... uspad-server`). On GitHub, open the repository, then Settings → Deploy keys → Add deploy key. Paste it and leave "Allow write access" off.
+The repository is public (`github.com/fourtisf/uspad`), so cloning needs no key. If it ever goes private, add a read-only deploy key for the `divvy` user (GitHub: Settings → Deploy keys) and clone over SSH instead.
 
 ## 4. Clone, settings and build (as `divvy`)
 
 ```bash
 su - divvy
 
-ssh -T git@github.com            # type "yes" once; expect "Hi fourtisf/DIVVY-LAUNCHPAD! You've successfully authenticated"
-git clone --branch claude/new-session-qmy02t git@github.com:fourtisf/DIVVY-LAUNCHPAD.git /srv/divvy/app
+git clone --branch claude/new-session-qmy02t https://github.com/fourtisf/uspad.git /srv/divvy/app
 cd /srv/divvy/app
 
 cat > .env <<'EOF'
