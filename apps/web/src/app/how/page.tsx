@@ -4,10 +4,36 @@ import { sharedApi } from "@/lib/server-api";
 import { deliveryCopy } from "@/lib/copy";
 
 const pctLabel = (bps: number) => `${+(bps / 100).toFixed(2)}%`;
+const tokens = (v: number) => (v >= 1e9 ? `${+(v / 1e9).toFixed(2)}B` : `${+(v / 1e6).toFixed(1)}M`);
+const usdShort = (v: number) => (v >= 1e6 ? `$${+(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.round(v)}`);
+/** Dollars per $1,000 traded for a fee in basis points. */
+const per1k = (bps: number) => `$${(bps / 10).toFixed(2)}`;
+
+// The Raydium CPMM pool a coin graduates into (docs/ECONOMICS.md "Sources"): a 0.25% trade fee, of
+// which Raydium keeps 12% + 4% and the locked liquidity earns the rest, plus a 0.05% creator fee.
+const POOL_FEE_BPS = 25;
+const POOL_RAYDIUM_SHARE = 0.16;
+const POOL_CREATOR_FEE_BPS = 5;
 
 export default async function HowPage() {
   const c = await sharedApi<Config>("/api/config");
   const f = c.fees;
+  const g = c.graduation;
+  const raiseSol = +g.quoteFundRaising.ui.toFixed(1);
+
+  // After graduation the locked liquidity's fees and the pool's creator fee are split in the same
+  // proportions as the 1% on the curve.
+  const lpBps = POOL_FEE_BPS * (1 - POOL_RAYDIUM_SHARE);
+  const potBps = lpBps + POOL_CREATOR_FEE_BPS;
+  const shared = f.holdersBps + f.creatorBps + f.divvyBps;
+  const after = {
+    total: POOL_FEE_BPS + POOL_CREATOR_FEE_BPS,
+    holders: (potBps * f.holdersBps) / shared,
+    creator: (potBps * f.creatorBps) / shared,
+    divvy: (potBps * f.divvyBps) / shared,
+    raydium: POOL_FEE_BPS * POOL_RAYDIUM_SHARE,
+  };
+
   return (
     <>
       <h1 className="page-h">How uspad works</h1>
@@ -37,14 +63,21 @@ export default async function HowPage() {
         <li>
           <span className="n">4</span>
           <div>
-            <h3>Every trade fills the coin&apos;s vault</h3>
+            <h3>Every trade on the curve pays {pctLabel(f.tradeFeeBps)}</h3>
             <p>
-              Trades pay a {pctLabel(f.tradeFeeBps)} fee on chain, straight into this coin&apos;s own vault: {bpsLabel(f.holdersBps)} for holders, {bpsLabel(f.creatorBps)} for the creator, {bpsLabel(f.divvyBps)} for uspad and {bpsLabel(f.protocolBps)} for Raydium. Nothing is forwarded by hand and nothing is estimated.
+              Raydium&apos;s LaunchLab program takes the fee on chain, on every buy and every sell: {bpsLabel(f.holdersBps)} for holders, {bpsLabel(f.creatorBps)} for the creator, {bpsLabel(f.divvyBps)} for uspad and {bpsLabel(f.protocolBps)} for Raydium. The creator&apos;s share goes straight to their own fee vault, and they claim it from their page. The holders&apos; and uspad&apos;s share goes to uspad&apos;s fee vault, and each trade&apos;s record says which coin paid it, so every coin&apos;s dividend is exactly what its own trades paid. Nothing is estimated.
             </p>
           </div>
         </li>
         <li>
           <span className="n">5</span>
+          <div>
+            <h3>Why Raydium gets {bpsLabel(f.protocolBps)}</h3>
+            <p>The bonding curve and the pool after it are Raydium&apos;s programs, not uspad&apos;s. Raydium charges its own {bpsLabel(f.protocolBps)} on every curve trade for running them, and its own wallet moves the coin into the pool when it graduates. uspad can&apos;t turn that fee off and doesn&apos;t receive any of it. The {pctLabel(f.tradeFeeBps)} you see is the whole fee, Raydium&apos;s part included.</p>
+          </div>
+        </li>
+        <li>
+          <span className="n">6</span>
           <div>
             <h3>{deliveryCopy(c).howStepTitle}</h3>
             <p>
@@ -52,10 +85,87 @@ export default async function HowPage() {
             </p>
           </div>
         </li>
+        <li>
+          <span className="n">7</span>
+          <div>
+            <h3>At {raiseSol} SOL it graduates to a Raydium pool</h3>
+            <p>
+              Every coin has {tokens(g.totalSupply.ui)} tokens. The curve sells {tokens(g.curveSupply.ui)} of them, and the price rises with each buy. When buyers have put {raiseSol} SOL into the curve, the coin graduates: Raydium moves those {raiseSol} SOL, less its migration fee if it charges one, and the other {tokens(g.migrateSupply.ui)} tokens into a new Raydium pool. That&apos;s a market cap of about {usdShort(g.targetUsd)} at today&apos;s SOL price. From then on the coin trades in the pool.
+            </p>
+          </div>
+        </li>
+        <li>
+          <span className="n">8</span>
+          <div>
+            <h3>The pool&apos;s liquidity is locked for good, not burned</h3>
+            <p>
+              All of the pool&apos;s liquidity is locked with Raydium Burn &amp; Earn, which has no way to withdraw it. Nobody can ever pull those {raiseSol} SOL out of the pool, uspad included. For holders that&apos;s as safe as burning it, with one difference: locked liquidity keeps earning the pool&apos;s trading fees, and those fees keep paying the dividend. Burned liquidity would earn nothing.
+            </p>
+          </div>
+        </li>
+        <li>
+          <span className="n">9</span>
+          <div>
+            <h3>After graduation the fee drops to {bpsLabel(after.total)}</h3>
+            <p>
+              A trade in the Raydium pool pays {bpsLabel(after.total)} instead of {pctLabel(f.tradeFeeBps)}: the pool&apos;s {pctLabel(POOL_FEE_BPS)} trading fee plus a {pctLabel(POOL_CREATOR_FEE_BPS)} creator fee. Raydium keeps {Math.round(POOL_RAYDIUM_SHARE * 100)}% of the {pctLabel(POOL_FEE_BPS)} and the locked liquidity earns the rest. uspad collects that along with the creator fee and splits it the same way as on the curve. Dividends keep coming every hour, just smaller per dollar traded.
+            </p>
+          </div>
+        </li>
       </ol>
+      <div className="sec-h">
+        <div>
+          <h2>Where the fee goes</h2>
+          <p>Per $1,000 traded</p>
+        </div>
+      </div>
+      <div className="how-fees">
+        <table className="t">
+          <thead>
+            <tr>
+              <th />
+              <th className="r">On the curve</th>
+              <th className="r">After graduation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>The trader pays</td>
+              <td className="r">{per1k(f.tradeFeeBps)} ({pctLabel(f.tradeFeeBps)})</td>
+              <td className="r">{per1k(after.total)} ({bpsLabel(after.total)})</td>
+            </tr>
+            <tr>
+              <td>Holders&apos; dividend</td>
+              <td className="r"><b>{per1k(f.holdersBps)}</b></td>
+              <td className="r"><b>{per1k(after.holders)}</b></td>
+            </tr>
+            <tr>
+              <td>Creator</td>
+              <td className="r">{per1k(f.creatorBps)}</td>
+              <td className="r">{per1k(after.creator)}</td>
+            </tr>
+            <tr>
+              <td>uspad</td>
+              <td className="r">{per1k(f.divvyBps)}</td>
+              <td className="r">{per1k(after.divvy)}</td>
+            </tr>
+            <tr>
+              <td>Raydium</td>
+              <td className="r">{per1k(f.protocolBps)}</td>
+              <td className="r">{per1k(after.raydium)}</td>
+            </tr>
+            <tr>
+              <td>Liquidity</td>
+              <td className="r">In the curve</td>
+              <td className="r">Locked for good</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div className="fine">
         <p>Tokenized stocks are issued by third parties such as xStocks. They track a share&apos;s price but carry no voting rights, and may be unavailable in some countries, including the United States.</p>
         <p>A stock token trades around the clock while the real market closes at night and on weekends, so its price can jump when the market reopens.</p>
+        <p>After graduation, half of the locked liquidity&apos;s fees arrive in the coin itself, and uspad sells them for SOL before the payout. The figures after graduation are rounded and can move by a few cents with Raydium&apos;s pool settings.</p>
         <p>Most new coins never graduate. Payouts depend entirely on trading volume. Nothing here is financial advice.</p>
       </div>
       <div style={{ marginBottom: 80 }}>
