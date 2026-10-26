@@ -2,11 +2,16 @@
 # Daily PostgreSQL backup for Divvy: a custom-format pg_dump into /var/backups/divvy, 14-day local
 # rotation, and an optional offsite copy with rclone. Restore: deploy/backup/pg-restore.md.
 #
-# Runs as the divvy user from /etc/cron.d/divvy-backup (docs/RUNBOOK.md, "Backups"):
-#   40 3 * * * divvy /srv/divvy/current/deploy/backup/pg-backup.sh >> /var/log/divvy/backup.log 2>&1
+# Runs as the divvy-backup user from /etc/cron.d/divvy-backup, as an installed copy outside the releases
+# (deploy/setup-vps.md §11), so the user that owns the releases can't change what runs with the database
+# password. After changing this file, review it and install it again:
+#   sudo install -o root -g root -m 755 deploy/backup/pg-backup.sh /usr/local/bin/divvy-pg-backup
+#   40 3 * * * divvy-backup /usr/local/bin/divvy-pg-backup >> /var/log/divvy/backup/backup.log 2>&1
+# It refuses to run as root: root-owned files in BACKUP_DIR would break every later run.
 #
-# Settings come from the environment first, then from the env file (read line by line, never sourced):
-#   DIVVY_ENV_FILE   /etc/divvy/divvy.env
+# Settings come from the environment first, then from the env file (read line by line, never sourced).
+# The env file holds only what backups need, chmod 600 and owned by divvy-backup:
+#   DIVVY_ENV_FILE   /etc/divvy/backup.env
 #   DATABASE_URL     Prisma's URL, postgresql://user:pass@host:port/db?schema=public (the query is ignored)
 #   BACKUP_DIR       /var/backups/divvy
 #   RETENTION_DAYS   14
@@ -20,9 +25,10 @@ set -Eeuo pipefail
 umask 077
 export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
-ENV_FILE="${DIVVY_ENV_FILE:-/etc/divvy/divvy.env}"
+ENV_FILE="${DIVVY_ENV_FILE:-/etc/divvy/backup.env}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/divvy}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
+LOG_FILE=/var/log/divvy/backup/backup.log
 
 partial=""
 
@@ -57,11 +63,13 @@ fail() {
   trap - ERR
   [[ -n "$partial" ]] && rm -f -- "$partial"
   log "failed: $1"
-  notify_failure "Divvy database backup failed on $(hostname): $1. Check /var/log/divvy/backup.log."
+  notify_failure "Divvy database backup failed on $(hostname): $1. Check ${LOG_FILE}."
   exit "$status"
 }
 trap 'fail "command at line $LINENO exited with status $?" 1' ERR
 
+[[ "$(id -u)" -ne 0 ]] || fail "refusing to run as root; run it as divvy-backup (sudo -u divvy-backup -H $0)"
+[[ -r "$ENV_FILE" ]] || log "warning: $ENV_FILE is not readable by $(id -un); using the environment only"
 [[ "$RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]] || fail "RETENTION_DAYS must be a positive whole number of days"
 for bin in pg_dump pg_restore node sha256sum flock; do
   command -v "$bin" > /dev/null || fail "$bin is not installed"

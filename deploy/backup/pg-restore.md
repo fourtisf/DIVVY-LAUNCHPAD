@@ -1,6 +1,6 @@
 # Restoring the Divvy database
 
-Backups come from `deploy/backup/pg-backup.sh` (cron, daily at 03:40 UTC). Each one is a custom-format `pg_dump` at `/var/backups/divvy/divvy-<UTC timestamp>.dump` with a `.sha256` beside it. Local copies are kept for 14 days. When `RCLONE_REMOTE` is set, each dump is also copied offsite.
+Backups come from `deploy/backup/pg-backup.sh` (cron runs its installed copy `/usr/local/bin/divvy-pg-backup` as `divvy-backup`, daily at 03:40 UTC). Each one is a custom-format `pg_dump` at `/var/backups/divvy/divvy-<UTC timestamp>.dump` with a `.sha256` beside it. Local copies are kept for 14 days. When `RCLONE_REMOTE` is set, each dump is also copied offsite.
 
 **Always restore into a scratch database first.** Production is only replaced by renaming databases after the checks pass, so the database being replaced is kept until you drop it.
 
@@ -8,7 +8,7 @@ Last rehearsal: 2026-10-26, on PostgreSQL 16.15 from the Ubuntu 24.04 packages, 
 
 ## Before you start
 
-- Run this from an admin shell on the VPS. Commands run as `postgres` (superuser, peer auth) or as `divvy` (the app role, owner of the `divvy` database). `sudo -u divvy -H` makes libpq read `/home/divvy/.pgpass` (set up in `deploy/setup-vps.md` §5), so no password goes on a command line.
+- Run this from an admin shell on the VPS. Commands run as `postgres` (superuser, peer auth) or as the OS user `divvy-backup`, which owns the dumps and connects as the app role `divvy` (owner of the `divvy` database). `sudo -u divvy-backup -H` makes libpq read `/home/divvy-backup/.pgpass` (set up in `deploy/setup-vps.md` §5), so no password goes on a command line.
 - Free disk: allow about 5 times the dump size under `/var/lib/postgresql` (`df -h /var/lib/postgresql`).
 - To restore production (step 4), tell the owner first. A restore rewinds the ledger, and step 5 is not optional.
 
@@ -18,15 +18,15 @@ Set these once in the admin shell. Every block below uses them:
 NAME=divvy-20261026T034000Z.dump                 # the dump you picked in step 1
 DUMP=/var/backups/divvy/$NAME
 SCRATCH=divvy_restore_$(date -u +%Y%m%d)
-as_divvy() { sudo -u divvy -H "$@"; }
+as_backup() { sudo -u divvy-backup -H "$@"; }
 ```
 
 ## 1. Pick and verify a dump
 
 ```bash
 sudo ls -lt /var/backups/divvy/ | head
-as_divvy bash -c 'cd /var/backups/divvy && sha256sum -c "$0.sha256"' "$NAME"
-as_divvy pg_restore --list "$DUMP" | head -12
+as_backup bash -c 'cd /var/backups/divvy && sha256sum -c "$0.sha256"' "$NAME"
+as_backup pg_restore --list "$DUMP" | head -12
 ```
 
 Expected output (the creation time is the point you are rewinding to):
@@ -50,10 +50,10 @@ A checksum mismatch or a `pg_restore --list` error means the file is damaged. Pi
 **Restoring from offsite**, for example on a new server or when the local copies are gone:
 
 ```bash
-REMOTE=$(sudo grep -E '^RCLONE_REMOTE=' /etc/divvy/divvy.env | cut -d= -f2-)
-as_divvy rclone lsl "$REMOTE" | sort -k2,3 | tail -5
-as_divvy rclone copy "$REMOTE/$NAME" /var/backups/divvy/
-as_divvy rclone copy "$REMOTE/$NAME.sha256" /var/backups/divvy/
+REMOTE=$(sudo grep -E '^RCLONE_REMOTE=' /etc/divvy/backup.env | tail -n 1 | cut -d= -f2-)
+as_backup rclone lsl "$REMOTE" | sort -k2,3 | tail -5
+as_backup rclone copy "$REMOTE/$NAME" /var/backups/divvy/
+as_backup rclone copy "$REMOTE/$NAME.sha256" /var/backups/divvy/
 ```
 
 Then run the checksum again.
@@ -62,7 +62,7 @@ Then run the checksum again.
 
 ```bash
 sudo -u postgres createdb --owner=divvy "$SCRATCH"
-as_divvy pg_restore --host=127.0.0.1 --username=divvy --dbname="$SCRATCH" \
+as_backup pg_restore --host=127.0.0.1 --username=divvy --dbname="$SCRATCH" \
   --no-owner --exit-on-error --jobs=2 "$DUMP"
 echo "pg_restore exit: $?"            # must be 0
 ```
@@ -83,8 +83,8 @@ SELECT
   (SELECT count(*) FROM "ReservedTicker")   AS reserved_tickers;
 SQL
 chmod 644 /tmp/divvy-restore-check.sql
-as_divvy psql -h 127.0.0.1 -U divvy -d "$SCRATCH" -X -f /tmp/divvy-restore-check.sql
-as_divvy psql -h 127.0.0.1 -U divvy -d divvy     -X -f /tmp/divvy-restore-check.sql   # production, if it is still up
+as_backup psql -h 127.0.0.1 -U divvy -d "$SCRATCH" -X -f /tmp/divvy-restore-check.sql
+as_backup psql -h 127.0.0.1 -U divvy -d divvy     -X -f /tmp/divvy-restore-check.sql   # production, if it is still up
 ```
 
 - The scratch counts should be at or below production's. `last_round_hour` and `last_signed_tx` should sit just before the dump's creation time.
@@ -93,7 +93,7 @@ as_divvy psql -h 127.0.0.1 -U divvy -d divvy     -X -f /tmp/divvy-restore-check.
 Compare the migrations in the copy with the ones the running release ships:
 
 ```bash
-as_divvy psql -h 127.0.0.1 -U divvy -d "$SCRATCH" -XAt \
+as_backup psql -h 127.0.0.1 -U divvy -d "$SCRATCH" -XAt \
   -c 'SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY 1' \
   > /tmp/db-migrations.txt
 ls -1 /srv/divvy/current/packages/db/prisma/migrations | grep -v '\.toml$' > /tmp/release-migrations.txt
@@ -112,15 +112,15 @@ sudo -u postgres dropdb "$SCRATCH"
 
 ## 4. Promote the copy (production restore only)
 
-1. Stop new money from moving: pause launches, and keep payouts in dry-run until step 5 is done.
+1. Stop new money from moving: pause launches, and keep payouts in dry-run until step 5 is done. Dry-run also closes holder claims. The API and the worker both read `PAYOUTS_DRY_RUN`, so set it in both files.
    ```bash
    sudo touch /etc/nginx/divvy-launches-paused
-   sudo sed -i 's/^PAYOUTS_DRY_RUN=.*/PAYOUTS_DRY_RUN=true/' /etc/divvy/divvy.env
-   sudo grep '^PAYOUTS_DRY_RUN=' /etc/divvy/divvy.env       # must print PAYOUTS_DRY_RUN=true
+   sudo sed -i 's/^PAYOUTS_DRY_RUN=.*/PAYOUTS_DRY_RUN=true/' /etc/divvy/api.env /etc/divvy/worker.env
+   sudo grep -H '^PAYOUTS_DRY_RUN=' /etc/divvy/api.env /etc/divvy/worker.env   # both must print PAYOUTS_DRY_RUN=true
    ```
-2. Stop the apps. The site is down from here until step 4.5.
+2. Stop the apps, each under its own user's PM2. The site is down from here until step 4.5.
    ```bash
-   as_divvy pm2 stop divvy-worker divvy-api divvy-web
+   for u in divvy-worker divvy-api divvy-web; do sudo -iu "$u" pm2 stop "$u"; done
    ```
 3. Swap the databases. The current one is renamed, not dropped. If production no longer exists (for example on a new server), leave out the first `ALTER`.
    ```bash
@@ -130,14 +130,14 @@ sudo -u postgres dropdb "$SCRATCH"
      -c "ALTER DATABASE divvy RENAME TO divvy_before_restore_$STAMP" \
      -c "ALTER DATABASE $SCRATCH RENAME TO divvy"
    ```
-   `DATABASE_URL` names the database `divvy`, so nothing in `/etc/divvy/divvy.env` changes.
-4. Bring the schema up to the running release (this applies any `<` migrations from step 3):
+   `DATABASE_URL` names the database `divvy`, so nothing in the env files changes.
+4. Bring the schema up to the running release (this applies any `<` migrations from step 3), with the API's database URL:
    ```bash
-   sudo -iu divvy bash -c 'cd /srv/divvy/current && pnpm db:deploy'
+   cd /srv/divvy/current/packages/db && sudo -u divvy-api -H node --env-file=/etc/divvy/api.env ./node_modules/prisma/build/index.js migrate deploy; cd
    ```
 5. Start the apps. The worker starts in dry-run because of step 1.
    ```bash
-   as_divvy pm2 start divvy-api divvy-web divvy-worker
+   for u in divvy-api divvy-web divvy-worker; do sudo -iu "$u" pm2 start "$u"; done
    curl -fsS http://127.0.0.1:4000/api/health && curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/
    ```
 
@@ -153,8 +153,9 @@ Anything that happened on chain after the dump's creation time is missing from t
 After reconciliation, and only with the owner's approval for live payouts (CLAUDE.md rule 3):
 
 ```bash
-sudo sed -i 's/^PAYOUTS_DRY_RUN=.*/PAYOUTS_DRY_RUN=false/' /etc/divvy/divvy.env
-as_divvy pm2 restart divvy-worker --update-env
+sudo sed -i 's/^PAYOUTS_DRY_RUN=.*/PAYOUTS_DRY_RUN=false/' /etc/divvy/api.env /etc/divvy/worker.env
+sudo -iu divvy-api pm2 reload /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-api --update-env
+sudo -iu divvy-worker pm2 restart /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-worker --update-env
 sudo rm /etc/nginx/divvy-launches-paused
 ```
 
