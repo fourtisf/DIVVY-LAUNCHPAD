@@ -273,7 +273,7 @@ export function CreateForm() {
             </div>
             <div className="form-row fld">
               <div>
-                <label className="lbl" htmlFor="fX">X account</label>
+                <label className="lbl" htmlFor="fX">X account <em>optional</em></label>
                 {oauthX ? (
                   me?.x ? (
                     <input className="tinput" id="fX" value={`@${me.x.handle}`} readOnly />
@@ -289,12 +289,12 @@ export function CreateForm() {
                 )}
               </div>
               <div>
-                <label className="lbl" htmlFor="fTg">Telegram</label>
+                <label className="lbl" htmlFor="fTg">Telegram <em>optional</em></label>
                 <input className="tinput" id="fTg" placeholder="t.me/yourgroup" value={d.tg} onChange={set("tg")} />
               </div>
             </div>
             <div className="fld">
-              <label className="lbl" htmlFor="fWeb">Website</label>
+              <label className="lbl" htmlFor="fWeb">Website <em>optional</em></label>
               <input className="tinput" id="fWeb" placeholder="https://" value={d.web} onChange={set("web")} />
             </div>
           </section>
