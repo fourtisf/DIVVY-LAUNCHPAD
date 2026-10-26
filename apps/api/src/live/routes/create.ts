@@ -196,7 +196,7 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
               tx.launch.count({ where: { createdAt: { gte: dayStart }, step: { not: "failed" } } }),
             ]);
             if (mine >= p.launchesPerWalletPerDay) throw new Refusal(429, "DAILY_LIMIT", `You can launch ${p.launchesPerWalletPerDay} coins a day`);
-            if (all >= p.launchesPerDayGlobal) throw new Refusal(429, "GLOBAL_LIMIT", "Divvy hit today's launch limit. Try again tomorrow.");
+            if (all >= p.launchesPerDayGlobal) throw new Refusal(429, "GLOBAL_LIMIT", "uspad hit today's launch limit. Try again tomorrow.");
             invalidatePictures();
             // On this transaction's connection: the lock holder must not wait for a second pooled
             // connection while other launches hold the rest waiting on the lock (audit).

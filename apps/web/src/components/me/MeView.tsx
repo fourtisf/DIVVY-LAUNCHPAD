@@ -96,7 +96,7 @@ export function MeView() {
         <button className="btn btn-ghost" type="button" onClick={() => void signOut()}>Sign out</button>
         <button className="btn btn-ghost" type="button" onClick={() => void signOut().then(() => wallet.disconnect())}>Disconnect</button>
       </div>
-      {me?.blocked && <p className="note me-warn">Divvy isn&apos;t available in your country, so claims are turned off here.</p>}
+      {me?.blocked && <p className="note me-warn">uspad isn&apos;t available in your country, so claims are turned off here.</p>}
 
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-h">

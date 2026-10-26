@@ -6,7 +6,7 @@ export default function GlobalError({ reset }: { error: Error; reset: () => void
     <html lang="en">
       <body style={{ background: "#0A0F0D", color: "#EAFBF1", fontFamily: "system-ui, sans-serif", display: "grid", placeItems: "center", minHeight: "100vh", margin: 0 }}>
         <div style={{ textAlign: "center", padding: 24 }}>
-          <p>Divvy can&apos;t reach its server right now.</p>
+          <p>uspad can&apos;t reach its server right now.</p>
           <button type="button" onClick={reset} style={{ marginTop: 12, padding: "10px 18px", borderRadius: 999, border: 0, background: "#4ADE80", color: "#03140A", fontWeight: 600, cursor: "pointer" }}>
             Try again
           </button>

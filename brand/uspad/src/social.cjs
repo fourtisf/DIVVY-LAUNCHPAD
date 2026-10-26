@@ -48,6 +48,22 @@ const header = `<div style="width:1500px;height:500px;position:relative;overflow
     <p style="margin:18px 0 0;font:500 19px Inter;color:#97ACA2;letter-spacing:.005em">Launch on Solana · Hourly stock dividends</p>
   </div></div>`;
 
+// 1200 x 630 share image for the site (opengraph-image.png and twitter-image.png): the lockup, the
+// hero's headline and the coin.
+const og = `<div style="width:1200px;height:630px;position:relative;overflow:hidden;background:
+  radial-gradient(520px 460px at 935px 330px,rgba(74,222,128,.22),transparent 70%),
+  radial-gradient(700px 400px at 200px -80px,rgba(94,234,212,.10),transparent 70%),
+  linear-gradient(180deg,#0B130F,#070B09)">
+  ${guilloche(1200, 630, 36, 12, 0.05)}
+  <div style="position:absolute;left:935px;top:330px;width:560px;height:560px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(134,239,172,.10)"></div>
+  <div style="position:absolute;left:935px;top:330px;width:420px;height:420px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(134,239,172,.14)"></div>
+  <div style="position:absolute;left:935px;top:330px;transform:translate(-50%,-50%);filter:drop-shadow(0 34px 60px rgba(74,222,128,.35)) drop-shadow(0 0 24px rgba(74,222,128,.15))">${sized(read("mark.svg"), 300)}</div>
+  <div style="position:absolute;left:72px;top:66px">${sized(read("lockup-dark.svg"), 210)}</div>
+  <div style="position:absolute;left:72px;top:206px;width:640px">
+    <p style="margin:0;font:600 66px/1.0 'Inter Display',Inter;letter-spacing:-.04em">Memecoins that pay you <span class="glow">real stock dividends.</span></p>
+    <p style="margin:28px 0 0;font:500 22px Inter;color:#97ACA2">Launch on Solana · Hourly stock dividends</p>
+  </div></div>`;
+
 (async () => {
   const b = await chromium.launch();
   const page = await b.newPage({ deviceScaleFactor: 2 });
@@ -60,6 +76,7 @@ const header = `<div style="width:1500px;height:500px;position:relative;overflow
   // Rendered at 2x for crispness; the 1x sizes are made from these below.
   await shot(profile, 1000, 1000, "x-profile-2000.png");
   await shot(header, 1500, 500, "x-header-3000x1000.png");
+  await shot(og, 1200, 630, "og-2400x1260.png");
 
   // Preview: the header with the profile photo where X puts it (desktop column 600 px wide, photo
   // 134 px, 16 px from the left, overlapping the header's bottom by half).

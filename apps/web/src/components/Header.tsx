@@ -89,9 +89,10 @@ export function Header() {
   return (
     <header className="top">
       <div className="wrap">
-        <Link className="logo" href="/" aria-label="Divvy home">
-          <span className="logo-mark" />
-          divvy
+        <Link className="logo" href="/" aria-label="uspad home">
+          {/* The Koin belah mark and the drawn "uspad" wordmark (brand/uspad). */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="logo-lockup" src="/brand/uspad-lockup.svg" alt="uspad" width={121} height={36} />
         </Link>
         <nav className="links" aria-label="Main">
           <Link href="/" {...cur("board")}>Board</Link>

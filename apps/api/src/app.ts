@@ -59,7 +59,7 @@ export async function buildApp({ env, store, kv, live }: BuildOptions): Promise<
   app.addHook("onRequest", async (req, reply) => {
     if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
     const o = req.headers.origin;
-    if (o && o !== allowedOrigin) return sendError(reply, 403, "BAD_ORIGIN", "Requests must come from the Divvy app");
+    if (o && o !== allowedOrigin) return sendError(reply, 403, "BAD_ORIGIN", "Requests must come from the uspad app");
   });
 
   if (env.API_MODE === "live") {

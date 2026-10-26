@@ -45,7 +45,7 @@ export function ReportButton({ mint, ticker }: { mint: string; ticker: string })
           <form className="modal report-modal" onSubmit={submit}>
             <div className="in">
               <h2 id="reportTitle">Report ${ticker}</h2>
-              <p>Tell us what&apos;s wrong. Reports go to Divvy&apos;s moderators.</p>
+              <p>Tell us what&apos;s wrong. Reports go to uspad&apos;s moderators.</p>
               <div className="report-reasons" role="radiogroup" aria-label="Reason">
                 {REASONS.map(([k, label]) => (
                   <label key={k} className="report-reason">

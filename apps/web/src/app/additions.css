@@ -49,3 +49,7 @@
 .report-reason input{accent-color:var(--g)}
 .report-modal textarea{width:100%;resize:vertical;min-height:72px}
 .report-acts{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+
+/* uspad lockup in the header (replaces the prototype's foil mark and "divvy" text). */
+.logo-lockup{display:block;height:36px;width:auto}
+@media (max-width:760px){.logo-lockup{height:32px}}

@@ -28,7 +28,7 @@ export function createAlerts(opts: {
         const res = await f(`https://api.telegram.org/bot${opts.botToken}/sendMessage`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ chat_id: opts.chatId, text: `${icon} Divvy: ${text}`, disable_web_page_preview: true }),
+          body: JSON.stringify({ chat_id: opts.chatId, text: `${icon} uspad: ${text}`, disable_web_page_preview: true }),
         });
         if (!res.ok) opts.log("alert: telegram refused", { status: res.status });
       } catch (e) {

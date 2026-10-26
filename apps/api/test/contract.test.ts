@@ -234,7 +234,7 @@ describe("auth (SIWS) and signed-in routes", () => {
     expect(ok.statusCode).toBe(200);
 
     const n2 = (await get(`/api/auth/nonce?address=${address}`)).body as z.infer<typeof NonceResponseSchema>;
-    const other = n2.message.replace("Sign in to Divvy.", "Something else.");
+    const other = n2.message.replace("Sign in to uspad.", "Something else.");
     const r = await app.inject({
       method: "POST",
       url: "/api/auth/verify",

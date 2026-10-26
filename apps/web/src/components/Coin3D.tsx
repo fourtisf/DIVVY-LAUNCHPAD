@@ -67,7 +67,7 @@ export function CoinSpin3D({ src, back, label }: { src: string; back: DividendAs
 export function HeroStage({ featured, children }: { featured: DividendAsset[]; children: ReactNode }) {
   const { ref, state } = useScene((host, m) => m.heroScene(host, featured.map(toArt)), [featured.map((f) => f.symbol).join()]);
   return (
-    <div className="stage" id="stage" ref={ref} aria-label="A 3D Divvy coin with stock tokens orbiting around it">
+    <div className="stage" id="stage" ref={ref} aria-label="A 3D uspad coin with stock tokens orbiting around it">
       {state === "fallback" && <div className="fallback-coin" />}
       <div className="halo" />
       <div className="floor" />

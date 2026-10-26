@@ -92,7 +92,7 @@ export function isBlockedCountry(d: LiveDeps, req: FastifyRequest): boolean {
 /** Launching and claiming stock tokens are refused from blocked countries (HANDOFF §10). */
 export async function refuseBlockedCountry(d: LiveDeps, req: FastifyRequest, reply: FastifyReply): Promise<boolean> {
   if (isBlockedCountry(d, req)) {
-    await sendError(reply, 451, "REGION_BLOCKED", "Divvy isn't available in your country");
+    await sendError(reply, 451, "REGION_BLOCKED", "uspad isn't available in your country");
     return true;
   }
   return false;

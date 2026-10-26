@@ -10,7 +10,7 @@ export default async function HowPage() {
   const f = c.fees;
   return (
     <>
-      <h1 className="page-h">How Divvy works</h1>
+      <h1 className="page-h">How uspad works</h1>
       <p className="page-lede">A memecoin you buy with SOL. A dividend you&apos;re paid in a real stock token. Here&apos;s the path from a form to a payout.</p>
       <ol className="steps">
         <li>
@@ -31,7 +31,7 @@ export default async function HowPage() {
           <span className="n">3</span>
           <div>
             <h3>The launcher creates it in a private bundle</h3>
-            <p>Divvy&apos;s launcher wallet creates the coin on a Raydium LaunchLab bonding curve and pays the rent. The create goes out as a private bundle and the address isn&apos;t shown before it lands, so nobody can buy in the block it&apos;s created in. There&apos;s no dev buy for anyone.</p>
+            <p>uspad&apos;s launcher wallet creates the coin on a Raydium LaunchLab bonding curve and pays the rent. The create goes out as a private bundle and the address isn&apos;t shown before it lands, so nobody can buy in the block it&apos;s created in. There&apos;s no dev buy for anyone.</p>
           </div>
         </li>
         <li>
@@ -39,7 +39,7 @@ export default async function HowPage() {
           <div>
             <h3>Every trade fills the coin&apos;s vault</h3>
             <p>
-              Trades pay a {pctLabel(f.tradeFeeBps)} fee on chain, straight into this coin&apos;s own vault: {bpsLabel(f.holdersBps)} for holders, {bpsLabel(f.creatorBps)} for the creator, {bpsLabel(f.divvyBps)} for Divvy and {bpsLabel(f.protocolBps)} for Raydium. Nothing is forwarded by hand and nothing is estimated.
+              Trades pay a {pctLabel(f.tradeFeeBps)} fee on chain, straight into this coin&apos;s own vault: {bpsLabel(f.holdersBps)} for holders, {bpsLabel(f.creatorBps)} for the creator, {bpsLabel(f.divvyBps)} for uspad and {bpsLabel(f.protocolBps)} for Raydium. Nothing is forwarded by hand and nothing is estimated.
             </p>
           </div>
         </li>

@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.WEB_ORIGIN || "http://localhost:3000"),
-  title: "Divvy: memecoins that pay dividends in real stocks",
+  title: "uspad: memecoins that pay dividends in real stocks",
   description: "Launch a memecoin for free. Every trade buys a real stock token and splits it between holders, every hour.",
 };
 

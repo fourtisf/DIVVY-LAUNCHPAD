@@ -19,7 +19,7 @@ export type TxKind = "trade" | "claim" | "creator-claim";
 export class UnsafeTransaction extends Error {
   override name = "UnsafeTransaction";
   constructor(reason: string) {
-    super(`Divvy stopped this transaction before your wallet saw it: ${reason}.`);
+    super(`uspad stopped this transaction before your wallet saw it: ${reason}.`);
   }
 }
 

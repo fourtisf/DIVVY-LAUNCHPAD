@@ -115,7 +115,7 @@ function logoFace(): HTMLCanvasElement {
     g.shadowBlur = 0;
     g.fillStyle = "#DFFFEA";
     g.font = `600 46px ${FONT_D}`;
-    g.fillText("divvy", 256, 370);
+    g.fillText("uspad", 256, 370);
   });
 }
 
@@ -403,7 +403,7 @@ async function fontsReady() {
 
 /* ---------- scenes ---------- */
 
-/** Hero: the Divvy coin with six stock coins orbiting it and a field of sparkles. Click spins it. */
+/** Hero: the uspad coin with six stock coins orbiting it and a field of sparkles. Click spins it. */
 export async function heroScene(host: HTMLElement, featured: StockArt[]): Promise<Stop> {
   await fontsReady();
   if (!host.isConnected) return () => {};

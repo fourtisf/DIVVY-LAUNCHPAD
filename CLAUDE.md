@@ -5,6 +5,8 @@ Read this first in every session.
 ## What this is
 Divvy is a Solana memecoin launchpad built on Raydium LaunchLab. Every coin trades against SOL and pays its holders an hourly dividend in a tokenized stock (NVDAx, SPYx and others). The full spec is in `HANDOFF.md`. The approved UI is `prototype/divvy-prototype.html`.
 
+**Name:** the product is **uspad** (`uspad.fun`, repo `fourtisf/uspad`) since 2026-10-26, the owner's rebrand. Everything users see says uspad, with the Koin belah logo (`brand/uspad/`). Internal names still say Divvy: the `@divvy/*` packages, `DIVVY_*` env vars, `divvy:` Redis keys and these docs.
+
 ## Stack (do not change without the owner's OK)
 - **Frontend:** Next.js 14 App Router in `apps/web`.
 - **API:** Fastify in `apps/api`.

@@ -258,7 +258,7 @@ export function CoinView({ coin, initialMeter, initialPayouts }: { coin: CoinDet
             <div className="split-legend">
               <span><i style={{ background: "var(--g)" }} />Buys {coin.dividendAsset} for holders<b>{bpsLabel(f.holdersBps)}</b></span>
               <span><i style={{ background: "var(--teal)" }} />Creator<b>{bpsLabel(f.creatorBps)}</b></span>
-              <span><i style={{ background: "var(--lime)" }} />Divvy<b>{bpsLabel(f.divvyBps)}</b></span>
+              <span><i style={{ background: "var(--lime)" }} />uspad<b>{bpsLabel(f.divvyBps)}</b></span>
               <span><i style={{ background: "rgba(255,255,255,.14)" }} />Raydium protocol<b>{bpsLabel(f.protocolBps)}</b></span>
             </div>
           </div>
