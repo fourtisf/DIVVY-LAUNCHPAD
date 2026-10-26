@@ -84,15 +84,19 @@ if (roles.has("payouts")) {
   // Minute 0 starts the hour's run; every 10 minutes resumes anything unfinished (each step is idempotent).
   every("*/10 * * * *", "payouts", 15 * 60_000, async () => {
     const hour = topOfHour();
-    // Earlier hours with unfinished rounds (up to a day back) are finished first, without new rounds.
+    // Earlier hours with unfinished rounds are finished first, without new rounds. However old: a coin
+    // gets no new round while an earlier one is open, so dropping old hours would block it for good.
     const stuck = await d.prisma.payoutRound.findMany({
-      where: { dryRun: d.params.dryRun, step: { not: "delivered" }, hour: { lt: hour, gte: new Date(hour.getTime() - 24 * 3_600_000) } },
+      where: { dryRun: d.params.dryRun, step: { not: "delivered" }, hour: { lt: hour } },
       distinct: ["hour"],
       orderBy: { hour: "asc" },
       select: { hour: true },
     });
     for (const s of stuck) {
       jsonLog("payouts: resuming an earlier hour", { hour: s.hour });
+      if (hour.getTime() - s.hour.getTime() > 24 * 3_600_000) {
+        await d.alerts.send(`payouts-stuck-${s.hour.toISOString()}`, "critical", `Payout rounds for ${s.hour.toISOString()} are still unfinished after a day; their coins get no new rounds until they finish (RUNBOOK "Stuck rounds")`, 6 * 3600);
+      }
       await runPayouts(d, chain, s.hour, d.params.dryRun, undefined, { resumeOnly: true }).catch((e) => jsonLog("payouts: resume failed", { hour: s.hour, error: e instanceof Error ? e.message : String(e) }));
     }
     const summary = await runPayouts(d, chain, hour, d.params.dryRun);
@@ -120,9 +124,10 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     if (stopping) return;
     stopping = true;
     crons.forEach((c) => c.stop());
-    // Let running jobs finish (PM2 kill_timeout must be longer than this).
-    await Promise.race([Promise.allSettled([...running]), new Promise((r) => setTimeout(r, 120_000))]);
-    await Promise.allSettled(stops.map((s) => s()));
+    // Queue workers stop taking jobs now and finish the ones they hold, alongside the scheduled jobs
+    // (audit: closing them only after the wait let a launch start late and be killed mid-send). PM2's
+    // kill_timeout (130 s) is longer than this wait.
+    await Promise.race([Promise.allSettled([...running, ...stops.map((s) => s())]), new Promise((r) => setTimeout(r, 120_000))]);
     await d.close();
     process.exit(0);
   });

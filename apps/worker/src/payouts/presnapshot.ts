@@ -19,6 +19,11 @@ export async function readPreSnapshot(d: Pick<WorkerDeps, "redis">, roundHour: D
   return new Map(Object.entries(raw).filter(([w]) => w !== "_").map(([w, a]) => [w, BigInt(a)]));
 }
 
+/** The round has its own snapshot now (or carried): the mid-hour one isn't needed any more. */
+export async function dropPreSnapshot(d: Pick<WorkerDeps, "redis">, roundHour: Date, coinId: string): Promise<void> {
+  await d.redis.del(preKey(roundHour, coinId));
+}
+
 /** Runs every minute; acts once per hour at that hour's secret minute. */
 export async function preSnapshotJob(d: WorkerDeps, chain: PayoutChain, now = new Date()): Promise<number> {
   const roundHour = new Date(Math.floor(now.getTime() / HOUR) * HOUR + HOUR);
@@ -40,7 +45,9 @@ export async function preSnapshotJob(d: WorkerDeps, chain: PayoutChain, now = ne
       const key = preKey(roundHour, c.id);
       // "_" marks a snapshot with no holders, so the round knows one was taken.
       await d.redis.hset(key, { _: "0", ...Object.fromEntries(holders.map((h) => [h.owner, h.amount.toString()])) });
-      await d.redis.expire(key, 3 * 3600);
+      // Kept until the round uses it (dropPreSnapshot) or a day passes, so a round resumed hours late
+      // is still capped by it.
+      await d.redis.expire(key, 26 * 3600);
       taken++;
     } catch (e) {
       d.log("presnapshot: failed", { coinId: c.id, error: e instanceof Error ? e.message : String(e) });

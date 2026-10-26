@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   attributeClaim,
-  chunkSwap,
+  budgetRounds,
   classifyHolders,
   deliveryAction,
   entitlements,
@@ -63,10 +63,12 @@ describe("swaps", () => {
     expect(s.get("r1")).toBe(333n);
     expect(s.get("r2")).toBe(667n);
   });
-  it("chunks a large swap into equal parts", () => {
-    expect(chunkSwap(10n, 4n)).toEqual([3n, 3n, 4n]);
-    expect(chunkSwap(3n, 4n)).toEqual([3n]);
-    expect(chunkSwap(0n, 4n)).toEqual([]);
+  it("budgets rounds: everything when it fits, the same fraction for every coin when it doesn't", () => {
+    const pending = new Map([["a", 100n], ["b", 50n], ["c", 3n]]);
+    expect(budgetRounds(pending, 200n)).toEqual(pending);
+    // 75 of 153: each coin gets 75/153 of its share, floored, never more than the budget in total.
+    expect([...budgetRounds(pending, 75n)]).toEqual([["a", 49n], ["b", 24n], ["c", 1n]]);
+    expect([...budgetRounds(pending, 0n)]).toEqual([["a", 0n], ["b", 0n], ["c", 0n]]);
   });
   it("flags quotes far below the reference price", () => {
     const base = { lamportsIn: 1_000_000_000n, assetDecimals: 8, solUsd: 150, assetUsd: 150, maxImpactBps: 300 };

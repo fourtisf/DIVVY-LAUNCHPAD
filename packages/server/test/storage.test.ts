@@ -25,6 +25,8 @@ describe("production storage guard", () => {
   it("refuses a relative folder, a folder inside the release, http and localhost", () => {
     expect(prod({ STORAGE_DIR: "./data/media", PUBLIC_MEDIA_BASE: "https://divvy.example/media" })).toThrow(/absolute/);
     expect(prod({ STORAGE_DIR: join(process.cwd(), "data/media"), PUBLIC_MEDIA_BASE: "https://divvy.example/media" })).toThrow(/outside the release/);
+    // The workspace root above the app folder counts as the release too (audit: /srv/divvy/current/data/media).
+    expect(prod({ STORAGE_DIR: join(process.cwd(), "../../data/media"), PUBLIC_MEDIA_BASE: "https://divvy.example/media" })).toThrow(/outside the release/);
     expect(prod({ STORAGE_DIR: "/var/lib/divvy/media", PUBLIC_MEDIA_BASE: "http://divvy.example/media" })).toThrow(/https/);
     expect(prod({ STORAGE_DIR: "/var/lib/divvy/media", PUBLIC_MEDIA_BASE: "https://localhost:3000/media" })).toThrow(/public host/);
   });

@@ -28,8 +28,9 @@ const wsolAta = (owner: PublicKey) =>
 
 export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, network: "mainnet-beta" | "devnet", kind: TxKind, coinMint?: PublicKey): void {
   const msg = tx.message;
-  // Address lookup tables can't hold program ids, and only Jupiter routes use them.
-  const keys = msg.getAccountKeys({ accountKeysFromLookups: msg.addressTableLookups.length ? { writable: [], readonly: [] } : undefined });
+  // Static keys only: a program can't be loaded from an address lookup table, and only Jupiter routes
+  // use them. An index past the static keys is a lookup-table account, which reads as null below.
+  const keys = { get: (i: number): PublicKey | undefined => msg.staticAccountKeys[i] };
   const payer = msg.staticAccountKeys[0]!;
   const signers = msg.staticAccountKeys.slice(0, msg.header.numRequiredSignatures);
   if (!signers.some((s) => s.equals(wallet))) throw new UnsafeTransaction("this transaction isn't for your wallet");

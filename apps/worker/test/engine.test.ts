@@ -395,4 +395,33 @@ describe.skipIf(!run)("dividend engine", () => {
     await expect(runPayouts(d, chain, new Date(HOUR.getTime() + 3_600_000), true)).rejects.toThrow("rates differ");
     expect(alerts.some((a) => a.includes("rates differ"))).toBe(true);
   });
+
+  it("pays a backlog over the swap budget in part, carries the rest, and halves the size after an impact refusal (audit)", async () => {
+    await seed();
+    const base = deps(loadParams({ PAYOUTS_DRY_RUN: "true" }));
+    const d = { ...base, env: { ...base.env, SWAP_BATCH_MAX_LAMPORTS: 75_000_000 } };
+    await runPayouts(d, stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
+    const rounds = Object.fromEntries((await prisma.payoutRound.findMany({ where: { dryRun: true, hour: HOUR } })).map((r) => [r.coinId, r]));
+    // NVDAx budget 0.075 SOL against 0.1525 waiting (A 0.1, B 0.05, D 0.0025): each coin gets 75/152.5 of its
+    // share. A: 49,180,327 ($7.38, a round). B: 24,590,163 ($3.69, under $5) and D carry whole.
+    expect(rounds[coins.A]).toMatchObject({ status: "ok", solIn: 49_180_327n, carriedOutLamports: 50_819_673n });
+    expect(rounds[coins.B]).toMatchObject({ status: "carried", carriedOutLamports: 50_000_000n });
+    expect(rounds[coins.C]).toMatchObject({ status: "ok", solIn: 75_000_000n, carriedOutLamports: 0n });
+    // Nothing is lost: A's allocations still add up to its 0.1 SOL; the unspent part waits unattached.
+    const a = await prisma.feeAllocation.findMany({ where: { coinId: coins.A, dryRun: true } });
+    expect(a.reduce((x, r) => x + r.holdersLamports, 0n)).toBe(100_000_000n);
+    expect(a.filter((r) => r.roundId === null).reduce((x, r) => x + r.holdersLamports, 0n)).toBe(50_819_673n);
+    expect((await prisma.swapBatch.findFirstOrThrow({ where: { hour: HOUR, dryRun: true, asset: { mint: NVDA } } })).lamportsIn).toBe(49_180_327n);
+
+    // Next hour the route's impact is over the cap: the swap is refused, the rounds carry, and the
+    // size limit for that stock halves.
+    const next = new Date(HOUR.getTime() + 3_600_000);
+    const chain: PayoutChain = { ...stubChain(0n), quote: async (m, l) => ({ outAmount: quoteOut(m, l), minOut: 0n, priceImpactBps: 400 }) };
+    await runPayouts(d, chain, next, true, () => new Date(next.getTime() + 5 * 60_000));
+    const nb = await prisma.swapBatch.findFirstOrThrow({ where: { hour: next, dryRun: true, asset: { mint: NVDA } } });
+    expect(nb.status).toBe("skipped");
+    expect(await redis.get(`divvy:swap-limit:dry:${nb.assetId}`)).toBe((nb.lamportsIn / 2n).toString());
+    const waiting = await prisma.feeAllocation.aggregate({ where: { dryRun: true, roundId: null, coin: { dividendAsset: { mint: NVDA } } }, _sum: { holdersLamports: true } });
+    expect(waiting._sum.holdersLamports).toBe(50_819_673n + 50_000_000n + 2_500_000n);
+  });
 });

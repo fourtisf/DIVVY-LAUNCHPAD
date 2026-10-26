@@ -4,6 +4,7 @@
  * - s3: any S3-compatible bucket (AWS, Cloudflare R2, Filebase/IPFS, ...). Token metadata URIs are
  *   permanent once a coin is created, so production should use durable storage (decision: owner).
  */
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
@@ -91,8 +92,30 @@ export function assertProductionStorage(e: z.infer<typeof StorageEnv>, cwd = pro
   if (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.)/.test(base.hostname)) throw new Error("PUBLIC_MEDIA_BASE must be a public host in production");
   if (e.STORAGE_DRIVER !== "local") return;
   if (!isAbsolute(e.STORAGE_DIR)) throw new Error("STORAGE_DIR must be an absolute path in production (e.g. /var/lib/divvy/media)");
-  const rel = relative(resolve(cwd), resolve(e.STORAGE_DIR));
-  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) throw new Error("STORAGE_DIR must be outside the release folder in production");
+  // The release is the workspace root above the app folder, under the path it was started by
+  // (/srv/divvy/current/...) and the folder that link points to (/srv/divvy/releases/<id>/...).
+  const inside = (root: string) => {
+    const rel = relative(root, resolve(e.STORAGE_DIR));
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  };
+  const roots = [workspaceRoot(resolve(cwd)), workspaceRoot(realpathOr(resolve(cwd)))];
+  if (roots.some(inside)) throw new Error("STORAGE_DIR must be outside the release folder in production");
+}
+
+function realpathOr(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/** The nearest folder at or above `from` holding pnpm-workspace.yaml (the release), else `from`. */
+function workspaceRoot(from: string): string {
+  for (let dir = from; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
+    if (dirname(dir) === dir) return from;
+  }
 }
 
 export function loadStorage(src: Record<string, string | undefined> = process.env): Storage {

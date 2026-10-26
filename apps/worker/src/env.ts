@@ -37,6 +37,8 @@ const EnvSchema = z.object({
   CU_PRICE_MICRO_LAMPORTS: z.coerce.number().int().nonnegative().default(20_000),
   /** Hourly caps on what the hot wallets may move (HANDOFF §9): fee-claimer swaps, payout-vault sends. */
   SWAP_HOURLY_CAP_LAMPORTS: z.coerce.number().int().positive().default(100_000_000_000),
+  /** Largest swap per dividend asset per hour. Halves after a swap is refused for price impact, grows back after good ones. */
+  SWAP_BATCH_MAX_LAMPORTS: z.coerce.number().int().positive().default(20_000_000_000),
   PUSH_HOURLY_CAP_USD: z.coerce.number().positive().default(25_000),
 });
 

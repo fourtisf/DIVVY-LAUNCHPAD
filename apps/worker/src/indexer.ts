@@ -130,8 +130,13 @@ export class Indexer {
           throw e;
         }
       }
-      // Where a vault claim sits in the stream: every trade indexed so far was swept by it.
-      if (name === "platform" && this.claimSigs.has(s.signature)) await this.markClaim(s.signature);
+      // Where a vault claim sits in the stream: every trade indexed so far was swept by it. A claim that
+      // failed on chain swept nothing, so it gets no marker; the engine sees the failure and its fees
+      // roll into the next claim's range (a marker here would give those trades to an empty claim).
+      if (name === "platform" && this.claimSigs.has(s.signature)) {
+        if (s.err) this.claimSigs.delete(s.signature);
+        else await this.markClaim(s.signature);
+      }
       await this.d.prisma.indexerCursor.upsert({
         where: { name },
         create: { name, lastSignature: s.signature, lastSlot: BigInt(s.slot) },

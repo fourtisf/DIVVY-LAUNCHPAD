@@ -18,8 +18,26 @@ import { deliveryAction } from "./plan";
 const MAX_CREDITS_PER_RUN = 5000;
 /** Blocks past lastValidBlockHeight before a missing transaction counts as expired (load-balanced RPCs lag). */
 export const EXPIRY_MARGIN = 150n;
-/** Wallets whose transfers keep failing (frozen account, required memo, ...) are left to claim. */
-const blockedKey = (assetId: string) => `divvy:push-blocked:${assetId}`;
+/**
+ * Wallets whose transfers keep failing (frozen account, required memo, ...) are skipped for a day,
+ * then tried again; a refused send costs nothing (preflight). Each wallet keeps its own time, so one
+ * new failure doesn't extend the others (audit). Under the claim model the wallet can also claim.
+ */
+const blockedKey = (assetId: string) => `divvy:push-blocked-at:${assetId}`;
+const BLOCK_MS = 24 * 3_600_000;
+
+async function blockedWallets(d: WorkerDeps, assetId: string): Promise<string[]> {
+  const all = await d.redis.hgetall(blockedKey(assetId));
+  const now = Date.now();
+  const expired = Object.keys(all).filter((w) => now - Number(all[w]) >= BLOCK_MS);
+  if (expired.length) await d.redis.hdel(blockedKey(assetId), ...expired);
+  return Object.keys(all).filter((w) => !expired.includes(w));
+}
+
+async function blockWallet(d: WorkerDeps, assetId: string, symbol: string, wallet: string) {
+  await d.redis.hset(blockedKey(assetId), wallet, String(Date.now()));
+  await d.alerts.send(`push-blocked-${assetId}-${wallet}`, "warn", `Sending ${symbol} to ${wallet} keeps failing; its credit waits and is retried once a day`, 86_400);
+}
 
 interface Planned {
   wallet: string;
@@ -49,7 +67,7 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
     const [pendingT, pendingC, blocked] = await Promise.all([
       d.prisma.payoutTransfer.findMany({ where: { assetId: asset.id, status: "pending" }, select: { wallet: true, amount: true } }),
       d.prisma.claim.findMany({ where: { assetId: asset.id, status: "pending" }, select: { wallet: true, amount: true } }),
-      d.redis.smembers(blockedKey(asset.id)),
+      blockedWallets(d, asset.id),
     ]);
     const busy = new Set([...pendingT, ...pendingC].map((x) => x.wallet).concat(blocked));
     const have = await existingAtas(d.conn, credits.map((c) => new PublicKey(c.wallet)), info);
@@ -69,27 +87,37 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
     }
     if (!plan.length) continue;
 
+    // Hourly cap on what the payout vault sends (HANDOFF §9). Whatever fits this hour goes; the rest
+    // waits for the next hour (audit: reserving the whole plan let a large backlog block every send).
+    const capKey = `divvy:push-usd:${new Date().toISOString().slice(0, 13)}`;
+    const unitUsd = usd / 10 ** asset.decimals;
+    let room = d.env.PUSH_HOURLY_CAP_USD - Number((await d.redis.get(capKey)) ?? 0);
+    const fits: Planned[] = [];
+    for (const p of plan) {
+      const u = Number(p.amount) * unitUsd;
+      if (u > room) continue;
+      fits.push(p);
+      room -= u;
+    }
+    if (fits.length < plan.length) {
+      await d.alerts.send("push-cap", "critical", `Payout vault hourly send cap ($${d.env.PUSH_HOURLY_CAP_USD}) reached: ${plan.length - fits.length} ${asset.symbol} sends wait for the next hour`);
+    }
+    if (!fits.length) continue;
+
     // Never promise more than the vault holds: tokens reserved by pending transfers and claims are
     // still in it, so they count against the balance.
     const vault = d.wallets.payoutVault();
     const source = ata(vault.publicKey, info.address, info.programId);
     const bal = BigInt((await d.conn.getTokenAccountBalance(source, "confirmed").catch(() => null))?.value.amount ?? "0");
     const reserved = [...pendingT, ...pendingC].reduce((a, x) => a + x.amount, 0n);
-    const owed = plan.reduce((a, p) => a + p.amount, 0n);
+    const owed = fits.reduce((a, p) => a + p.amount, 0n);
     if (owed + reserved > bal) {
       await d.alerts.send(`vault-short-${asset.symbol}`, "critical", `Payout vault holds ${bal} ${asset.symbol} base units but owes ${owed} more on top of ${reserved} in flight; sends stopped`);
       continue;
     }
-    // Hourly cap on what the payout vault sends (HANDOFF §9).
-    const capKey = `divvy:push-usd:${new Date().toISOString().slice(0, 13)}`;
-    const owedUsd = (Number(owed) / 10 ** asset.decimals) * usd;
-    const spentUsd = Number(await d.redis.incrbyfloat(capKey, owedUsd));
+    await d.redis.incrbyfloat(capKey, Number(owed) * unitUsd);
     await d.redis.expire(capKey, 7200);
-    if (spentUsd > d.env.PUSH_HOURLY_CAP_USD) {
-      await d.redis.incrbyfloat(capKey, -owedUsd);
-      await d.alerts.send("push-cap", "critical", `Payout vault hourly send cap ($${d.env.PUSH_HOURLY_CAP_USD}) reached; sends wait`);
-      continue;
-    }
+    plan.splice(0, plan.length, ...fits);
 
     for (let i = 0; i < plan.length; i += d.env.PUSH_BATCH_SIZE) {
       const batch = plan.slice(i, i + d.env.PUSH_BATCH_SIZE);
@@ -100,9 +128,9 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
         for (const p of batch) {
           const one = await sendBatch(d, asset.id, info, [p]);
           if (one === "confirmed") sent++;
-          else if (one === "failed") await d.redis.sadd(blockedKey(asset.id), p.wallet).then(() => d.redis.expire(blockedKey(asset.id), 7 * 86_400));
+          else if (one === "failed") await blockWallet(d, asset.id, asset.symbol, p.wallet);
         }
-      } else if (r === "failed") await d.redis.sadd(blockedKey(asset.id), batch[0]!.wallet).then(() => d.redis.expire(blockedKey(asset.id), 7 * 86_400));
+      } else if (r === "failed") await blockWallet(d, asset.id, asset.symbol, batch[0]!.wallet);
     }
   }
   return { sent, held };

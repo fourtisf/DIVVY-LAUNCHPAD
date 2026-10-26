@@ -41,6 +41,19 @@ export const lamportsUsd = (lamports: bigint, solUsd: number) => (Number(lamport
 /** Below MIN_ROUND_USD the holders' bucket carries forward; it isn't "late" (HANDOFF §3.3 step 3). */
 export const shouldCarry = (holdersLamports: bigint, solUsd: number, minRoundUsd: number) => lamportsUsd(holdersLamports, solUsd) < minRoundUsd;
 
+/**
+ * How much of each coin's waiting holders' bucket this hour's swap can take. Everything when it fits
+ * the budget; otherwise each coin gets the same fraction (floored), so a large backlog drains over
+ * several hours without starving the other coins paying that asset (audit: an all-or-nothing batch
+ * over the cap was refused every hour and stopped every coin paying that stock).
+ */
+export function budgetRounds(pending: Map<string, bigint>, budget: bigint): Map<string, bigint> {
+  const total = [...pending.values()].reduce((a, b) => a + b, 0n);
+  if (total <= budget) return new Map(pending);
+  if (budget <= 0n) return new Map([...pending.keys()].map((k) => [k, 0n]));
+  return new Map([...pending].map(([k, v]) => [k, (v * budget) / total]));
+}
+
 /* ---------- 3. share one swap between the rounds that funded it ---------- */
 
 /** Asset units per round, pro rata to the lamports each put in. Flooring dust goes to the largest round. */
@@ -53,15 +66,6 @@ export function splitSwapOutput(assetOut: bigint, lamportsByRound: Map<string, b
     out.set(largest, out.get(largest)! + dust);
   }
   return out;
-}
-
-/** Swap sizes: equal chunks of at most `chunkLamports` (the last one takes the remainder). */
-export function chunkSwap(total: bigint, chunkLamports: bigint): bigint[] {
-  if (total <= 0n) return [];
-  if (chunkLamports <= 0n || total <= chunkLamports) return [total];
-  const n = (total + chunkLamports - 1n) / chunkLamports;
-  const each = total / n;
-  return [...Array.from({ length: Number(n) - 1 }, () => each), total - each * (n - 1n)];
 }
 
 /**

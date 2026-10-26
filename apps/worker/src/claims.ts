@@ -34,7 +34,10 @@ export async function buildClaim(d: WorkerDeps, job: ClaimJob): Promise<ClaimJob
   // The vault pays each claim's network fee, so tiny claims wait until they're worth it.
   const usd = (await d.prices()).byMint[asset.mint] ?? 0;
   const creditUsd = (Number(credit.amount) / 10 ** asset.decimals) * usd;
-  if (usd > 0 && creditUsd < d.params.autoPushMinUsd) return fail("CLAIM_TOO_SMALL", `You can claim once it's worth $${d.params.autoPushMinUsd}`);
+  // Without a price the minimum can't be checked, so claims for that stock wait (audit: otherwise
+  // anyone could make the vault pay fees for dust claims during a price outage).
+  if (usd <= 0) return fail("NO_PRICE", `${asset.symbol} claims are paused while its price updates. Try again in a few minutes.`);
+  if (creditUsd < d.params.autoPushMinUsd) return fail("CLAIM_TOO_SMALL", `You can claim once it's worth $${d.params.autoPushMinUsd}`);
 
   const info = await getMintInfo(d.conn, new PublicKey(asset.mint));
   if (info.paused) return fail("ASSET_PAUSED", `${asset.symbol} transfers are paused by its issuer. Try again later.`);
