@@ -43,7 +43,7 @@ So:
 | `og-default.png` | 1200×630 | Copy it to `apps/web/src/app/opengraph-image.png` and `twitter-image.png`, with alt text "Divvy: memecoins that pay you real stock dividends." in `opengraph-image.alt.txt`. |
 | `index.html` | | The brand sheet. |
 
-Next.js 14 picks these files up by name in `app/`, so `layout.tsx` doesn't need an `icons` entry.
+Next.js picks these files up by name in `app/`, so `layout.tsx` doesn't need an `icons` entry.
 
 ## How each asset maps to the prototype
 

@@ -8,7 +8,7 @@ A Solana memecoin launchpad on Raydium LaunchLab where every coin pays its holde
 ## Layout
 
 ```
-apps/web         Next.js 14 (App Router): /, /coin/[ticker], /create, /payouts, /how
+apps/web         Next.js 15 (App Router): /, /coin/[ticker], /create, /payouts, /how
 apps/api         Fastify API (HANDOFF §6). API_MODE=mock serves deterministic demo data.
 apps/worker      Cron: hourly payouts (dry-run by default), daily reserved tickers, indexer heartbeat
 packages/db      Prisma schema + migrations (PostgreSQL)

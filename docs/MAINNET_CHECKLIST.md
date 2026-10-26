@@ -1,6 +1,6 @@
 # Mainnet checklist
 
-Nothing in this file has been done yet.
+Owner decisions of 2026-10-26 are ticked below. The owner chose to go straight to mainnet without the devnet rehearsal (section 4); payouts still start in dry-run.
 
 **The mainnet switch.** Divvy doesn't sign or send anything on mainnet until `DIVVY_MAINNET_ENABLED=true`. That switch stays `false` until the sign-off section at the bottom is complete, and the sign-off needs sections 1 to 4 and section 6 done first. Only then does section 5 (go-live) start.
 
@@ -20,13 +20,13 @@ The worker and the live API also refuse to start if the RPC's genesis hash doesn
 
 The details are in `docs/AUDIT.md`, "Open owner decisions".
 
-- [ ] **Delivery model:** push, or credit and claim.
+- [x] **Delivery model:** push, or credit and claim. Owner chose **push** on 2026-10-26.
       - `docs/ECONOMICS.md` recommends credit and claim, because push loses money on most coins through token-account rent.
       - Set `PAYOUT_DELIVERY`. The site's copy switches from "paid" to "credited" by itself.
 - [ ] **Fee split:**
       - `FEE_*` must equal the PlatformConfig you create. Payouts refuse to run if the on-chain rates differ.
       - Default: 1% = 0.25% Raydium + 0.50% holders + 0.15% creator + 0.10% Divvy.
-- [ ] **After graduation:**
+- [ ] **After graduation:** decided, harvest still to build. Owner chose the CPMM creator fee to uspad (`platform_cp_creator` = fee claimer, `CPMM_CREATOR_FEES=true`) on 2026-10-26.
       - Set `platform_cp_creator` to the fee-claimer wallet (a second `updatePlatformConfig` transaction) and turn on `CPMM_CREATOR_FEES`, or leave the CPMM creator fee with the coin's creator.
       - Harvesting the locked-LP Fee Key is not built. Its fee amount comes from Raydium's API and the LP-lock program is closed source; see docs/verified/launchlab.md §5b.
 - [ ] **Durable storage** for coin pictures and token metadata. The metadata URI is permanent once a coin exists.
@@ -50,7 +50,7 @@ The details are in `docs/AUDIT.md`, "Open owner decisions".
         - (b) paying the holders the dry-run rounds computed (not built);
         - (c) setting the backlog aside (not built).
       - The details are in `docs/AUDIT.md`, "First live run".
-- [ ] **Next.js upgrade** (DEP-1). Next 14.2.35 has 25 open advisories, 3 of them critical, and gets no fixes. They are fixed in next 15.5.28 or later. The image optimizer and Server Actions are shut off in the meantime. The upgrade changes the stack CLAUDE.md pins, so it needs the owner's OK. It is recommended before mainnet.
+- [x] **Next.js upgrade** (DEP-1). Done on 2026-10-26 with the owner's OK: next 15.5.28 and React 19.2.9 replace next 14.2.35 and its 25 open advisories. The image optimizer and Server Actions stay shut off.
 - [ ] **Legal review** (HANDOFF §10):
       - paying "dividends" in stock tokens;
       - the geofence list (`BLOCKED_COUNTRIES`; unknown countries are refused in production);

@@ -178,8 +178,8 @@ What matters most for mainnet now:
 
 | ID | Severity | Finding | Status | Where and how |
 |---|---|---|---|---|
-| DEP-1 | 3 critical, 9 high, 11 moderate, 2 low | next 14.2.35 is affected by most advisories. They are patched only from next 15.5.28, and the 14.x line gets no fixes.<br>• Critical: two unauthenticated RCEs in the Image Optimization API, and one RCE that only affects servers hosted on Windows. The VPS runs Linux, so that one doesn't apply.<br>• High: RSC and Server Actions DoS, SSRF in Server Actions on custom servers, SSRF in rewrites, a middleware bypass (Pages Router only; Divvy has no middleware and uses the App Router), and an HTTP deserialization DoS.<br>• Moderate: XSS in the App Router, cache poisoning and confusion, request smuggling in rewrites, image-optimizer DoS and disk growth. | partly fixed | Mitigations:<br>• `images.unoptimized: true` in `apps/web/next.config.mjs`. With it, `/_next/image` renders a 404; checked in `next/dist/server/next-server.js`. Divvy never uses `next/image`.<br>• `deploy/nginx/divvy.conf` returns 404 for `/_next/image` and for any request carrying a `Next-Action` header. The app has no `"use server"` code.<br>• Production Nginx never sends any `/api` spelling to Next, so the dev-only rewrite can't be reached from outside.<br>• Pages are rate-limited.<br>The real fix is an upgrade to next 15.5.28 or later. That is an owner decision, because CLAUDE.md pins the stack to Next.js 14. The recommendation is to upgrade before mainnet. |
-| DEP-2 | 2 high, 2 moderate | postcss, through next. | accepted risk | Used only at build time, on Divvy's own CSS, and never reached at runtime. It clears with the Next upgrade. |
+| DEP-1 | 3 critical, 9 high, 11 moderate, 2 low | next 14.2.35 is affected by most advisories. They are patched only from next 15.5.28, and the 14.x line gets no fixes.<br>• Critical: two unauthenticated RCEs in the Image Optimization API, and one RCE that only affects servers hosted on Windows. The VPS runs Linux, so that one doesn't apply.<br>• High: RSC and Server Actions DoS, SSRF in Server Actions on custom servers, SSRF in rewrites, a middleware bypass (Pages Router only; Divvy has no middleware and uses the App Router), and an HTTP deserialization DoS.<br>• Moderate: XSS in the App Router, cache poisoning and confusion, request smuggling in rewrites, image-optimizer DoS and disk growth. | fixed | Fixed on 2026-10-26 with the owner's OK: next 15.5.28 and React 19.2.9. `pnpm audit --prod` lists no next advisory. The mitigations (optimizer off, `/_next/image` and `Next-Action` blocked in Nginx) stay as defence in depth. |
+| DEP-2 | 2 high, 2 moderate | postcss, through next. | accepted risk | Used only at build time, on Divvy's own CSS, and never reached at runtime. next 15.5.28 still pins postcss 8.4.31, so it stays after the upgrade. |
 | DEP-3 | High | bigint-buffer 1.1.5 or earlier (through spl-token) has a buffer overflow in the native `toBigIntLE`. | accepted risk | `pnpm.ignoredBuiltDependencies` in the root `package.json` skips the native addon, so the pure-JS fallback runs. The tests log "bigint: Failed to load bindings, pure JS will be used". |
 | DEP-4 | High | deepmerge-ts below 8, through the Prisma CLI's config loader. | accepted risk | Used only at migrate and build time, on Divvy's own config. |
 | DEP-5 | 4 moderate | stream-json below 3.6 and uuid below 11.1.1, through `@solana/web3.js` and jayson. | accepted risk | Not reached. web3.js loads only `jayson/lib/client/browser`, which never requires stream-json. It calls uuid v4 without a `buf` argument; the advisory needs v3, v5 or v6 with `buf`. |
@@ -314,6 +314,14 @@ None of these can be checked here, because this environment has no mainnet RPC. 
 
 ## Open owner decisions
 
+**Decided by the owner on 2026-10-26** (in chat, after the trade-offs below were put to them):
+
+- **Go straight to mainnet, without the devnet rehearsal** (checklist section 4). Mitigation: payouts start in dry-run with small caps, and every spend still needs the owner's OK in chat.
+- **Delivery model: push** (item 1). `PAYOUT_DELIVERY=push`. ECONOMICS.md's warning stands: push pays a token-account rent per new holder, and at a $10 minimum holding it can be farmed. The threshold (`MIN_HOLDER_USD`, item 6) is still open.
+- **After graduation: the CPMM creator fee goes to uspad** (item 3). `platform_cp_creator` is set to the fee claimer and `CPMM_CREATOR_FEES=true`; the pot is split 50 : 15 : 10 like the curve fee. Fee Key harvesting is being built.
+- **Next.js upgrade: done** (item 7, DEP-1). next 15.5.28 with React 19.2.9.
+- **How it works copy** (item 9, step 4): rewritten at the owner's request. Raydium's fee, the shared vault, graduation, the locked LP and the fee after graduation are explained.
+
 1. **Delivery model: push, or credit and claim** (HANDOFF §3.4).
    - `PAYOUT_DELIVERY` defaults to `push` (`packages/shared/src/params.ts`). `docs/ECONOMICS.md` recommends credit and claim, because pushes pay token-account rent.
    - The site's copy switches through `deliveryCopy`. The words "credited every hour" are used only if claim is chosen (CLAUDE.md rule 8).
@@ -338,7 +346,7 @@ None of these can be checked here, because this environment has no mainnet RPC. 
      - `LAUNCHER_HOURLY_CAP_LAMPORTS` (default 3 SOL).
 
      Money over the swap budget waits and is paid in later hours. If a stock's holders' share is regularly larger than its size limit, payouts for that stock fall further behind every hour (the budget alert fires).
-7. **Next.js 15.5 upgrade (DEP-1).** It changes the stack CLAUDE.md pins, so it needs the owner's OK. It is recommended before mainnet.
+7. ~~**Next.js 15.5 upgrade (DEP-1).**~~ Approved by the owner and done on 2026-10-26: next 15.5.28, React 19.2.9.
 8. **Dividend assets at launch** (HANDOFF §12). Insert them from `fetch-xstocks.ts` output, after R4 and R5.
 9. **Copy that doesn't match how the money moves.** On chain:
    - One platform fee vault holds the platform fees of every Divvy coin (VERIFIED item 6 and "Where the sources contradict HANDOFF" item 1). Each coin's share is still exact, because it comes from that coin's own indexed trades.
