@@ -10,15 +10,15 @@ import { api, ApiRequestError } from "./api";
 const shared = new Map<string, { at: number; v: Promise<unknown> }>();
 const SHARED_MS = 5000;
 
-function visitorHeaders(): Record<string, string> {
-  const h = headers();
+async function visitorHeaders(): Promise<Record<string, string>> {
+  const h = await headers();
   const ip = h.get("x-real-ip");
   const country = h.get("x-geo-country");
   return { ...(ip ? { "x-forwarded-for": ip } : {}), ...(country ? { "x-geo-country": country } : {}) };
 }
 
-export function serverApi<T>(path: string): Promise<T> {
-  return api<T>(path, { headers: visitorHeaders() });
+export async function serverApi<T>(path: string): Promise<T> {
+  return api<T>(path, { headers: await visitorHeaders() });
 }
 
 /** For responses that are the same for everyone (/api/config, /api/stats). */

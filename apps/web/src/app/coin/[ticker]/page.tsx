@@ -4,8 +4,8 @@ import { serverApi, serverApiOrNull } from "@/lib/server-api";
 import { CoinView } from "@/components/coin/CoinView";
 import { Icon } from "@/components/Icon";
 
-export default async function CoinPage({ params }: { params: { ticker: string } }) {
-  const ticker = decodeURIComponent(params.ticker);
+export default async function CoinPage({ params }: { params: Promise<{ ticker: string }> }) {
+  const ticker = decodeURIComponent((await params).ticker);
   const coin = await serverApiOrNull<CoinDetail>(`/api/coins/${encodeURIComponent(ticker)}`);
   if (!coin)
     return (

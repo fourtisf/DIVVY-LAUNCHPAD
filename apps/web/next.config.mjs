@@ -8,6 +8,9 @@ const nextConfig = {
   // Divvy uses plain <img>, never next/image. Turning the optimizer off makes /_next/image a 404, which
   // removes Next 14's image-optimizer advisories (critical RCE included; docs/AUDIT.md, dependencies).
   images: { unoptimized: true },
+  // `pnpm lint` (the repo's flat ESLint config) lints the web app; Next's own build-time lint
+  // passes options ESLint 9 removed.
+  eslint: { ignoreDuringBuilds: true },
   // /API/launch must not reach the API through the rewrite below while skipping Nginx's /api/ rules (audit).
   experimental: { caseSensitiveRoutes: true },
   // Same-origin API in every environment: Next proxies /api/* in dev, Nginx does it in production.

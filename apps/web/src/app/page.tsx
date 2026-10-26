@@ -3,8 +3,9 @@ import { serverApi, sharedApi } from "@/lib/server-api";
 import { Board } from "@/components/board/Board";
 import { coinsKey } from "@/lib/keys";
 
-export default async function BoardPage({ searchParams }: { searchParams: { q?: string } }) {
-  const q = typeof searchParams.q === "string" ? searchParams.q : "";
+export default async function BoardPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
+  const { q: raw } = await searchParams;
+  const q = typeof raw === "string" ? raw : "";
   const [stats, leaders, coins] = await Promise.all([
     sharedApi<Stats>("/api/stats"),
     serverApi<CoinList>("/api/coins?sort=payers&limit=3"),
