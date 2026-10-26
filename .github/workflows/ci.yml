@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  check:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: divvy
+          POSTGRES_PASSWORD: divvy
+          POSTGRES_DB: divvy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U divvy -d divvy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://divvy:divvy@localhost:5432/divvy?schema=public
+      # Also switches on the Redis-backed tests (apps/worker/test/lock.test.ts).
+      REDIS_URL: redis://localhost:6379
+      # Mock mode serves deterministic demo data and refuses to start with NODE_ENV=production.
+      API_MODE: mock
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # No `version` input: the action reads "packageManager": "pnpm@10.28.0" from package.json.
+      # Setting both makes the action fail on any mismatch.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Restore the Next.js build cache
+        uses: actions/cache@v6
+        with:
+          path: apps/web/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('apps/web/src/**', 'packages/shared/src/**') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm db:deploy
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  e2e:
+    name: End-to-end (Playwright)
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Restore the Next.js build cache
+        uses: actions/cache@v6
+        with:
+          path: apps/web/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('apps/web/src/**', 'packages/shared/src/**') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # The mock API needs no database. Without REDIS_URL it keeps SIWS nonces in memory, which is
+      # fine for one process.
+      - name: Start the API (mock mode)
+        env:
+          NODE_ENV: test
+          API_MODE: mock
+          LOG_LEVEL: warn
+        run: nohup node apps/api/dist/server.js > "$RUNNER_TEMP/api.log" 2>&1 &
+
+      - name: Start the web app
+        run: nohup pnpm --filter @divvy/web start > "$RUNNER_TEMP/web.log" 2>&1 &
+
+      - name: Wait for both to answer
+        run: |
+          wait_for() {
+            local url="$1" log="$2"
+            for _ in $(seq 1 60); do
+              if curl -fsS -o /dev/null "$url"; then echo "up: $url"; return 0; fi
+              sleep 2
+            done
+            echo "::error::$url did not answer within 120 s"
+            tail -n 100 "$log"
+            return 1
+          }
+          wait_for http://127.0.0.1:4000/api/health "$RUNNER_TEMP/api.log"
+          wait_for http://127.0.0.1:3000/ "$RUNNER_TEMP/web.log"
+
+      # Run from apps/web so npx uses the Playwright that @divvy/web pins; a mismatched CLI would
+      # download browsers the test runner can't use.
+      - name: Install Playwright's Chromium
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the e2e tests
+        run: pnpm --filter @divvy/web e2e
+
+      - name: Collect the server logs
+        if: failure()
+        run: |
+          mkdir -p apps/web/test-results
+          cp "$RUNNER_TEMP/api.log" "$RUNNER_TEMP/web.log" apps/web/test-results/ 2>/dev/null || true
+
+      - name: Upload the Playwright report, screenshots and logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
