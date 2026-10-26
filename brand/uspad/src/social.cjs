@@ -34,18 +34,17 @@ const profile = `<div style="width:1000px;height:1000px;position:relative;overfl
   </div></div>`;
 
 // 1500 x 500 header. X lays the profile photo over the lower left and crops a little off the top and
-// bottom on phones, so everything sits right of x = 430 and between y = 80 and 420.
+// bottom on phones, so everything sits right of x = 430 and between y = 80 and 420. No domain on the header (owner's call).
 const header = `<div style="width:1500px;height:500px;position:relative;overflow:hidden;background:
-  radial-gradient(520px 420px at 1170px 250px,rgba(74,222,128,.22),transparent 70%),
+  radial-gradient(520px 420px at 1210px 250px,rgba(74,222,128,.22),transparent 70%),
   radial-gradient(700px 400px at 300px -60px,rgba(94,234,212,.10),transparent 70%),
   linear-gradient(180deg,#0B130F,#070B09)">
   ${guilloche(1500, 500, 30, 12, 0.055)}
-  <div style="position:absolute;left:1170px;top:250px;width:620px;height:620px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(134,239,172,.10)"></div>
-  <div style="position:absolute;left:1170px;top:250px;width:470px;height:470px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(134,239,172,.14)"></div>
-  <div style="position:absolute;left:1170px;top:250px;transform:translate(-50%,-50%);filter:drop-shadow(0 34px 60px rgba(74,222,128,.35)) drop-shadow(0 0 24px rgba(74,222,128,.15))">${sized(read("mark.svg"), 300)}</div>
-  <div style="position:absolute;left:470px;top:118px">
-    ${sized(read("wordmark-dark.svg"), 300)}
-    <p style="margin:22px 0 0;font:600 50px/1.04 'Inter Display',Inter;letter-spacing:-.035em">Memecoins that pay <span class="glow">us.</span><br>In <span class="glow">US stocks.</span></p>
+  <div style="position:absolute;left:1210px;top:250px;width:620px;height:620px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(134,239,172,.10)"></div>
+  <div style="position:absolute;left:1210px;top:250px;width:470px;height:470px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(134,239,172,.14)"></div>
+  <div style="position:absolute;left:1210px;top:250px;transform:translate(-50%,-50%);filter:drop-shadow(0 34px 60px rgba(74,222,128,.35)) drop-shadow(0 0 24px rgba(74,222,128,.15))">${sized(read("mark.svg"), 300)}</div>
+  <div style="position:absolute;left:470px;top:250px;transform:translateY(-50%)">
+    <p style="margin:0;font:600 54px/1.04 'Inter Display',Inter;letter-spacing:-.035em">Memecoins that pay <span class="glow">us.</span><br>In <span class="glow">US stocks.</span></p>
     <p style="margin:18px 0 0;font:500 19px Inter;color:#97ACA2;letter-spacing:.005em">Launch on Solana · Hourly stock dividends</p>
   </div></div>`;
 
