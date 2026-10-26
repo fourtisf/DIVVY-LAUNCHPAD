@@ -11,7 +11,9 @@
  *   D. one Jupiter swap per dividend asset → SwapBatch (unique asset+hour+dryRun), shared pro rata
  *   E. per round: snapshot holders, exclude pool/Divvy/burn wallets and small holders, pro-rata
  *      entitlements, PayoutItems, and (live) Credits
+ *   B2–B4. fees of graduated coins, collected and split 50 : 15 : 10: see poolfees.ts
  *   F. deliver (live only): see deliver.ts
+ *   G. forward creators' shares of post-graduation fees (live only): see poolfees.ts
  *
  * Dry-run (the default, CLAUDE.md rule 7) runs A–E against real chain data without signing
  * anything: the vault claim is simulated from indexed fees and swaps are quotes.
@@ -25,6 +27,7 @@ import type { PayoutChain } from "./chain";
 import { SwapRejected } from "./swapguard";
 import { deliverCredits } from "./deliver";
 import { dropPreSnapshot, readPreSnapshot } from "./presnapshot";
+import { stepCpmmCreatorFees, stepCreatorForwards, stepLockedLpFees, stepMemecoinSales } from "./poolfees";
 import { attributeClaim, budgetRounds, classifyHolders, entitlements, isLate, quoteLooksWrong, referenceFloor, shouldCarry, splitPlatformFee, splitSwapOutput } from "./plan";
 
 const COIN_DECIMALS = 6;
@@ -65,11 +68,14 @@ export async function runPayouts(d: WorkerDeps, chain: PayoutChain, hour: Date, 
     const claim = await stepClaim(d, chain, hour, dryRun);
     await attributeVaultClaim(d, chain, claim.id);
     if (!dryRun && d.env.CPMM_CREATOR_FEES) await stepCpmmCreatorFees(d, chain);
+    await stepLockedLpFees(d, chain, dryRun);
+    if (!dryRun && (d.env.CPMM_CREATOR_FEES || d.env.LOCKED_LP_FEES)) await stepMemecoinSales(d, chain);
     await stepOpenRounds(d, hour, dryRun, prices.solUsd);
   }
   const swaps = await stepSwaps(d, chain, hour, dryRun, prices);
   await stepSnapshots(d, chain, hour, dryRun, prices.solUsd);
   if (!dryRun) await deliverCredits(d);
+  if (!dryRun) await stepCreatorForwards(d, chain);
   await stepFinish(d, hour, dryRun, now());
 
   const rounds = await d.prisma.payoutRound.groupBy({ by: ["status"], where: { hour, dryRun }, _count: true });
@@ -216,39 +222,6 @@ async function attributeVaultClaim(d: WorkerDeps, chain: PayoutChain, claimId: s
     }
     await tx.vaultClaim.update({ where: { id: claim.id }, data: { unattributedLamports: a.unattributed, attributedAt: new Date() } });
   }, TX_OPTS);
-}
-
-/* ---------- B2. CPMM creator fees of graduated coins (live, opt-in) ---------- */
-
-async function stepCpmmCreatorFees(d: WorkerDeps, chain: PayoutChain) {
-  // Collections a crash left unrecorded (row made at signing, lamports still 0): ask the chain.
-  const stale = await d.prisma.feeClaim.findMany({ where: { kind: "cpmm_creator", lamports: 0n, ts: { lt: new Date(Date.now() - 5 * 60_000) } } });
-  for (const fc of stale) {
-    if (await d.prisma.feeAllocation.findFirst({ where: { feeClaimId: fc.id } })) continue;
-    const o = await chain.outcome(fc.sig, "wsol");
-    if (o.status === "landed" && o.delta > 0n) {
-      const s = splitPlatformFee(o.delta, d.params.fees);
-      await d.prisma.$transaction([
-        d.prisma.feeClaim.update({ where: { id: fc.id }, data: { lamports: o.delta } }),
-        d.prisma.feeAllocation.create({ data: { coinId: fc.coinId, feeClaimId: fc.id, lamports: o.delta, holdersLamports: s.holders, divvyLamports: s.divvy } }),
-      ]);
-    } else if (o.status !== "landed") await d.prisma.feeClaim.delete({ where: { id: fc.id } });
-  }
-  const coins = await d.prisma.coin.findMany({ where: { status: "graduated", cpmmPool: { not: null } }, select: { id: true, cpmmPool: true } });
-  for (const c of coins) {
-    const pending = await chain.cpmmCreatorFees(c.cpmmPool!).catch(() => 0n);
-    if (pending < 1_000_000n) continue; // not worth a transaction below 0.001 SOL
-    let feeClaimId: string | null = null;
-    const r = await chain.collectCpmmCreatorFees(c.cpmmPool!, c.id, async (sig) => {
-      feeClaimId = (await d.prisma.feeClaim.create({ data: { coinId: c.id, kind: "cpmm_creator", sig, lamports: 0n } })).id;
-    });
-    if (!r || !feeClaimId) continue;
-    const s = splitPlatformFee(r.lamports, d.params.fees);
-    await d.prisma.$transaction([
-      d.prisma.feeClaim.update({ where: { id: feeClaimId }, data: { lamports: r.lamports } }),
-      d.prisma.feeAllocation.create({ data: { coinId: c.id, feeClaimId, lamports: r.lamports, holdersLamports: s.holders, divvyLamports: s.divvy } }),
-    ]);
-  }
 }
 
 /* ---------- C. rounds ---------- */

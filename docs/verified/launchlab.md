@@ -520,6 +520,15 @@ If the locked share is non-zero, the LP-Lock program (`LockrWmn6K5twhz3y9w1dQERb
 - Post-graduation claims need the Fee Key owner's signature and an `lpFeeAmount` from Raydium's API, or a simulation-based probe.
 - The dividend engine must handle the memecoin leg of harvested fees, for example by swapping it to SOL. This is not in the HANDOFF.
 
+**Built (2026-10-26)** in `packages/solana/src/live/lplock.ts` and `apps/worker/src/payouts/poolfees.ts`:
+
+- **Finding the Fee Key.** The fee claimer's SPL Token accounts holding exactly 1 token whose `["locked_liquidity", mint]` PDA exists under the lock program (the SDK's own test, `cpmm.ts:1723-1750`), and whose lock record contains the pool's 32-byte address. That last test is an ASSUMPTION about a closed layout, so Raydium's API must also return the same `poolInfo.id` before any harvest.
+- **The API's `id` is the lock PDA**, not the NFT mint: raydium-docs-v1@3682384 `api-reference/openapi/dynamic-ipfs-v1.yaml` ("Locked CPMM position PDA public key"); the SDK's `fetchCpmmLockBalances` passes the PDA too. Devnet host `https://dynamic-ipfs-devnet.raydium.io` (same file, `servers`).
+- **`unclaimedFee.lp` has no documented unit** ("Claimable LP amount", type number). The worker tries it as whole LP tokens (× 10^`lpDecimals`) and, if it is a whole number, as base units, drops any reading above a tenth of the locked LP, and simulates each before signing. The first reading that simulates cleanly and returns a positive amount is used.
+- **User accounts:** the owner's ATAs for both pool mints (the SDK uses a temporary WSOL account; an ATA is assumed to be accepted, which the simulation checks).
+- **Memecoin leg:** sold with CPMM `swap_base_input` in the coin's own pool (account order checked against cp-swap@f4b9b26 `instructions/swap_base_input.rs` `Swap`), at most 1% of the coin reserve per run.
+- **Status:** NOT exercised on chain. `LOCKED_LP_FEES` stays off until a graduated coin's simulated harvest (logged every run) has been checked against Raydium's UI for that position.
+
 ### 5c. CPMM creator fee on LaunchLab-migrated pools
 
 **Finding:** yes, the CPMM creator fee applies to LaunchLab-migrated pools.

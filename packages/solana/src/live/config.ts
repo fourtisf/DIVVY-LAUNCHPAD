@@ -49,6 +49,7 @@ export function programs(cluster: Cluster) {
     defaultGlobalConfig: p.LAUNCHPAD_CONFIG,
     cpmm: p.CREATE_CPMM_POOL_PROGRAM,
     lpLock: p.LOCK_CPMM_PROGRAM,
+    lpLockAuth: p.LOCK_CPMM_AUTH,
   };
 }
 

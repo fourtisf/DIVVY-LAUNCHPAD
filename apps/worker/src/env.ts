@@ -33,6 +33,13 @@ const EnvSchema = z.object({
    * (PlatformConfig.platform_cp_creator). Off until that update is made with the owner's approval.
    */
   CPMM_CREATOR_FEES: bool.default(false),
+  /**
+   * Collect graduated coins' locked-LP fees with the Fee Key (PlatformConfig.platform_lock_nft_wallet
+   * must be the fee claimer). Off: each run only simulates and logs what it would collect.
+   */
+  LOCKED_LP_FEES: bool.default(false),
+  /** Forward a creator's share of post-graduation fees once it reaches this many lamports (0.01 SOL). */
+  CREATOR_FORWARD_MIN_LAMPORTS: z.coerce.number().int().positive().default(10_000_000),
   /** Priority fee for Divvy's own transactions (claims, swaps, pushes), micro-lamports per CU. */
   CU_PRICE_MICRO_LAMPORTS: z.coerce.number().int().nonnegative().default(20_000),
   /** Hourly caps on what the hot wallets may move (HANDOFF §9): fee-claimer swaps, payout-vault sends. */

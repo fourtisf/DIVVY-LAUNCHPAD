@@ -28,7 +28,9 @@ The details are in `docs/AUDIT.md`, "Open owner decisions".
       - Default: 1% = 0.25% Raydium + 0.50% holders + 0.15% creator + 0.10% Divvy.
 - [ ] **After graduation:** decided, harvest still to build. Owner chose the CPMM creator fee to uspad (`platform_cp_creator` = fee claimer, `CPMM_CREATOR_FEES=true`) on 2026-10-26.
       - Set `platform_cp_creator` to the fee-claimer wallet (a second `updatePlatformConfig` transaction) and turn on `CPMM_CREATOR_FEES`, or leave the CPMM creator fee with the coin's creator.
-      - Harvesting the locked-LP Fee Key is not built. Its fee amount comes from Raydium's API and the LP-lock program is closed source; see docs/verified/launchlab.md §5b.
+      - Locked-LP harvesting is built (2026-10-26) but not exercised on chain. Leave `LOCKED_LP_FEES=false` until the first graduated coin's logged simulation matches Raydium's UI for that position, then turn it on. Fees wait in the lock until then; nothing is lost (docs/verified/launchlab.md §5b).
+      - Creators' shares after graduation are forwarded in SOL from the fee claimer (`CREATOR_FORWARD_MIN_LAMPORTS`).
+      - `NFT_WALLET` for `create-platform-config.ts` must be the fee claimer's public key, or the Fee Keys go elsewhere.
 - [ ] **Durable storage** for coin pictures and token metadata. The metadata URI is permanent once a coin exists.
       - With `STORAGE_DRIVER=s3`, choose a provider you trust, add the bucket's origin to the CSP `img-src` and add a CORS rule (WEB-10).
       - With local storage, use an absolute folder outside `/srv/divvy` (NEW-4) and back it up.

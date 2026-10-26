@@ -92,12 +92,19 @@ function stubChain(claimed: bigint): PayoutChain {
     excludedOwners: () => new Map([[W.curveAuth, "curve" as const]]),
     cpmmCreatorFees: async () => 0n,
     collectCpmmCreatorFees: async () => null,
+    feeKeysByPool: async () => new Map(),
+    harvestLockedLp: async () => null,
+    memecoinBalance: async () => 0n,
+    sellMemecoin: async () => null,
+    sendSol: async () => {
+      throw new Error("not expected");
+    },
     feeClaimerLamports: async () => 10_000_000_000n,
   };
 }
 
-function deps(params: DivvyParams): WorkerDeps {
-  const env = loadWorkerEnv({ REDIS_URL: REDIS, DATABASE_URL: DB });
+function deps(params: DivvyParams, envOverrides: Record<string, string> = {}): WorkerDeps {
+  const env = loadWorkerEnv({ REDIS_URL: REDIS, DATABASE_URL: DB, ...envOverrides });
   const p = programs("devnet");
   return {
     env,
@@ -423,5 +430,111 @@ describe.skipIf(!run)("dividend engine", () => {
     expect(await redis.get(`divvy:swap-limit:dry:${nb.assetId}`)).toBe((nb.lamportsIn / 2n).toString());
     const waiting = await prisma.feeAllocation.aggregate({ where: { dryRun: true, roundId: null, coin: { dividendAsset: { mint: NVDA } } }, _sum: { holdersLamports: true } });
     expect(waiting._sum.holdersLamports).toBe(50_819_673n + 50_000_000n + 2_500_000n);
+  });
+  it("after graduation: finds the Fee Key, collects, sells the memecoin, splits 50 : 15 : 10 and forwards the creator's share once", async () => {
+    const pool = pk();
+    const nft = pk();
+    await prisma.coin.update({ where: { id: coins.B }, data: { status: "graduated", cpmmPool: pool, graduatedAt: new Date(HOUR.getTime() - 7_200_000) } });
+    const creator = (await prisma.coin.findUniqueOrThrow({ where: { id: coins.B } })).creatorWallet;
+    let creatorPending = 2_000_000n;
+    let lpFees = 15_000_000n;
+    let memecoin = 0n;
+    const forwards: [string, bigint][] = [];
+    const chain: PayoutChain = {
+      ...stubChain(0n),
+      claimVault: async () => null,
+      cpmmCreatorFees: async (p) => (p === pool ? creatorPending : 0n),
+      collectCpmmCreatorFees: async (_p, _c, onSigned) => {
+        await onSigned("CREATORFEE");
+        creatorPending = 0n;
+        return { sig: "CREATORFEE", lamports: 7_500_000n };
+      },
+      feeKeysByPool: async (pools) => new Map(pools.includes(pool) ? [[pool, nft]] : []),
+      harvestLockedLp: async (c, simulateOnly, onSigned) => {
+        expect([c.feeKeyMint, simulateOnly]).toEqual([nft, false]);
+        if (lpFees === 0n) return null;
+        await onSigned("LPFEE");
+        const r = { sig: "LPFEE", lpFeeAmount: 1_000n, lamports: lpFees, memecoin: 4_000_000n };
+        lpFees = 0n;
+        memecoin += 4_000_000n;
+        return r;
+      },
+      memecoinBalance: async () => memecoin,
+      sellMemecoin: async (_c, amount, onSigned) => {
+        await onSigned("SELL");
+        memecoin -= amount;
+        return { sig: "SELL", sold: amount, lamports: 7_500_000n };
+      },
+      sendSol: async (to, lamports, purpose, _c, onSigned) => {
+        expect(purpose).toBe("fees.forward_creator");
+        await onSigned(`FWD-${forwards.length}`);
+        forwards.push([to, lamports]);
+        return { sig: `FWD-${forwards.length - 1}` };
+      },
+    };
+    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false" }), { CPMM_CREATOR_FEES: "true", LOCKED_LP_FEES: "true", CREATOR_FORWARD_MIN_LAMPORTS: "5000000" });
+    const h = new Date(HOUR.getTime() + 3 * 3_600_000);
+    await runPayouts(d, chain, h, false, () => new Date(h.getTime() + 300_000));
+
+    expect((await prisma.coin.findUniqueOrThrow({ where: { id: coins.B } })).feeKeyMint).toBe(nft);
+    const claims = await prisma.feeClaim.findMany({ where: { coinId: coins.B }, orderBy: { ts: "asc" }, select: { kind: true, lamports: true, memecoinAmount: true } });
+    expect(claims).toEqual([
+      { kind: "cpmm_creator", lamports: 7_500_000n, memecoinAmount: 0n },
+      { kind: "cpmm_locked_lp", lamports: 15_000_000n, memecoinAmount: 4_000_000n },
+      { kind: "memecoin_sale", lamports: 7_500_000n, memecoinAmount: 4_000_000n },
+    ]);
+    // 50 : 15 : 10 of 75: 7.5M → 5M / 1.5M / 1M; 15M → 10M / 3M / 2M.
+    const split = await prisma.feeAllocation.findMany({ where: { coinId: coins.B, feeClaimId: { not: null } }, orderBy: { createdAt: "asc" }, select: { holdersLamports: true, creatorLamports: true, divvyLamports: true } });
+    expect(split.map((a) => [a.holdersLamports, a.creatorLamports, a.divvyLamports])).toEqual([
+      [5_000_000n, 1_500_000n, 1_000_000n],
+      [10_000_000n, 3_000_000n, 2_000_000n],
+      [5_000_000n, 1_500_000n, 1_000_000n],
+    ]);
+    // The creator's 1.5M + 3M + 1.5M = 6M ≥ the 5M minimum: forwarded once, and every allocation is linked.
+    expect(forwards).toEqual([[creator, 6_000_000n]]);
+    expect(await prisma.creatorTransfer.findMany({ select: { lamports: true, status: true, wallet: true } })).toEqual([{ lamports: 6_000_000n, status: "landed", wallet: creator }]);
+    expect(await prisma.feeAllocation.count({ where: { creatorLamports: { gt: 0n }, creatorTransferId: null } })).toBe(0);
+
+    // A second run of the same hour collects nothing new and forwards nothing.
+    await runPayouts(d, chain, h, false, () => new Date(h.getTime() + 900_000));
+    expect(await prisma.feeClaim.count({ where: { coinId: coins.B } })).toBe(3);
+    expect(forwards).toHaveLength(1);
+  });
+
+  it("a creator forward a crash left unconfirmed is undone when it never landed, then sent again", async () => {
+    const fc = await prisma.feeClaim.create({ data: { coinId: coins.B, kind: "cpmm_creator", sig: "CREATORFEE-2", lamports: 75_000_000n } });
+    await prisma.feeAllocation.create({ data: { coinId: coins.B, feeClaimId: fc.id, lamports: 75_000_000n, holdersLamports: 50_000_000n, creatorLamports: 15_000_000n, divvyLamports: 10_000_000n } });
+    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false" }), { CREATOR_FORWARD_MIN_LAMPORTS: "5000000" });
+    const h = new Date(HOUR.getTime() + 4 * 3_600_000);
+
+    // Signed, then the process died before confirming.
+    const crashing: PayoutChain = {
+      ...stubChain(0n),
+      claimVault: async () => null,
+      sendSol: async (_to, _l, _p, _c, onSigned) => {
+        await onSigned("FWD-LOST");
+        throw new Error("crashed after signing");
+      },
+    };
+    await runPayouts(d, crashing, h, false, () => new Date(h.getTime() + 300_000));
+    expect(await prisma.creatorTransfer.findUniqueOrThrow({ where: { sig: "FWD-LOST" } })).toMatchObject({ status: "sent", lamports: 15_000_000n });
+
+    // Ten minutes later the chain has never seen it: the share is owed again and goes out once.
+    await prisma.creatorTransfer.update({ where: { sig: "FWD-LOST" }, data: { createdAt: new Date(Date.now() - 600_000) } });
+    const sentNow: bigint[] = [];
+    const recovering: PayoutChain = {
+      ...stubChain(0n),
+      claimVault: async () => null,
+      signatureStatuses: async (sigs) => sigs.map(() => "missing" as const),
+      sendSol: async (_to, lamports, _p, _c, onSigned) => {
+        await onSigned("FWD-AGAIN");
+        sentNow.push(lamports);
+        return { sig: "FWD-AGAIN" };
+      },
+    };
+    await runPayouts(d, recovering, h, false, () => new Date(h.getTime() + 900_000));
+    expect(await prisma.creatorTransfer.findUnique({ where: { sig: "FWD-LOST" } })).toBeNull();
+    expect(sentNow).toEqual([15_000_000n]);
+    expect(await prisma.creatorTransfer.findUniqueOrThrow({ where: { sig: "FWD-AGAIN" } })).toMatchObject({ status: "landed", lamports: 15_000_000n });
   });
 });

@@ -23,9 +23,20 @@ import {
   ata,
   claimPlatformVaultInstructions,
   collectCpmmCreatorFeeInstructions,
+  collectLockedLpFeeInstruction,
   cpmmAuthority,
   cpmmCreatorFeesPending,
+  cpmmReserves,
+  cpmmSellInstruction,
+  cpmmSellQuote,
+  decodeCpmmConfig,
   decodeCpmmPool,
+  fetchLockedPosition,
+  findFeeKeys,
+  lockedLiquidityPda,
+  lockLpVault,
+  lockNamesPool,
+  lpFeeCandidates,
   getMintInfo,
   platformFeeVault,
   poolAddresses,
@@ -49,6 +60,17 @@ export interface SwapGuard {
   /** Refuse if Jupiter's minimum output is below this (reference price minus the impact cap). */
   minOutFloor: bigint;
   maxImpactBps: number;
+}
+
+/** What collecting a coin's locked-LP fees gave (or, simulated, would give). */
+export interface LockedLpHarvest {
+  /** Null when only simulated. */
+  sig: string | null;
+  lpFeeAmount: bigint;
+  /** SOL leg, lamports. */
+  lamports: bigint;
+  /** Memecoin leg, base units; sold separately. */
+  memecoin: bigint;
 }
 
 export interface SwapQuote {
@@ -83,6 +105,23 @@ export interface PayoutChain {
   /** SOL leg of CPMM creator fees waiting in a graduated coin's pool, when Divvy is the pool creator. */
   cpmmCreatorFees(cpmmPool: string): Promise<bigint>;
   collectCpmmCreatorFees(cpmmPool: string, coinId: string, onSigned: OnSigned): Promise<{ sig: string; lamports: bigint } | null>;
+  /** CPMM pool → Fee Key mint, for the Fee Keys the fee claimer holds whose lock record names one of `pools`. */
+  feeKeysByPool(pools: string[]): Promise<Map<string, string>>;
+  /**
+   * Collects a graduated coin's locked-LP fees with the Fee Key. Every amount is simulated first;
+   * `simulateOnly` never signs. Null when there's nothing to collect or no reading of Raydium's
+   * figure simulates cleanly (an alert says which).
+   */
+  harvestLockedLp(c: { id: string; ticker: string; mint: string; cpmmPool: string; feeKeyMint: string }, simulateOnly: boolean, onSigned: OnSigned): Promise<LockedLpHarvest | null>;
+  /** Memecoin base units the fee claimer holds. */
+  memecoinBalance(mint: string): Promise<bigint>;
+  /**
+   * Sells memecoin from the fee claimer into the coin's own CPMM pool for SOL, at most 1% of the
+   * pool's coin reserve per call, with a minimum out from the reserves minus SWAP_SLIPPAGE_BPS.
+   */
+  sellMemecoin(c: { id: string; mint: string; cpmmPool: string }, amount: bigint, onSigned: OnSigned): Promise<{ sig: string; sold: bigint; lamports: bigint } | null>;
+  /** Plain SOL transfer from the fee claimer. */
+  sendSol(to: string, lamports: bigint, purpose: string, coinId: string, onSigned: OnSigned): Promise<{ sig: string }>;
   feeClaimerLamports(): Promise<bigint>;
 }
 
@@ -275,6 +314,111 @@ export function liveChain(d: WorkerDeps): PayoutChain {
       const lamports = tokenDelta(tx, wsol());
       await sendIxs([createCloseAccountInstruction(wsol(), feeClaimer().publicKey, feeClaimer().publicKey, [], TOKEN_PROGRAM_ID)], "fees.unwrap_wsol", coinId, async () => {});
       return { sig: tx.transaction.signatures[0]!, lamports };
+    },
+    async feeKeysByPool(pools) {
+      const keys = await findFeeKeys(d.conn, d.programs.lpLock, feeClaimer().publicKey);
+      const out = new Map<string, string>();
+      for (const pool of pools) {
+        const hit = keys.find((k) => lockNamesPool(k.data, new PublicKey(pool)));
+        if (hit) out.set(pool, hit.nftMint.toBase58());
+      }
+      return out;
+    },
+    async harvestLockedLp(c, simulateOnly, onSigned) {
+      const owner = feeClaimer().publicKey;
+      const poolId = new PublicKey(c.cpmmPool);
+      const nftMint = new PublicKey(c.feeKeyMint);
+      const info = await d.conn.getAccountInfo(poolId, "confirmed");
+      if (!info) return null;
+      const pool = decodeCpmmPool(info.data);
+      const lock = lockedLiquidityPda(d.programs.lpLock, nftMint);
+      // Raydium's API must agree that this lock belongs to this coin's pool.
+      const pos = await fetchLockedPosition(d.sol.cluster, lock, fetch);
+      if (pos.poolId !== c.cpmmPool) {
+        await d.alerts.send(`lplock-pool-${c.id}`, "critical", `${c.ticker}: Raydium says Fee Key ${c.feeKeyMint} locks pool ${pos.poolId}, not ${c.cpmmPool}. Not harvesting.`, 86_400);
+        return null;
+      }
+      const lockedInfo = await d.conn.getAccountInfo(lockLpVault(d.programs.lpLockAuth, pool.mintLp), "confirmed");
+      const locked = lockedInfo ? AccountLayout.decode(lockedInfo.data.subarray(0, 165)).amount : 0n;
+      // One hour's fees are a small part of the locked LP; anything above a tenth means a misread figure.
+      const candidates = lpFeeCandidates(pos.lp, pool.lpDecimals, locked / 10n);
+      if (!candidates.length) return null;
+
+      const coinMint = new PublicKey(c.mint);
+      const coinProgram = pool.mintA.equals(coinMint) ? pool.mintProgramA : pool.mintProgramB;
+      const coinAta = ata(owner, coinMint, coinProgram);
+      const setup = [
+        createAssociatedTokenAccountIdempotentInstruction(owner, wsol(), owner, NATIVE_MINT, TOKEN_PROGRAM_ID),
+        createAssociatedTokenAccountIdempotentInstruction(owner, coinAta, owner, coinMint, coinProgram),
+      ];
+      const ixsFor = (lpFeeAmount: bigint) => [
+        ...setup,
+        collectLockedLpFeeInstruction({ lockProgram: d.programs.lpLock, lockAuth: d.programs.lpLockAuth, cpmmProgram: d.programs.cpmm, owner, nftMint, poolId, pool, lpFeeAmount }),
+      ];
+      const balance = (acc: { data: Buffer | string[] } | null | undefined) =>
+        !acc ? 0n : AccountLayout.decode((Array.isArray(acc.data) ? Buffer.from(acc.data[0] ?? "", "base64") : acc.data).subarray(0, 165)).amount;
+
+      for (const lpFeeAmount of candidates) {
+        const { blockhash } = await d.conn.getLatestBlockhash("confirmed");
+        const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixsFor(lpFeeAmount) }).compileToV0Message();
+        const before = await d.conn.getMultipleAccountsInfo([wsol(), coinAta], "confirmed");
+        const sim = await d.conn.simulateTransaction(new VersionedTransaction(msg), {
+          sigVerify: false,
+          replaceRecentBlockhash: true,
+          commitment: "confirmed",
+          accounts: { encoding: "base64", addresses: [wsol().toBase58(), coinAta.toBase58()] },
+        });
+        if (sim.value.err) continue;
+        const [w, m] = sim.value.accounts ?? [];
+        const lamports = balance(w) - balance(before[0]);
+        const memecoin = balance(m) - balance(before[1]);
+        if (lamports < 0n || memecoin < 0n || lamports + memecoin === 0n) continue;
+        if (simulateOnly) return { sig: null, lpFeeAmount, lamports, memecoin };
+
+        const tx = await sendIxs(ixsFor(lpFeeAmount), "fees.collect_locked_lp", c.id, onSigned);
+        const got = { lamports: tokenDelta(tx, wsol()), memecoin: tokenDelta(tx, coinAta) };
+        await sendIxs([createCloseAccountInstruction(wsol(), owner, owner, [], TOKEN_PROGRAM_ID)], "fees.unwrap_wsol", c.id, async () => {});
+        return { sig: tx.transaction.signatures[0]!, lpFeeAmount, ...got };
+      }
+      await d.alerts.send(`lplock-sim-${c.id}`, "warn", `${c.ticker}: no reading of Raydium's claimable LP fee (${pos.lp}) simulates cleanly; locked-LP fees wait`, 86_400);
+      return null;
+    },
+    async memecoinBalance(mint) {
+      const info = await getMintInfo(d.conn, new PublicKey(mint));
+      const acc = await d.conn.getAccountInfo(ata(feeClaimer().publicKey, info.address, info.programId), "confirmed");
+      return acc ? AccountLayout.decode(acc.data.subarray(0, 165)).amount : 0n;
+    },
+    async sellMemecoin(c, amount, onSigned) {
+      const owner = feeClaimer().publicKey;
+      const poolId = new PublicKey(c.cpmmPool);
+      const coinMint = new PublicKey(c.mint);
+      const info = await d.conn.getAccountInfo(poolId, "confirmed");
+      if (!info) return null;
+      const pool = decodeCpmmPool(info.data);
+      const cfgInfo = await d.conn.getAccountInfo(pool.configId, "confirmed");
+      if (!cfgInfo) return null;
+      const cfg = decodeCpmmConfig(cfgInfo.data);
+      const reserves = await cpmmReserves(d.conn, pool);
+      const coinIsA = pool.mintA.equals(coinMint);
+      const coinReserve = coinIsA ? reserves.a : reserves.b;
+      const solReserve = coinIsA ? reserves.b : reserves.a;
+      const sold = amount < coinReserve / 100n ? amount : coinReserve / 100n;
+      const creatorRate = pool.enableCreatorFee ? BigInt(cfg.creatorFeeRate.toString()) : 0n;
+      const expected = cpmmSellQuote(sold, coinReserve, solReserve, BigInt(cfg.tradeFeeRate.toString()), creatorRate);
+      const minOut = (expected * BigInt(10_000 - d.params.swapSlippageBps)) / 10_000n;
+      if (minOut < 10_000n) return null; // not worth a transaction
+      const ixs = [
+        createAssociatedTokenAccountIdempotentInstruction(owner, wsol(), owner, NATIVE_MINT, TOKEN_PROGRAM_ID),
+        cpmmSellInstruction({ cpmmProgram: d.programs.cpmm, owner, poolId, pool, coinMint, amountIn: sold, minOut }),
+      ];
+      const tx = await sendIxs(ixs, "fees.sell_memecoin", c.id, onSigned);
+      const lamports = tokenDelta(tx, wsol());
+      await sendIxs([createCloseAccountInstruction(wsol(), owner, owner, [], TOKEN_PROGRAM_ID)], "fees.unwrap_wsol", c.id, async () => {});
+      return { sig: tx.transaction.signatures[0]!, sold, lamports };
+    },
+    async sendSol(to, lamports, purpose, coinId, onSigned) {
+      const tx = await sendIxs([SystemProgram.transfer({ fromPubkey: feeClaimer().publicKey, toPubkey: new PublicKey(to), lamports })], purpose, coinId, onSigned);
+      return { sig: tx.transaction.signatures[0]! };
     },
     async feeClaimerLamports() {
       return BigInt(await d.conn.getBalance(feeClaimer().publicKey, "confirmed"));

@@ -43,6 +43,8 @@ enum FeeClaimKind {
   cpmm_locked_lp
   /// CPMM creator fee collected when platform_cp_creator is a Divvy wallet.
   cpmm_creator
+  /// Memecoin from those fees, sold for SOL in the coin's own pool.
+  memecoin_sale
 }
 
 /// Steps of an hourly round; a retry resumes from the last completed step.
@@ -184,6 +186,8 @@ model Coin {
   /// LaunchLab pool state account (PDA of the mint). Null until the mint exists.
   poolState       String?       @unique
   cpmmPool        String?       @unique
+  /// Raydium Fee Key NFT of the locked LP, minted to platform_nft_wallet at migration. Null until found.
+  feeKeyMint      String?       @unique
   status          CoinStatus    @default(pending)
   /// Hidden by moderation: kept for history, never listed.
   hidden          Boolean       @default(false)
@@ -196,15 +200,16 @@ model Coin {
   /// { x?: string, telegram?: string, website?: string }
   links           Json          @default("{}")
 
-  launch         Launch?
-  stats          CoinStats?
-  trades         Trade[]
-  candles        Candle[]
-  feeClaims      FeeClaim[]
-  allocations    FeeAllocation[]
-  rounds         PayoutRound[]
-  holderBalances HolderBalance[]
-  reports        Report[]
+  launch           Launch?
+  stats            CoinStats?
+  trades           Trade[]
+  candles          Candle[]
+  feeClaims        FeeClaim[]
+  allocations      FeeAllocation[]
+  rounds           PayoutRound[]
+  holderBalances   HolderBalance[]
+  reports          Report[]
+  creatorTransfers CreatorTransfer[]
 
   /// Trigram index: prefilter for the name-similarity check (needs the pg_trgm extension).
   @@index([nameNorm(ops: raw("gin_trgm_ops"))], type: Gin, map: "Coin_nameNorm_trgm")
@@ -382,25 +387,52 @@ model VaultClaim {
 
 /// A coin's share of a vault claim (or of a post-graduation FeeClaim), split into Divvy's buckets.
 model FeeAllocation {
-  id              String       @id @default(cuid())
-  coinId          String
-  coin            Coin         @relation(fields: [coinId], references: [id])
-  vaultClaimId    String?
-  vaultClaim      VaultClaim?  @relation(fields: [vaultClaimId], references: [id])
-  feeClaimId      String?
-  lamports        BigInt
-  holdersLamports BigInt
-  creatorLamports BigInt       @default(0)
-  divvyLamports   BigInt
+  id                String           @id @default(cuid())
+  coinId            String
+  coin              Coin             @relation(fields: [coinId], references: [id])
+  vaultClaimId      String?
+  vaultClaim        VaultClaim?      @relation(fields: [vaultClaimId], references: [id])
+  feeClaimId        String?
+  lamports          BigInt
+  holdersLamports   BigInt
+  /// Only fees collected after graduation have a creator share; on the curve the creator is paid on chain.
+  creatorLamports   BigInt           @default(0)
+  divvyLamports     BigInt
+  /// The transfer that forwarded creatorLamports to the creator. Null while it is owed.
+  creatorTransferId String?
+  creatorTransfer   CreatorTransfer? @relation(fields: [creatorTransferId], references: [id])
   /// The round that spent the holders' bucket. Null while carried forward.
-  roundId         String?
-  round           PayoutRound? @relation(fields: [roundId], references: [id])
-  dryRun          Boolean      @default(false)
-  createdAt       DateTime     @default(now())
+  roundId           String?
+  round             PayoutRound?     @relation(fields: [roundId], references: [id])
+  dryRun            Boolean          @default(false)
+  createdAt         DateTime         @default(now())
 
   @@unique([vaultClaimId, coinId])
   @@unique([feeClaimId, coinId])
   @@index([coinId, roundId])
+  @@index([coinId, creatorTransferId])
+}
+
+enum CreatorTransferStatus {
+  /// Signed and sent; the outcome isn't known yet.
+  sent
+  landed
+}
+
+/// SOL the fee claimer forwards to a coin's creator: their share of what uspad collects after
+/// graduation (the CPMM creator fee and the locked LP's fees).
+model CreatorTransfer {
+  id          String                @id @default(cuid())
+  coinId      String
+  coin        Coin                  @relation(fields: [coinId], references: [id])
+  wallet      String
+  lamports    BigInt
+  sig         String                @unique
+  status      CreatorTransferStatus @default(sent)
+  createdAt   DateTime              @default(now())
+  allocations FeeAllocation[]
+
+  @@index([coinId, createdAt])
 }
 
 /// One Jupiter swap per dividend asset per hour, shared by every coin paying that asset.
