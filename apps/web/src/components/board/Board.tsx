@@ -15,6 +15,7 @@ import { Countdown, Ring } from "../Countdown";
 import { CountUp } from "../CountUp";
 import { Coupon } from "../Coupon";
 import { Icon } from "../Icon";
+import { TokenCa } from "../TokenCa";
 
 export const toCard = (c: CoinSummary, now = Date.now()): CardCoin => ({
   name: c.name,
@@ -59,12 +60,15 @@ export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders:
     <>
       <section className="hero">
         <div>
-          <span className="eyecatch">
-            <span className="dot">
-              <Icon name="bolt" size={12} />
+          <div className="hero-chips">
+            <span className="eyecatch">
+              <span className="dot">
+                <Icon name="bolt" size={12} />
+              </span>
+              Holders paid {usd(roundUsd)} in stocks this hour
             </span>
-            Holders paid {usd(roundUsd)} in stocks this hour
-          </span>
+            <TokenCa />
+          </div>
           <h1>
             Memecoins that pay you <span className="glow">real stock dividends.</span>
           </h1>

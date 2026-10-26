@@ -53,3 +53,11 @@
 /* uspad lockup in the header (replaces the prototype's foil mark and "divvy" text). */
 .logo-lockup{display:block;height:36px;width:auto}
 @media (max-width:760px){.logo-lockup{height:32px}}
+
+/* Hero badges: the payout badge and the token's contract address side by side. */
+.hero-chips{display:flex;flex-wrap:wrap;gap:8px 10px;margin-bottom:22px}
+.hero-chips .eyecatch{margin-bottom:0}
+.ca-pill{gap:5px;padding:0 12px;color:var(--text);font-family:inherit;cursor:default}
+.ca-pill b{color:var(--g-hi);font-weight:600}
+button.ca-pill{cursor:pointer}
+button.ca-pill:hover{border-color:var(--hair3)}
