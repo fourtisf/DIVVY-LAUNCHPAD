@@ -1,0 +1,41 @@
+{
+  "name": "divvy",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @divvy/web --filter @divvy/api --filter @divvy/worker dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "db:migrate": "pnpm --filter @divvy/db migrate:dev",
+    "db:deploy": "pnpm --filter @divvy/db migrate:deploy",
+    "db:generate": "pnpm --filter @divvy/db generate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^8.57.1",
+    "@next/eslint-plugin-next": "14.2.35",
+    "eslint": "^8.57.1",
+    "globals": "^16.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "eslint-plugin-react-hooks": "^5.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "sharp",
+      "bufferutil",
+      "utf-8-validate"
+    ],
+    "ignoredBuiltDependencies": [
+      "bigint-buffer"
+    ]
+  }
+}

@@ -1,0 +1,313 @@
+// Divvy data model (HANDOFF §7). Amounts are integers in base units (BigInt): lamports for SOL,
+// token base units for coins and dividend assets. Prices are Decimal.
+// Key material never lives here: no private keys, no mint secret keys, no session secrets.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CoinStatus {
+  pending
+  live
+  graduated
+  failed
+}
+
+enum LaunchStep {
+  checking
+  bundling
+  landed
+  indexed
+  failed
+}
+
+enum TradeSide {
+  buy
+  sell
+}
+
+enum CandleTf {
+  m1 @map("1m")
+  m5 @map("5m")
+  h1 @map("1h")
+  d1 @map("1d")
+}
+
+enum FeeClaimKind {
+  /// Platform fee claimed from the LaunchLab curve.
+  curve_platform
+  /// Fees harvested from the locked LP position (Fee Key) after graduation.
+  cpmm_locked_lp
+}
+
+enum RoundStatus {
+  ok
+  carried
+  late
+  failed
+}
+
+enum PayoutItemStatus {
+  credited
+  sent
+  claimed
+}
+
+enum AssetKind {
+  stock
+  crypto
+}
+
+enum TokenProgram {
+  spl_token  @map("spl-token")
+  token_2022 @map("token-2022")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  wallet    String    @unique
+  /// OAuth-verified X user ID. The handle is display only.
+  xUserId   String?   @unique
+  xHandle   String?
+  createdAt DateTime  @default(now())
+  sessions  Session[]
+  coins     Coin[]
+  launches  Launch[]
+}
+
+model Session {
+  /// SHA-256 of the session token. The token itself only lives in the httpOnly cookie.
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model DividendAsset {
+  id           String       @id @default(cuid())
+  symbol       String       @unique
+  name         String
+  kind         AssetKind
+  /// Fetched from the official list or the Jupiter token API. Never typed by hand.
+  mint         String       @unique
+  decimals     Int
+  tokenProgram TokenProgram
+  logoUrl      String?
+  /// Chip art from the prototype: monogram and colours.
+  mono         String
+  chipBg       String
+  chipFg       String
+  featured     Boolean      @default(false)
+  enabled      Boolean      @default(true)
+  sortOrder    Int          @default(0)
+  /// Where the mint was fetched from, for audit (e.g. "jupiter-tokens-v2").
+  source       String
+  fetchedAt    DateTime
+  coins        Coin[]
+}
+
+model Coin {
+  id              String        @id @default(cuid())
+  mint            String        @unique
+  ticker          String
+  tickerNorm      String        @unique
+  name            String
+  nameNorm        String
+  description     String        @default("")
+  imageUrl        String
+  imageSha256     String        @unique
+  imagePhash      String
+  dividendAssetId String
+  dividendAsset   DividendAsset @relation(fields: [dividendAssetId], references: [id])
+  creatorUserId   String
+  creator         User          @relation(fields: [creatorUserId], references: [id])
+  /// One coin per OAuth-verified X account (HANDOFF §5). Null when no X account is linked.
+  creatorXUserId  String?       @unique
+  /// LaunchLab pool state account.
+  poolState       String        @unique
+  cpmmPool        String?       @unique
+  status          CoinStatus    @default(pending)
+  createdSig      String?
+  createdAt       DateTime      @default(now())
+  graduatedAt     DateTime?
+  /// { x?: string, telegram?: string, website?: string }
+  links           Json          @default("{}")
+
+  launch          Launch?
+  trades          Trade[]
+  candles         Candle[]
+  feeClaims       FeeClaim[]
+  rounds          PayoutRound[]
+  holderBalances  HolderBalance[]
+
+  @@index([nameNorm])
+  @@index([status, createdAt])
+  @@index([dividendAssetId])
+}
+
+model Launch {
+  id         String     @id @default(cuid())
+  userId     String
+  user       User       @relation(fields: [userId], references: [id])
+  coinId     String?    @unique
+  coin       Coin?      @relation(fields: [coinId], references: [id])
+  step       LaunchStep @default(checking)
+  /// Public key only. Secret until the create lands: the API must not return it before step = landed.
+  /// The mint secret key is held in memory for the bundle and never stored.
+  mintPubkey String     @unique
+  bundleId   String?
+  signature  String?
+  /// { code, message, collidesWith } when step = failed.
+  error      Json?
+  /// The validated launch form.
+  request    Json
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model Trade {
+  id          BigInt    @id @default(autoincrement())
+  sig         String
+  /// Instruction index within the transaction (inner instructions included).
+  ix          Int
+  coinId      String
+  coin        Coin      @relation(fields: [coinId], references: [id])
+  side        TradeSide
+  solAmount   BigInt
+  tokenAmount BigInt
+  wallet      String
+  /// SOL per whole token.
+  priceSol    Decimal   @db.Decimal(38, 18)
+  slot        BigInt
+  ts          DateTime
+
+  @@unique([sig, ix])
+  @@index([coinId, ts])
+  @@index([wallet, ts])
+}
+
+model Candle {
+  coinId String
+  coin   Coin     @relation(fields: [coinId], references: [id])
+  tf     CandleTf
+  /// Bucket start.
+  ts     DateTime
+  /// Price in SOL per whole token. Market cap is derived (price × supply) at read time.
+  o      Decimal  @db.Decimal(38, 18)
+  h      Decimal  @db.Decimal(38, 18)
+  l      Decimal  @db.Decimal(38, 18)
+  c      Decimal  @db.Decimal(38, 18)
+  volSol BigInt
+
+  @@id([coinId, tf, ts])
+}
+
+model FeeClaim {
+  id              String       @id @default(cuid())
+  coinId          String
+  coin            Coin         @relation(fields: [coinId], references: [id])
+  kind            FeeClaimKind
+  sig             String       @unique
+  lamports        BigInt
+  holdersLamports BigInt
+  creatorLamports BigInt
+  divvyLamports   BigInt
+  /// The round that spent the holders' bucket. Null while it is carried forward.
+  roundId         String?
+  round           PayoutRound? @relation(fields: [roundId], references: [id])
+  ts              DateTime
+
+  @@index([coinId, ts])
+}
+
+model PayoutRound {
+  id                 String       @id @default(cuid())
+  coinId             String
+  coin               Coin         @relation(fields: [coinId], references: [id])
+  /// Top of the hour (UTC) this round is for.
+  hour               DateTime
+  /// Dry-run rounds compute everything and send nothing (CLAUDE.md rule 7).
+  dryRun             Boolean      @default(false)
+  status             RoundStatus
+  /// Lamports swapped this round (holders' bucket incl. carry-in).
+  solIn              BigInt       @default(0)
+  carriedInLamports  BigInt       @default(0)
+  carriedOutLamports BigInt       @default(0)
+  /// Dividend asset base units bought.
+  assetOut           BigInt       @default(0)
+  /// Asset base units left undistributed by flooring, carried to the next round.
+  dustCarried        BigInt       @default(0)
+  priceUsd           Decimal?     @db.Decimal(38, 18)
+  swapSig            String?
+  holdersPaid        Int          @default(0)
+  error              String?
+  startedAt          DateTime     @default(now())
+  finishedAt         DateTime?
+  items              PayoutItem[]
+  feeClaims          FeeClaim[]
+
+  /// Idempotency: one live and one dry-run round per coin per hour.
+  @@unique([coinId, hour, dryRun])
+  @@index([hour])
+}
+
+model PayoutItem {
+  id          String           @id @default(cuid())
+  roundId     String
+  round       PayoutRound      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  wallet      String
+  amountAsset BigInt
+  status      PayoutItemStatus
+  sendSig     String?
+  createdAt   DateTime         @default(now())
+
+  @@unique([roundId, wallet])
+  @@index([wallet, status])
+}
+
+model HolderBalance {
+  coinId       String
+  coin         Coin     @relation(fields: [coinId], references: [id])
+  wallet       String
+  balance      BigInt
+  snapshotHour DateTime
+
+  @@id([coinId, snapshotHour, wallet])
+  @@index([wallet])
+}
+
+model ReservedTicker {
+  tickerNorm  String   @id
+  /// e.g. "dexscreener", "jupiter", "manual"
+  source      String
+  refreshedAt DateTime
+}
+
+/// Audit log of every transaction Divvy signs (CLAUDE.md conventions).
+model SignedTx {
+  id        String   @id @default(cuid())
+  /// e.g. "launch.create", "fees.claim_platform", "payout.swap", "payout.send"
+  purpose   String
+  /// Which hot wallet signed: launcher | payout_vault | fee_claimer
+  signer    String
+  signature String   @unique
+  coinId    String?
+  bundleId  String?
+  dryRun    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([purpose, createdAt])
+  @@index([coinId])
+}

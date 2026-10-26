@@ -1,0 +1,17 @@
+/*
+ * Styles the prototype didn't need. Built only from its tokens.
+ * - Meter states for carried / late rounds (HANDOFF §3.3: "carried to next round"; red when late).
+ * - The Solana wallet-adapter modal, re-skinned to match the prototype's modal.
+ */
+.status.carried{background:rgba(94,234,212,.12);color:var(--teal)}
+.status.late{background:var(--red-soft);color:var(--red)}
+.status.late i{box-shadow:0 0 0 3px rgba(255,107,129,.2)}
+
+.wallet-adapter-modal-wrapper{background:var(--s1)!important;border:1px solid var(--hair2);border-radius:26px!important;box-shadow:0 40px 80px -30px rgba(0,0,0,.9),0 0 0 1px rgba(74,222,128,.05)!important;font-family:var(--ui)!important}
+.wallet-adapter-modal-overlay{background:rgba(3,8,6,.72)!important;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.wallet-adapter-modal-title{font-family:var(--display)!important;font-weight:600!important;letter-spacing:-.035em;color:var(--text)!important}
+.wallet-adapter-modal-button-close{background:rgba(255,255,255,.04)!important}
+.wallet-adapter-modal-list .wallet-adapter-button{font-family:var(--ui)!important;font-weight:700!important;border-radius:12px!important;color:var(--text)!important}
+.wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover{background:var(--g-soft)!important}
+.wallet-adapter-modal-list-more{font-family:var(--ui)!important;color:var(--muted)!important}
+.wallet-adapter-modal-middle-button{background:var(--g)!important;color:var(--g-ink)!important;font-family:var(--ui)!important}

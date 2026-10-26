@@ -1,0 +1,73 @@
+# Verified facts (Phase 0)
+
+Checked on 2026-10-26. Every on-chain fact, program ID, fee field and SDK call that Divvy relies on is listed here with its source (CLAUDE.md rule 2). Full evidence, with quoted lines, is in:
+
+- [`docs/verified/launchlab.md`](verified/launchlab.md): Raydium LaunchLab, CPMM, LP lock, curve, fees.
+- [`docs/verified/jito-jupiter-xstocks.md`](verified/jito-jupiter-xstocks.md): Jito bundles, Jupiter swaps, xStocks mints and extensions, Helius snapshots.
+
+## How this was checked, and what's still open
+
+This build environment blocks every Solana RPC, docs.raydium.io, jup.ag, jito.wtf and xstocks.fi. Nothing here comes from a live on-chain read. Sources are:
+
+- **Source code and IDLs** at pinned commits: `raydium-io/raydium-sdk-V2@b69d02b` (= npm `0.2.75-alpha`, `src/` byte-identical), `raydium-io/raydium-idl@e7e0c96`, `raydium-io/raydium-cp-swap@f4b9b26`, `raydium-io/raydium-sdk-V2-demo@003d904`, `solana-program/token-2022@3f85f9c`, `helius-labs/helius-sdk@8560889`, `jito-labs/jito-ts@77e9405`, `jito-labs/jito-js-rpc@7f05783`.
+- **Docs-site sources** at pinned commits: `raydium-io/raydium-docs-v1@3682384` (the MDX behind docs.raydium.io), `jito-labs/jito-docs@9b923b8` (behind docs.jito.wtf), `jup-ag/docs@0066fde` (behind dev.jup.ag).
+- **Token registries**: `solana-foundation/tokens@e87d61f`, `trustwallet/assets` (master on 2026-10-26).
+
+Line citations were spot-checked by hand after the research pass (SDK fee math, creator signer flag, platform vault claim, curve defaults, the Raydium changelog lines, Jito encoding/tip/uncle lines, xStocks registry entries).
+
+Status legend: **Source** = read in code or IDL. **Docs** = Raydium/Jito/Jupiter docs source only; the LaunchLab and LP-lock programs are closed source. **On-chain** = must be confirmed with a read-only script before we rely on it.
+
+## Answers to the VERIFY items in HANDOFF.md
+
+| # | Question (HANDOFF) | Answer | Status | Key source |
+|---|---|---|---|---|
+| 1 | Program IDs | LaunchLab `LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj`, CPMM `CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C`, LP lock (Burn & Earn) `LockrWmn6K5twhz3y9w1dQERbmgSaRkfnTeTKbpofwE` | Source | sdk `src/common/programId.ts:37,29,33`; idl `raydium_launchpad.json:2`; cp-swap `programs/cp-swap/src/lib.rs:25` |
+| 2 | Create params, Token-2022, no transfer fee, quote SOL (§3.1) | Call the instruction builder `initializeWithToken2022()` directly with decimals 6, `ConstantCurve`, supply 1e15, totalSellA 7.931e14, totalFundRaisingB 85e9, `migrateType: "cpmm"`, vesting 0/0/0, `CpmmCreatorFeeOn.OnlyTokenB`, `transferFeeExtensionParams: undefined`. Don't use `createLaunchpad()`: it sets `token2022 = !!transferFeeExtensionParams`, so it can't make a Token-2022 coin without a transfer fee. Calling the builder adds no buy instruction, so there's no dev buy. | Source | sdk `launchpad/instrument.ts:242-356`, `launchpad.ts:206`; idl `:2737-2779` |
+| 3 | Fee fields and caps (§3.2) | PlatformConfig `fee_rate`, `creator_fee_rate`; GlobalConfig `trade_fee_rate`, `max_share_fee_rate`; denominator 1,000,000. Caps: `fee_rate` ≤ 50,000 (5%) since 2026-08-26 (was 10,000 on create), `creator_fee_rate` ≤ 5,000 (0.5%). `max_share_fee_rate` only caps the per-trade referral fee, never the platform fee. | Source (fields), Docs (caps) | sdk `launchpad/layout.ts:5-26,106-136`, `common/fee.ts:2`; docs `reference/changelog/2026-08-26-launchlab-platform-fee-rate-cap.mdx:18,22-23` |
+| 4 | Protocol fee inside or on top? | **On top.** A trader pays `trade_fee_rate + fee_rate + creator_fee_rate` (+ optional referral). Divvy's 1% is reachable exactly with `fee_rate = 6000` and `creator_fee_rate = 1500` if `trade_fee_rate = 2500`; the 0.60% platform fee is then split 0.50% holders / 0.10% Divvy off-chain. | Source; `trade_fee_rate` value is On-chain | sdk `launchpad/curve/curve.ts:466-515`; docs `products/launchlab/platform-config.mdx:15` |
+| 5 | Must the creator sign? (§3.1 step 4) | **No.** `creator` is neither signer nor writable; only the payer (launcher) and the new mint sign. Creator fees accrue on-chain to a vault `PDA([creator, quote_mint])` and the creator claims them with `claim_creator_fee`. Option (a) works with no user signature at all. | Source | idl `raydium_launchpad.json:2512-2522`; sdk `instrument.ts:298-299`, `pda.ts:70-71`; docs `products/launchlab/instructions.mdx:98-99` |
+| 6 | Claiming platform fees (§3.3) | `claim_platform_fee_from_vault` sweeps **one vault per platform and quote mint**, `PDA([platform_config, quote_mint])`, signed by `platform_fee_wallet` (SDK `claimVaultPlatformFee`). The per-pool `claim_platform_fee` is the legacy path. Per-coin amounts come from `TradeEvent.platform_fee` in the indexer. | Source; whether new trades still bump `PoolState.platform_fee` is On-chain | idl `:732-910`, `:565-730`; sdk `launchpad.ts:1846-1893`, `pda.ts:62-64` |
+| 7 | Locked-LP / Fee Key fees after graduation (§3.2) | At `migrate_to_cpswap` the LP share `platform_scale + creator_scale` is locked into **one Fee Key NFT owned by `platform_nft_wallet`**, and the rest is burned. Fees are harvested with `raydium.cpmm.harvestLockLp` (LP-lock `collectCpFee`), signed by the Fee Key owner; `lpFeeAmount` comes from Raydium's API. Fees arrive in SOL **and** the memecoin. Migrated CPMM pools also have the CPMM **creator fee** enabled, paid to `platform_cp_creator` (or the launch creator if unset). | Source (SDK, CPMM), Docs (LaunchLab side) | docs `reference/changelog/2026-08-17-launchlab-cpmm-only-platform-config.mdx:16,37`; sdk `cpmm/cpmm.ts:910-1024`; cp-swap `instructions/initialize_with_permission.rs:357-372` |
+| 8 | Curve supply and graduation (§3.1) | 1B supply, 793.1M on the curve, 206.9M to the pool, 85 SOL raised, 6 decimals are the **SDK defaults** (`LaunchpadPoolInitParam`), not just StonkFun's choice. Graduation price is 85 / 206.9M SOL per token, so graduation FDV ≈ **410.8 SOL**. "$48k" only holds at SOL ≈ $117. Progress = `real_base / total_base_sell`. | Source | sdk `launchpad.ts:100-111`, `curve/constantProductCurve.ts:88-126`; idl PoolState `:5700,5738,5759` |
+| 9 | Jito bundles (§3.5) | `sendBundle` POST to `https://<region>.mainnet.block-engine.jito.wtf/api/v1/bundles` with params `[[base64 txs], {"encoding":"base64"}]` (default is still deprecated base58). Max 5 txs. Tip = SOL transfer ≥ 1,000 lamports to one of 8 tip accounts from `getTipAccounts`, **inside the main tx**, never via an address lookup table. 1 req/s per IP per region, no key needed. Bundles aren't broadcast by Jito, but an uncled block can unbundle them, so every tx must be safe alone. | Source | jito-docs `docs/source/lowlatencytxnsend.md:25,81,172,178-179,574-579,637,688-696` |
+| 10 | Jupiter SOL → xStocks (§3.3) | Swap API v1 is unmaintained. Use `https://api.jup.ag/swap/v2/build?…&forJitoBundle=true` for instructions we can bundle (Metis routing only; no CU-limit ix included; `priceImpactPct` is a decimal ratio). `/order` + `/execute` is landed by Jupiter and can't be bundled; that's also the only path to the RFQ market makers who mint xStocks just in time. Whether `/build` routes into xStocks at our sizes needs a live quote. | Source; routing is On-chain/live | jup-docs `swap/v1/index.mdx:9-11`, `swap/index.mdx:79,213`, `openapi-spec/swap/v2/swap.yaml:556-563,597-599` |
+| 11 | xStocks mints | SPYx `XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W` and NVDAx `Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh` match HANDOFF. All 11 stock mints are listed with citations in the detail file; each appears in two independent registries. Token-2022 with Scaled UI Amount, Pausable, Permanent Delegate, Default Account State, Transfer Hook (disabled). Decimals 8 per Trust Wallet. Offered to non-U.S. persons only. | Source (registries), Docs (extensions), On-chain (issuer list, extensions) | sf-tokens `packages/asset-registry/src/data/list-mints.ts:139,242`; solana-com `case-study-xstocks.mdx:165-174,27` |
+| 12 | Holder snapshot (§3.3 step 5) | Helius DAS `getTokenAccounts {mint, limit, cursor, options.showZeroBalance}`. For `getProgramAccounts` on Token-2022, filter `memcmp` offset 0 = mint with **no** `dataSize` (extended accounts are longer than 165 bytes). | Source | helius-sdk `src/types/das.ts:643-662`; token-2022 `interface/src/extension/mod.rs:311-314` |
+
+## Where the sources contradict HANDOFF.md
+
+1. **Curve fees aren't held per pool** (§1 table, §3.3 step 1). Platform fees for every Divvy coin go into one platform vault per quote mint. Each coin's share is still exact, but it comes from indexed `TradeEvent.platform_fee` values, not from a per-pool balance. Creator fees likewise go to one vault per creator, shared across that creator's coins.
+2. **The protocol fee is added on top** of the platform and creator fees (§3.2). The platform fee has to be sized so the three add up to 1%.
+3. **`CRRS5ieQmBrZjWhcj99JuGrT5tyuWDaGAXLXLFjbAtjQ` is CPMM AmmConfig index 11** (derived offline from the CPMM seed). The docs name index 0, `D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2`, as the 0.25% tier. CRRS5's rates are unknown until read on-chain.
+4. **After graduation the money is smaller and split differently** (§3.2). The Fee Key earns only the LP share of the CPMM trade fee, in both SOL and the memecoin. The CPMM creator fee is a separate stream to `platform_cp_creator`, and Raydium takes a protocol cut of it since 2026-09-19. The dividend engine will need to swap the memecoin leg to SOL.
+5. **The creator doesn't sign the create** (§3.1). Option (a) needs no user signature.
+6. **`requires_platform_auth` was removed** in the 2026-08-17 LaunchLab release (docs only). Platforms now manage access themselves with `restrict_global_config` and `PlatformAllowConfig`. We probably don't need to contact Raydium, but deployment of that release is unconfirmed.
+7. **"Graduates at $48k" depends on the SOL price.** Graduation is at ≈ 410.8 SOL FDV. `/api/config` should compute the USD figure live.
+8. **The SDK has no IDL** (§4 table). The IDL lives in `raydium-io/raydium-idl`, and that copy predates the 2026-08/09 changes; decode with SDK 0.2.75 layouts instead.
+9. **`createLaunchpad()` can't build Divvy's create**; use the `initializeWithToken2022` builder.
+10. **Jupiter v1 parameters named in HANDOFF don't exist on v2 `/build`** (`restrictIntermediateTokens`, `onlyDirectRoutes`, `dynamicSlippage`, `prioritizationFeeLamports`).
+11. **xStocks aren't plain tokens.** The issuer can pause transfers or move tokens from any account (permanent delegate). Their balances are scaled for corporate actions, and they already reinvest the stock's own dividends through that multiplier. Every transfer must be `transferChecked`. Holders in restricted countries (including the US) are a legal question, not just a geofence (HANDOFF §10).
+
+## Read-only checks to run with an RPC
+
+None of these sign or spend anything. They need `RPC_URL` (any mainnet RPC; Helius is fine).
+
+```bash
+cd packages/solana
+RPC_URL=… pnpm tsx scripts/phase0/read-launchlab-configs.ts            # GlobalConfigs, StonkFun PlatformConfigs, CPMM configs, upgrade markers
+RPC_URL=… pnpm tsx scripts/phase0/read-launchlab-configs.ts --pool-of 6BwHHDg3u1854jC8PDLXvR4spTcLNaoBxLJNGC4nTESt
+RPC_URL=… pnpm tsx scripts/phase0/fetch-xstocks.ts                      # mints, decimals, extensions, paused flag
+JUP_API_KEY=… pnpm tsx scripts/phase0/jupiter-quote-xstock.ts --mint Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh --lamports 1000000000
+pnpm tsx scripts/phase0/jito-bundle.ts tip-accounts
+```
+
+They answer: the `trade_fee_rate` on the SOL GlobalConfig, StonkFun's actual fee setup, CRRS5 vs D4FP rates, whether the August–September LaunchLab releases are live, the xStocks on-chain extensions, and whether Jupiter `/build` routes into xStocks.
+
+## Scripts that spend SOL (owner approval required)
+
+Both default to a dry run (build and simulate). They only send with `--send` **and** `I_HAVE_OWNER_APPROVAL=yes`, and neither has been run.
+
+| Script | What it would do | Cost |
+|---|---|---|
+| `scripts/phase0/create-platform-config.ts` | Create Divvy's PlatformConfig: `fee_rate` 6000, `creator_fee_rate` 1500, scales 1e6/0/0, CPMM config D4FP… (index 0). One PlatformConfig per admin wallet. | Rent for a 944-byte account (≈ 0.0075 SOL) + fees |
+| `scripts/phase0/test-launch.ts` | One create-only test coin on our PlatformConfig. Dry run uses a throwaway mint; `--send` uses a fresh mint and a Jito bundle with the tip inside the tx. Never sent through an RPC. | Pool and mint rent paid by the launcher + Jito tip (default 0.0001 SOL) |

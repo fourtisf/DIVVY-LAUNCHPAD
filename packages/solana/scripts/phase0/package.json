@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "commonjs",
+  "description": "Phase 0 verification scripts. CommonJS so the require.main entry checks work under tsx."
+}
