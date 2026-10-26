@@ -18,6 +18,8 @@ export interface StockArt {
   mono: string;
   bg: string;
   fg: string;
+  /** The token's own icon (same origin); the face falls back to the initials without it. */
+  logo?: string | null;
 }
 
 const FONT_D = "'Clash Display','Plus Jakarta Sans',system-ui,sans-serif";
@@ -119,7 +121,42 @@ function logoFace(): HTMLCanvasElement {
   });
 }
 
-function stockFace(s: StockArt): HTMLCanvasElement {
+function loadImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => res(null);
+    img.src = src;
+  });
+}
+
+/** A stock coin's face: the token's icon with a gloss and a thin ring, or the initials face. */
+async function stockFace(s: StockArt): Promise<HTMLCanvasElement> {
+  const img = s.logo ? await loadImage(s.logo) : null;
+  if (!img) return monoFace(s);
+  return hiCanvas((g) => {
+    g.save();
+    g.beginPath();
+    g.arc(256, 256, 256, 0, 7);
+    g.clip();
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, 0, 0, 512, 512);
+    const sh = g.createRadialGradient(170, 140, 10, 256, 256, 300);
+    sh.addColorStop(0, "rgba(255,255,255,.38)");
+    sh.addColorStop(0.5, "rgba(255,255,255,.04)");
+    sh.addColorStop(1, "rgba(0,0,0,.28)");
+    g.fillStyle = sh;
+    g.fillRect(0, 0, 512, 512);
+    g.restore();
+    g.strokeStyle = "rgba(255,255,255,.55)";
+    g.lineWidth = 5;
+    g.beginPath();
+    g.arc(256, 256, 240, 0, 7);
+    g.stroke();
+  });
+}
+
+function monoFace(s: StockArt): HTMLCanvasElement {
   return hiCanvas((g) => {
     g.fillStyle = s.bg;
     g.fillRect(0, 0, 512, 512);
@@ -406,13 +443,14 @@ async function fontsReady() {
 /** Hero: the uspad coin with six stock coins orbiting it and a field of sparkles. Click spins it. */
 export async function heroScene(host: HTMLElement, featured: StockArt[]): Promise<Stop> {
   await fontsReady();
+  const faces = await Promise.all(featured.map(stockFace));
   if (!host.isConnected) return () => {};
   const S = baseScene(host, { fov: 30, z: 10.5 });
   S.scene.fog = new THREE.Fog(0x0a0f0d, 9.5, 15);
   const main = buildCoin(logoFace(), logoFace(), { r: 1.5 });
   S.scene.add(main);
   const sats = featured.map((s, i) => {
-    const f = stockFace(s);
+    const f = faces[i]!;
     const m = buildCoin(f, f, { r: 0.44, metal: new THREE.Color(s.bg).lerp(new THREE.Color(0xffffff), 0.2).getHex() });
     S.scene.add(m);
     return { m, a: (i / featured.length) * Math.PI * 2, w: 0.5 + i * 0.13 };
@@ -471,7 +509,7 @@ export async function heroScene(host: HTMLElement, featured: StockArt[]): Promis
 export async function coinScene(host: HTMLElement, src: string, back: StockArt | null, { mode = "flip", label = "" }: { mode?: "flip" | "spin"; label?: string } = {}): Promise<Stop> {
   await fontsReady();
   const front = await imageFace(src, label);
-  const backC = back ? stockFace(back) : logoFace();
+  const backC = back ? await stockFace(back) : logoFace();
   if (!host.isConnected) return () => {};
   const S = baseScene(host, { fov: 30, z: mode === "spin" ? 5.6 : 5.2 });
   const coin = buildCoin(front, backC, { r: 1.15 });

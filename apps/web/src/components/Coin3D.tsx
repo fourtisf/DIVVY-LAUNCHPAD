@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DividendAsset } from "@divvy/shared";
 import type { StockArt } from "@/three/scenes";
+import { stockLogo } from "@/lib/logos";
 
-export const toArt = (a: DividendAsset): StockArt => ({ symbol: a.symbol, name: a.name, mono: a.mono, bg: a.chipBg, fg: a.chipFg });
+export const toArt = (a: DividendAsset): StockArt => ({ symbol: a.symbol, name: a.name, mono: a.mono, bg: a.chipBg, fg: a.chipFg, logo: stockLogo(a.symbol) });
 
 type Load = () => Promise<typeof import("@/three/scenes")>;
 const load: Load = () => import("@/three/scenes");
