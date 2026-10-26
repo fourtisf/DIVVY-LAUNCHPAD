@@ -95,6 +95,7 @@ export function buildConfig(): Config {
         enabled: true,
       };
     }),
+    flags: { xOAuth: false, trading: false },
   };
 }
 

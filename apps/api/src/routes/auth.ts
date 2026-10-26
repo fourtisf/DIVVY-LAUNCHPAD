@@ -63,7 +63,10 @@ export function makeSessionLookup(store: MockStore): SessionLookup {
   };
 }
 
-export async function authRoutes(app: FastifyInstance, { store, env, kv, session }: { store: MockStore; env: Env; kv: Kv; session: SessionLookup }) {
+export async function authRoutes(
+  app: FastifyInstance,
+  { store, env, kv, session, adminWallets }: { store: MockStore; env: Env; kv: Kv; session: SessionLookup; adminWallets: Set<string> },
+) {
   const origin = new URL(env.WEB_ORIGIN);
 
   app.get<{ Querystring: { address?: string } }>("/api/auth/nonce", async (req, reply) => {
@@ -111,7 +114,7 @@ export async function authRoutes(app: FastifyInstance, { store, env, kv, session
     const s = session(req);
     const today = new Date().setUTCHours(0, 0, 0, 0);
     const launchesToday = s ? [...store.launches.values()].filter((l) => l.coin.creatorWallet === s.wallet && l.startedAt >= today).length : 0;
-    return { wallet: s?.wallet ?? null, x: null, launchesToday, launchesLeftToday: Math.max(0, 3 - launchesToday), claimable: [] };
+    return { wallet: s?.wallet ?? null, isAdmin: !!s && adminWallets.has(s.wallet), x: null, launchesToday, launchesLeftToday: Math.max(0, 3 - launchesToday), claimable: [] };
   });
 
   // X OAuth 2.0 linking is Phase 2. The routes exist so the contract is complete.

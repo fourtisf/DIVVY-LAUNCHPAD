@@ -53,7 +53,7 @@ export function programs(cluster: Cluster) {
 }
 
 export function loadSolanaEnv(src: NodeJS.ProcessEnv = process.env): SolanaEnv {
-  const e = Env.parse(src);
+  const e = Env.parse(Object.fromEntries(Object.entries(src).filter(([, v]) => v !== undefined && v !== "")));
   return {
     cluster: e.SOLANA_CLUSTER,
     rpcUrl: e.SOLANA_RPC_URL,

@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Launch" ADD COLUMN     "attempts" INTEGER NOT NULL DEFAULT 0,
+ALTER COLUMN "mintPubkey" DROP NOT NULL;
+

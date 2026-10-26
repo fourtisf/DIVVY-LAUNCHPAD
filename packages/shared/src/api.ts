@@ -92,6 +92,12 @@ export const ConfigSchema = z.object({
   }),
   quote: z.object({ symbol: z.literal("SOL"), mint: base58, decimals: z.literal(9), priceUsd: z.number() }),
   dividendAssets: z.array(DividendAssetSchema),
+  flags: z.object({
+    /** X accounts are linked with OAuth 2.0 (live). Off in demo mode, where the handle is typed. */
+    xOAuth: z.boolean(),
+    /** The trade box builds real transactions for the wallet to sign. */
+    trading: z.boolean(),
+  }),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -319,6 +325,7 @@ export const NonceResponseSchema = z.object({ nonce: z.string(), message: z.stri
 export const VerifyRequestSchema = z.object({ address: base58, signature: z.string().min(1), nonce: z.string().min(1) });
 export const MeSchema = z.object({
   wallet: base58.nullable(),
+  isAdmin: z.boolean(),
   x: z.object({ userId: z.string(), handle: z.string() }).nullable(),
   launchesToday: z.number().int(),
   launchesLeftToday: z.number().int(),
@@ -353,3 +360,69 @@ export const ClaimsSchema = z.object({
 });
 export const ClaimBuildRequestSchema = z.object({ assetSymbol: z.string().min(1) });
 export const ClaimBuildResponseSchema = z.object({ tx: z.string().nullable() });
+
+/* ---------- signed-in extras: payouts, creator fees, reports ---------- */
+
+export const MyPayoutsSchema = z.object({
+  items: z.array(
+    z.object({
+      coin: z.object(coinRef),
+      hour: iso,
+      assetSymbol: z.string(),
+      amount: AmountSchema,
+      usd: z.number(),
+      status: z.enum(["credited", "sent", "claimed"]),
+      sig: z.string().nullable(),
+    }),
+  ),
+  nextCursor: z.string().nullable(),
+});
+export type MyPayouts = z.infer<typeof MyPayoutsSchema>;
+
+export const CreatorInfoSchema = z.object({
+  wallet: base58,
+  /** SOL waiting in the creator's LaunchLab fee vault (all their coins together). */
+  claimable: AmountSchema,
+  coins: z.array(z.object({ ...coinRef, name: z.string(), status: z.enum(["pending", "live", "graduated", "failed"]), creatorFees: AmountSchema })),
+});
+export type CreatorInfo = z.infer<typeof CreatorInfoSchema>;
+
+export const UnsignedTxSchema = z.object({ tx: z.string() });
+
+export const ReportRequestSchema = z.object({
+  reason: z.enum(["copy", "scam", "nsfw", "illegal", "other"]),
+  details: z.string().max(500).default(""),
+});
+
+/* ---------- admin ---------- */
+
+export const AdminOverviewSchema = z.object({
+  launchesOpen: z.boolean(),
+  launchesPausedReason: z.string().nullable(),
+  wallets: z.array(z.object({ role: z.string(), address: base58, sol: z.number(), lowBalance: z.boolean() })),
+  pendingLaunches: z.number().int(),
+  openReports: z.number().int(),
+  lateRounds: z.number().int(),
+  indexerLagSec: z.number().nullable(),
+  mainnetEnabled: z.boolean(),
+  dryRun: z.boolean(),
+});
+export type AdminOverview = z.infer<typeof AdminOverviewSchema>;
+
+export const AdminReportListSchema = z.object({
+  items: z.array(
+    z.object({
+      id: z.string(),
+      coin: z.object({ ...coinRef, name: z.string(), hidden: z.boolean() }),
+      reason: z.string(),
+      details: z.string(),
+      status: z.enum(["open", "resolved", "dismissed"]),
+      createdAt: iso,
+    }),
+  ),
+});
+export type AdminReportList = z.infer<typeof AdminReportListSchema>;
+
+export const AdminSettingsRequestSchema = z.object({ launchesOpen: z.boolean(), reason: z.string().max(200).nullable().default(null) });
+export const AdminHideRequestSchema = z.object({ hidden: z.boolean(), reason: z.string().max(200).nullable().default(null) });
+export const AdminReportUpdateSchema = z.object({ status: z.enum(["open", "resolved", "dismissed"]) });

@@ -428,4 +428,4 @@ export function parseLaunchLabTransaction(tx: VersionedTransactionResponse, laun
   return out;
 }
 
-export { TOKEN_2022_PROGRAM_ID, NATIVE_MINT };
+export { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, NATIVE_MINT };

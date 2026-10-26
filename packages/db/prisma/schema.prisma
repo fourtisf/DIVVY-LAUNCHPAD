@@ -225,6 +225,8 @@ model CoinStats {
   paidUsd           Float     @default(0)
   paid24hAsset      BigInt    @default(0)
   paid24hUsd        Float     @default(0)
+  /// Last 28 market-cap points (USD) for the board card sparkline, oldest first.
+  spark             Json      @default("[]")
   lastTradeAt       DateTime?
   updatedAt         DateTime  @updatedAt
 
@@ -259,10 +261,11 @@ model Launch {
   coinId     String?    @unique
   coin       Coin?      @relation(fields: [coinId], references: [id])
   step       LaunchStep @default(checking)
-  /// Public key only. Secret until the create lands: the API must not return it before step = landed.
-  /// The mint secret key is held in memory for the bundle and never stored.
-  mintPubkey String     @unique
+  /// Public key only, set by the worker. Secret until the create lands: the API must not return it
+  /// before step = landed. The mint secret key lives in worker memory for the bundle and is never stored.
+  mintPubkey String?    @unique
   bundleId   String?
+  attempts   Int        @default(0)
   signature  String?
   /// { code, message, collidesWith } when step = failed.
   error      Json?
@@ -452,11 +455,13 @@ model PayoutItem {
 }
 
 model HolderBalance {
-  coinId       String
-  coin         Coin     @relation(fields: [coinId], references: [id])
-  wallet       String
-  balance      BigInt
-  snapshotHour DateTime
+  coinId         String
+  coin           Coin     @relation(fields: [coinId], references: [id])
+  wallet         String
+  balance        BigInt
+  snapshotHour   DateTime
+  /// Set for accounts left out of payouts: curve | pool | launcher | divvy | burn.
+  excludedReason String?
 
   @@id([coinId, snapshotHour, wallet])
   @@index([wallet])

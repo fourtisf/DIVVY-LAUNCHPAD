@@ -1,0 +1,203 @@
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { PublicKey } from "@solana/web3.js";
+import { Prisma } from "@divvy/db";
+import {
+  checkImageFile,
+  checkName,
+  checkTicker,
+  checkX,
+  displayTicker,
+  foldName,
+  foldTicker,
+  hamming,
+  IMAGE_HAMMING_LIMIT,
+  IMAGE_MAX_BYTES,
+  imageCollision,
+  imageOk,
+  KEYS,
+  LaunchRequestSchema,
+  normalizeXHandle,
+  type CheckResponse,
+  type CheckResult,
+  type LaunchStatus,
+  type UploadResponse,
+} from "@divvy/shared";
+import { getLaunchSettings } from "@divvy/server";
+import { sendCheckFailure, sendError } from "../../errors";
+import { processImage } from "../../media";
+import type { LiveDeps } from "../deps";
+import { antiVampContexts, identityOf, invalidateBoard, invalidatePictures, pictureCandidates } from "../data";
+import { refuseBlockedCountry, requireViewer } from "../viewer";
+
+export async function runChecks(d: LiveDeps, q: { ticker?: string; name?: string; x?: string }): Promise<CheckResponse> {
+  const ctx = await antiVampContexts(d);
+  const out: CheckResponse = {};
+  if (q.ticker !== undefined) {
+    const { hit, reserved } = await ctx.ticker(foldTicker(q.ticker));
+    out.ticker = checkTicker(q.ticker, { findByTickerNorm: () => hit, isReserved: () => reserved });
+  }
+  if (q.name !== undefined) {
+    const candidates = await ctx.nameCandidates(q.name);
+    out.name = checkName(q.name, { candidates: () => candidates });
+  }
+  if (q.x !== undefined) {
+    const h = normalizeXHandle(q.x);
+    const hit = h ? await ctx.xHandle(h) : undefined;
+    out.x = checkX(q.x, { findByX: () => hit });
+  }
+  return out;
+}
+
+export async function checkPicture(d: LiveDeps, sha256: string, phash: string): Promise<CheckResult> {
+  const rows = await pictureCandidates(d);
+  const exact = rows.find((r) => r.imageSha256 === sha256);
+  if (exact) return imageCollision(identityOf(exact), true);
+  const near = rows.find((r) => hamming(r.imagePhash, phash) <= IMAGE_HAMMING_LIMIT);
+  return near ? imageCollision(identityOf(near), false) : imageOk();
+}
+
+const Website = z.union([z.literal(""), z.string().url().max(200).refine((u) => /^https?:\/\//i.test(u), "http(s) only")]);
+const Telegram = z.union([z.literal(""), z.string().regex(/^(?:https:\/\/)?t\.me\/[A-Za-z0-9_]{5,32}$|^@[A-Za-z0-9_]{5,32}$/)]);
+const tgUrl = (t: string) => (!t ? null : t.startsWith("@") ? `https://t.me/${t.slice(1)}` : t.startsWith("https://") ? t : `https://${t}`);
+
+/** Maps a unique-constraint race to the same error contract as the checks. */
+function uniqueViolation(e: unknown): { code: string; message: string } | null {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return null;
+  const target = String((e.meta?.target as string[] | string | undefined) ?? "");
+  if (target.includes("tickerNorm")) return { code: "TICKER_TAKEN", message: "That ticker was just taken" };
+  if (target.includes("imageSha256") || target.includes("uploadId")) return { code: "IMAGE_DUPLICATE", message: "That picture was just used by another coin" };
+  if (target.includes("creatorXUserId")) return { code: "X_TAKEN", message: "This X account already launched a coin" };
+  return { code: "CONFLICT", message: "Something about this coin was just taken. Check the form again." };
+}
+
+export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDeps }) {
+  app.get("/api/check", { config: { rateLimit: { max: 240, timeWindow: "1 minute" } } }, async (req, reply) => {
+    const q = z.object({ ticker: z.string().max(64).optional(), name: z.string().max(64).optional(), x: z.string().max(64).optional() }).safeParse(req.query);
+    if (!q.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid check");
+    return runChecks(d, q.data);
+  });
+
+  app.post("/api/upload", { config: { rateLimit: { max: 30, timeWindow: "1 hour" } } }, async (req, reply): Promise<UploadResponse | void> => {
+    const v = await requireViewer(d, req, reply);
+    if (!v) return;
+    const file = await req.file({ limits: { fileSize: IMAGE_MAX_BYTES, files: 1 } });
+    if (!file) return sendError(reply, 400, "IMAGE_MISSING", "Upload a picture");
+    const buf = await file.toBuffer().catch(() => null);
+    if (!buf || file.file.truncated) return sendError(reply, 413, "IMAGE_SIZE", "That file is over 8 MB");
+    const gate = checkImageFile(file.mimetype, buf.length);
+    if (gate) return sendCheckFailure(reply, gate);
+    let img;
+    try {
+      img = await processImage(buf);
+    } catch {
+      return sendError(reply, 415, "IMAGE_TYPE", "Use a PNG, JPG, WEBP or GIF");
+    }
+    // Content-addressed key: the same picture always lands on the same object.
+    const key = `img/${img.sha256.slice(0, 2)}/${img.sha256}.webp`;
+    const url = await d.storage.put(key, img.webp, "image/webp");
+    const row = await d.prisma.upload.create({
+      data: { sha256: img.sha256, imagePhash: img.phash, url, storageKey: key, contentType: "image/webp", bytes: img.webp.length, ownerUserId: v.userId },
+    });
+    return { imageId: row.id, url, sha256: img.sha256, check: await checkPicture(d, img.sha256, img.phash) };
+  });
+
+  app.post("/api/launch", { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } }, async (req, reply) => {
+    const v = await requireViewer(d, req, reply);
+    if (!v) return;
+    if (await refuseBlockedCountry(d, req, reply)) return;
+    const settings = await getLaunchSettings(d.prisma);
+    if (!settings.launchesOpen) return sendError(reply, 503, "LAUNCHES_PAUSED", settings.reason ?? "Launches are paused for now");
+
+    const parsed = LaunchRequestSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(reply, 400, "BAD_REQUEST", "Some launch fields are missing or too long");
+    const b = parsed.data;
+    const web = Website.safeParse(b.website ?? "");
+    const tg = Telegram.safeParse(b.telegram ?? "");
+    if (!web.success) return sendError(reply, 422, "BAD_WEBSITE", "The website must be an http(s) link");
+    if (!tg.success) return sendError(reply, 422, "BAD_TELEGRAM", "Use a t.me link or @group for Telegram");
+
+    // Rate limits (HANDOFF §6): cooldown, per wallet per day, global per day.
+    const p = d.params;
+    if (await d.redis.exists(KEYS.launchCooldown(v.wallet))) return sendError(reply, 429, "COOLDOWN", "Wait a couple of minutes between launches");
+    const dayStart = new Date(new Date().setUTCHours(0, 0, 0, 0));
+    const [mine, all] = await Promise.all([
+      d.prisma.launch.count({ where: { userId: v.userId, createdAt: { gte: dayStart }, step: { not: "failed" } } }),
+      d.prisma.launch.count({ where: { createdAt: { gte: dayStart }, step: { not: "failed" } } }),
+    ]);
+    if (mine >= p.launchesPerWalletPerDay) return sendError(reply, 429, "DAILY_LIMIT", `You can launch ${p.launchesPerWalletPerDay} coins a day`);
+    if (all >= p.launchesPerDayGlobal) return sendError(reply, 429, "GLOBAL_LIMIT", "Divvy hit today's launch limit. Try again tomorrow.");
+
+    // Abuse guard for free launches: a linked X account, or a funded wallet.
+    if (!v.xUserId) {
+      const lamports = await d.conn.getBalance(new PublicKey(v.wallet)).catch(() => 0);
+      if (BigInt(lamports) < p.launchMinWalletLamports)
+        return sendError(reply, 403, "NEEDS_X_OR_SOL", `Link your X account, or hold at least ${Number(p.launchMinWalletLamports) / 1e9} SOL in this wallet, to launch for free`);
+    }
+
+    // The server is the authority: every check runs again here.
+    const checks = await runChecks(d, { ticker: b.ticker, name: b.name });
+    if (checks.ticker!.status !== "ok") return sendCheckFailure(reply, checks.ticker as CheckResult);
+    if (checks.name!.status !== "ok") return sendCheckFailure(reply, checks.name as CheckResult);
+    const up = await d.prisma.upload.findUnique({ where: { id: b.imageId } });
+    if (!up || up.ownerUserId !== v.userId) return sendError(reply, 422, "IMAGE_EMPTY", "Upload a picture");
+    const pic = await checkPicture(d, up.sha256, up.imagePhash);
+    if (pic.status !== "ok") return sendCheckFailure(reply, pic);
+    const asset = await d.prisma.dividendAsset.findFirst({ where: { symbol: b.dividendAsset, enabled: true } });
+    if (!asset) return sendError(reply, 422, "ASSET_UNKNOWN", "Pick a stock from the list");
+
+    let launchId: string;
+    try {
+      launchId = await d.prisma.$transaction(async (tx) => {
+        // Unique indexes on tickerNorm, imageSha256, uploadId and creatorXUserId make this race-safe.
+        const coin = await tx.coin.create({
+          data: {
+            ticker: displayTicker(b.ticker),
+            tickerNorm: foldTicker(b.ticker),
+            name: b.name.trim(),
+            nameNorm: foldName(b.name),
+            description: b.description,
+            imageUrl: up.url,
+            imageSha256: up.sha256,
+            imagePhash: up.imagePhash,
+            uploadId: up.id,
+            dividendAssetId: asset.id,
+            creatorUserId: v.userId,
+            creatorWallet: v.wallet,
+            creatorXUserId: v.xUserId,
+            status: "pending",
+            links: { website: web.data || undefined, telegram: tgUrl(tg.data) ?? undefined, x: v.xHandle ? `https://x.com/${v.xHandle}` : undefined },
+          },
+        });
+        const launch = await tx.launch.create({ data: { userId: v.userId, coinId: coin.id, step: "checking", request: b as unknown as Prisma.InputJsonValue } });
+        return launch.id;
+      });
+    } catch (e) {
+      const u = uniqueViolation(e);
+      if (u) return sendError(reply, 422, u.code, u.message);
+      throw e;
+    }
+    await d.redis.set(KEYS.launchCooldown(v.wallet), "1", "EX", p.launchCooldownSec || 1);
+    await d.queues.launch.add("create", { launchId }, { jobId: launchId, attempts: 1, removeOnComplete: 1000, removeOnFail: 1000 });
+    invalidatePictures();
+    invalidateBoard();
+    return reply.code(201).send({ launchId });
+  });
+
+  app.get<{ Params: { id: string } }>("/api/launch/:id", async (req, reply): Promise<LaunchStatus | void> => {
+    if (!/^[a-z0-9]{20,40}$/.test(req.params.id)) return sendError(reply, 404, "LAUNCH_NOT_FOUND", "No such launch");
+    const l = await d.prisma.launch.findUnique({ where: { id: req.params.id }, include: { coin: true } });
+    if (!l || !l.coin) return sendError(reply, 404, "LAUNCH_NOT_FOUND", "No such launch");
+    const out: LaunchStatus = { id: l.id, step: l.step, ticker: l.coin.ticker };
+    // The mint is revealed only once the create has landed (HANDOFF §3.5).
+    if ((l.step === "landed" || l.step === "indexed") && l.coin.mint) {
+      out.mint = l.coin.mint;
+      if (l.signature) out.signature = l.signature;
+    }
+    if (l.step === "failed") {
+      const e = (l.error ?? {}) as { code?: string; message?: string };
+      out.error = { code: e.code ?? "LAUNCH_FAILED", message: e.message ?? "The launch failed. Nothing was created.", collidesWith: null };
+    }
+    return out;
+  });
+}
