@@ -1,0 +1,134 @@
+/**
+ * Jupiter Swap API v2 and Price API v3 (jup-ag/docs@0066fde):
+ * - GET /swap/v2/build returns raw instructions we can put in our own transaction or Jito bundle;
+ *   forJitoBundle=true excludes incompatible DEXes (swap/index.mdx:213, swap.yaml:556-563).
+ * - /build has no CU-limit instruction (swap.yaml:604-608): we add one.
+ * - priceImpactPct on /build is a decimal ratio ("0.001" = 0.1%) (swap.yaml:597-599).
+ * - GET /price/v3?ids= (price/v3/price.yaml:8,24), up to 50 ids.
+ */
+import {
+  AddressLookupTableAccount,
+  ComputeBudgetProgram,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
+
+interface ApiIx {
+  programId: string;
+  accounts: { pubkey: string; isSigner: boolean; isWritable: boolean }[];
+  data: string;
+}
+
+export interface BuildResponse {
+  inputMint: string;
+  outputMint: string;
+  inAmount: string;
+  outAmount: string;
+  otherAmountThreshold: string;
+  slippageBps: number;
+  priceImpactPct: string;
+  computeBudgetInstructions: ApiIx[];
+  setupInstructions: ApiIx[];
+  swapInstruction: ApiIx;
+  cleanupInstruction: ApiIx | null;
+  otherInstructions: ApiIx[];
+  addressesByLookupTableAddress: Record<string, string[]> | null;
+  error?: string;
+}
+
+export interface BuiltSwap {
+  instructions: TransactionInstruction[];
+  lookupTables: AddressLookupTableAccount[];
+  inAmount: bigint;
+  outAmount: bigint;
+  minOut: bigint;
+  /** Price impact in basis points (from the decimal ratio). */
+  priceImpactBps: number;
+}
+
+const toIx = (i: ApiIx) =>
+  new TransactionInstruction({
+    programId: new PublicKey(i.programId),
+    keys: i.accounts.map((a) => ({ pubkey: new PublicKey(a.pubkey), isSigner: a.isSigner, isWritable: a.isWritable })),
+    data: Buffer.from(i.data, "base64"),
+  });
+
+export class JupiterClient {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly apiKey?: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  private async get<T>(path: string): Promise<T> {
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (this.apiKey) headers["x-api-key"] = this.apiKey;
+    const res = await this.fetchImpl(this.baseUrl.replace(/\/$/, "") + path, { headers });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`jupiter ${path.split("?")[0]}: HTTP ${res.status} ${text.slice(0, 200)}`);
+    return JSON.parse(text) as T;
+  }
+
+  async build(p: {
+    inputMint: string;
+    outputMint: string;
+    amount: bigint;
+    taker: PublicKey;
+    slippageBps: number;
+    forJitoBundle?: boolean;
+    destinationTokenAccount?: PublicKey;
+    cuLimit?: number;
+  }): Promise<BuiltSwap> {
+    const q = new URLSearchParams({
+      inputMint: p.inputMint,
+      outputMint: p.outputMint,
+      amount: p.amount.toString(),
+      taker: p.taker.toBase58(),
+      slippageBps: String(p.slippageBps),
+    });
+    if (p.forJitoBundle) q.set("forJitoBundle", "true");
+    if (p.destinationTokenAccount) q.set("destinationTokenAccount", p.destinationTokenAccount.toBase58());
+    const b = await this.get<BuildResponse>(`/swap/v2/build?${q}`);
+    if (b.error) throw new Error(`jupiter build: ${b.error}`);
+    const lookupTables = Object.entries(b.addressesByLookupTableAddress ?? {}).map(
+      ([key, addrs]) =>
+        new AddressLookupTableAccount({
+          key: new PublicKey(key),
+          state: { deactivationSlot: BigInt("18446744073709551615"), lastExtendedSlot: 0, lastExtendedSlotStartIndex: 0, addresses: addrs.map((a) => new PublicKey(a)) },
+        }),
+    );
+    return {
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: p.cuLimit ?? 600_000 }),
+        ...b.computeBudgetInstructions.map(toIx),
+        ...b.setupInstructions.map(toIx),
+        toIx(b.swapInstruction),
+        ...(b.cleanupInstruction ? [toIx(b.cleanupInstruction)] : []),
+        ...b.otherInstructions.map(toIx),
+      ],
+      lookupTables,
+      inAmount: BigInt(b.inAmount),
+      outAmount: BigInt(b.outAmount),
+      minOut: BigInt(b.otherAmountThreshold),
+      priceImpactBps: Math.round(Math.abs(parseFloat(b.priceImpactPct || "0")) * 10_000),
+    };
+  }
+
+  /** USD prices keyed by mint (Price API v3). Missing mints are left out. */
+  async prices(mints: string[]): Promise<Record<string, number>> {
+    const out: Record<string, number> = {};
+    for (let i = 0; i < mints.length; i += 50) {
+      const chunk = mints.slice(i, i + 50);
+      const r = await this.get<Record<string, { usdPrice?: number } | null>>(`/price/v3?ids=${chunk.join(",")}`);
+      for (const [mint, v] of Object.entries(r)) if (v?.usdPrice) out[mint] = v.usdPrice;
+    }
+    return out;
+  }
+}
+
+export function swapTransaction(payer: PublicKey, built: BuiltSwap, recentBlockhash: string, extra: TransactionInstruction[] = []): VersionedTransaction {
+  const msg = new TransactionMessage({ payerKey: payer, recentBlockhash, instructions: [...built.instructions, ...extra] }).compileToV0Message(built.lookupTables);
+  return new VersionedTransaction(msg);
+}

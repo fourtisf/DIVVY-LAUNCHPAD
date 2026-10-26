@@ -39,10 +39,38 @@ enum CandleTf {
 }
 
 enum FeeClaimKind {
-  /// Platform fee claimed from the LaunchLab curve.
-  curve_platform
   /// Fees harvested from the locked LP position (Fee Key) after graduation.
   cpmm_locked_lp
+  /// CPMM creator fee collected when platform_cp_creator is a Divvy wallet.
+  cpmm_creator
+}
+
+/// Steps of an hourly round; a retry resumes from the last completed step.
+enum RoundStep {
+  allocated
+  swapped
+  snapshotted
+  delivered
+}
+
+enum SwapStatus {
+  pending
+  sent
+  confirmed
+  failed
+  skipped
+}
+
+enum ClaimStatus {
+  pending
+  confirmed
+  expired
+}
+
+enum ReportStatus {
+  open
+  resolved
+  dismissed
 }
 
 enum RoundStatus {
@@ -78,6 +106,8 @@ model User {
   sessions  Session[]
   coins     Coin[]
   launches  Launch[]
+  uploads   Upload[]
+  reports   Report[]
 }
 
 model Session {
@@ -113,11 +143,15 @@ model DividendAsset {
   source       String
   fetchedAt    DateTime
   coins        Coin[]
+  swapBatches  SwapBatch[]
+  credits      Credit[]
+  claims       Claim[]
 }
 
 model Coin {
   id              String        @id @default(cuid())
-  mint            String        @unique
+  /// Null until the worker generates the mint keypair. Never returned by the API before the create lands.
+  mint            String?       @unique
   ticker          String
   tickerNorm      String        @unique
   name            String
@@ -126,32 +160,96 @@ model Coin {
   imageUrl        String
   imageSha256     String        @unique
   imagePhash      String
+  uploadId        String?       @unique
+  upload          Upload?       @relation(fields: [uploadId], references: [id])
+  /// Token metadata JSON (the URI in the create instruction).
+  metadataUri     String?
   dividendAssetId String
   dividendAsset   DividendAsset @relation(fields: [dividendAssetId], references: [id])
   creatorUserId   String
   creator         User          @relation(fields: [creatorUserId], references: [id])
+  /// The creator's wallet, recorded on-chain as pool_state.creator (creator fees accrue to it).
+  creatorWallet   String
   /// One coin per OAuth-verified X account (HANDOFF §5). Null when no X account is linked.
   creatorXUserId  String?       @unique
-  /// LaunchLab pool state account.
-  poolState       String        @unique
+  /// LaunchLab pool state account (PDA of the mint). Null until the mint exists.
+  poolState       String?       @unique
   cpmmPool        String?       @unique
   status          CoinStatus    @default(pending)
+  /// Hidden by moderation: kept for history, never listed.
+  hidden          Boolean       @default(false)
+  hiddenReason    String?
   createdSig      String?
   createdAt       DateTime      @default(now())
+  /// When the create landed on chain.
+  launchedAt      DateTime?
   graduatedAt     DateTime?
   /// { x?: string, telegram?: string, website?: string }
   links           Json          @default("{}")
 
-  launch          Launch?
-  trades          Trade[]
-  candles         Candle[]
-  feeClaims       FeeClaim[]
-  rounds          PayoutRound[]
-  holderBalances  HolderBalance[]
+  launch         Launch?
+  stats          CoinStats?
+  trades         Trade[]
+  candles        Candle[]
+  feeClaims      FeeClaim[]
+  allocations    FeeAllocation[]
+  rounds         PayoutRound[]
+  holderBalances HolderBalance[]
+  reports        Report[]
 
-  @@index([nameNorm])
+  /// Trigram index: prefilter for the name-similarity check (needs the pg_trgm extension).
+  @@index([nameNorm(ops: raw("gin_trgm_ops"))], type: Gin, map: "Coin_nameNorm_trgm")
   @@index([status, createdAt])
   @@index([dividendAssetId])
+  @@index([creatorWallet])
+}
+
+/// Denormalised market data, maintained by the indexer for fast board queries.
+model CoinStats {
+  coinId            String    @id
+  coin              Coin      @relation(fields: [coinId], references: [id], onDelete: Cascade)
+  /// SOL per whole token.
+  priceSol          Decimal   @default(0) @db.Decimal(38, 18)
+  marketCapUsd      Float     @default(0)
+  athUsd            Float     @default(0)
+  change24hPct      Float     @default(0)
+  volume24hLamports BigInt    @default(0)
+  volume24hUsd      Float     @default(0)
+  holders           Int       @default(0)
+  /// LaunchLab PoolState real_base / total_base_sell, in basis points.
+  progressBps       Int       @default(0)
+  realBase          BigInt    @default(0)
+  realQuote         BigInt    @default(0)
+  /// Dividend asset base units paid to holders, all time and last 24h.
+  paidAsset         BigInt    @default(0)
+  paidUsd           Float     @default(0)
+  paid24hAsset      BigInt    @default(0)
+  paid24hUsd        Float     @default(0)
+  lastTradeAt       DateTime?
+  updatedAt         DateTime  @updatedAt
+
+  @@index([marketCapUsd])
+  @@index([volume24hUsd])
+  @@index([paid24hUsd])
+}
+
+model Upload {
+  id          String   @id @default(cuid())
+  /// SHA-256 of the uploaded bytes.
+  sha256      String
+  imagePhash  String
+  /// Public URL of the re-encoded image.
+  url         String
+  storageKey  String
+  contentType String
+  bytes       Int
+  ownerUserId String?
+  owner       User?    @relation(fields: [ownerUserId], references: [id])
+  createdAt   DateTime @default(now())
+  coin        Coin?
+
+  @@index([sha256])
+  @@index([createdAt])
 }
 
 model Launch {
@@ -190,10 +288,19 @@ model Trade {
   wallet      String
   /// SOL per whole token.
   priceSol    Decimal   @db.Decimal(38, 18)
+  /// Fees from the LaunchLab TradeEvent, in lamports. platformFee drives per-coin attribution
+  /// of the shared platform vault (docs/VERIFIED.md item 6).
+  protocolFee BigInt    @default(0)
+  platformFee BigInt    @default(0)
+  creatorFee  BigInt    @default(0)
+  shareFee    BigInt    @default(0)
+  /// "curve" (LaunchLab) or "cpmm" (after graduation).
+  venue       String    @default("curve")
   slot        BigInt
   ts          DateTime
 
   @@unique([sig, ix])
+  @@index([slot])
   @@index([coinId, ts])
   @@index([wallet, ts])
 }
@@ -214,49 +321,116 @@ model Candle {
   @@id([coinId, tf, ts])
 }
 
+/// Per-coin claims after graduation (Fee Key harvests, CPMM creator fees).
 model FeeClaim {
   id              String       @id @default(cuid())
   coinId          String
   coin            Coin         @relation(fields: [coinId], references: [id])
   kind            FeeClaimKind
-  sig             String       @unique
+  sig             String
+  /// SOL received (the memecoin leg is swapped to SOL first; see memecoinSwapSig).
   lamports        BigInt
-  holdersLamports BigInt
-  creatorLamports BigInt
-  divvyLamports   BigInt
-  /// The round that spent the holders' bucket. Null while it is carried forward.
-  roundId         String?
-  round           PayoutRound? @relation(fields: [roundId], references: [id])
-  ts              DateTime
+  memecoinAmount  BigInt       @default(0)
+  memecoinSwapSig String?
+  ts              DateTime     @default(now())
 
+  @@unique([sig, coinId, kind])
   @@index([coinId, ts])
 }
 
+/// One claim_platform_fee_from_vault transaction (the vault is shared by every Divvy coin).
+model VaultClaim {
+  id                   String          @id @default(cuid())
+  hour                 DateTime
+  dryRun               Boolean         @default(false)
+  sig                  String?         @unique
+  /// Lamports actually received from the vault.
+  lamports             BigInt
+  /// Trades with fromSlot < slot <= toSlot were attributed by this claim.
+  fromSlot             BigInt
+  toSlot               BigInt
+  /// lamports minus the indexed platform fees in range. Non-zero means missed trades: alert.
+  unattributedLamports BigInt          @default(0)
+  createdAt            DateTime        @default(now())
+  allocations          FeeAllocation[]
+
+  @@unique([hour, dryRun])
+}
+
+/// A coin's share of a vault claim (or of a post-graduation FeeClaim), split into Divvy's buckets.
+model FeeAllocation {
+  id              String       @id @default(cuid())
+  coinId          String
+  coin            Coin         @relation(fields: [coinId], references: [id])
+  vaultClaimId    String?
+  vaultClaim      VaultClaim?  @relation(fields: [vaultClaimId], references: [id])
+  feeClaimId      String?
+  lamports        BigInt
+  holdersLamports BigInt
+  creatorLamports BigInt       @default(0)
+  divvyLamports   BigInt
+  /// The round that spent the holders' bucket. Null while carried forward.
+  roundId         String?
+  round           PayoutRound? @relation(fields: [roundId], references: [id])
+  dryRun          Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+
+  @@unique([vaultClaimId, coinId])
+  @@unique([feeClaimId, coinId])
+  @@index([coinId, roundId])
+}
+
+/// One Jupiter swap per dividend asset per hour, shared by every coin paying that asset.
+model SwapBatch {
+  id             String        @id @default(cuid())
+  assetId        String
+  asset          DividendAsset @relation(fields: [assetId], references: [id])
+  hour           DateTime
+  dryRun         Boolean       @default(false)
+  status         SwapStatus    @default(pending)
+  lamportsIn     BigInt
+  /// Asset base units received (quoted amount when dryRun).
+  assetOut       BigInt        @default(0)
+  minOut         BigInt        @default(0)
+  priceImpactBps Int           @default(0)
+  sig            String?
+  bundleId       String?
+  error          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  rounds         PayoutRound[]
+
+  @@unique([assetId, hour, dryRun])
+}
+
 model PayoutRound {
-  id                 String       @id @default(cuid())
+  id                 String          @id @default(cuid())
   coinId             String
-  coin               Coin         @relation(fields: [coinId], references: [id])
+  coin               Coin            @relation(fields: [coinId], references: [id])
   /// Top of the hour (UTC) this round is for.
   hour               DateTime
   /// Dry-run rounds compute everything and send nothing (CLAUDE.md rule 7).
-  dryRun             Boolean      @default(false)
+  dryRun             Boolean         @default(false)
   status             RoundStatus
+  step               RoundStep       @default(allocated)
+  swapBatchId        String?
+  swapBatch          SwapBatch?      @relation(fields: [swapBatchId], references: [id])
   /// Lamports swapped this round (holders' bucket incl. carry-in).
-  solIn              BigInt       @default(0)
-  carriedInLamports  BigInt       @default(0)
-  carriedOutLamports BigInt       @default(0)
-  /// Dividend asset base units bought.
-  assetOut           BigInt       @default(0)
+  solIn              BigInt          @default(0)
+  carriedInLamports  BigInt          @default(0)
+  carriedOutLamports BigInt          @default(0)
+  /// Dividend asset base units bought for this coin (its share of the batch).
+  assetOut           BigInt          @default(0)
   /// Asset base units left undistributed by flooring, carried to the next round.
-  dustCarried        BigInt       @default(0)
-  priceUsd           Decimal?     @db.Decimal(38, 18)
+  dustCarried        BigInt          @default(0)
+  priceUsd           Decimal?        @db.Decimal(38, 18)
   swapSig            String?
-  holdersPaid        Int          @default(0)
+  holdersPaid        Int             @default(0)
   error              String?
-  startedAt          DateTime     @default(now())
+  startedAt          DateTime        @default(now())
   finishedAt         DateTime?
   items              PayoutItem[]
-  feeClaims          FeeClaim[]
+  allocations        FeeAllocation[]
 
   /// Idempotency: one live and one dry-run round per coin per hour.
   @@unique([coinId, hour, dryRun])
@@ -310,4 +484,77 @@ model SignedTx {
 
   @@index([purpose, createdAt])
   @@index([coinId])
+}
+
+/// Claim-model ledger: what each wallet can claim per dividend asset.
+model Credit {
+  wallet    String
+  assetId   String
+  asset     DividendAsset @relation(fields: [assetId], references: [id])
+  /// Asset base units available to claim (pending claims already deducted).
+  amount    BigInt
+  updatedAt DateTime      @updatedAt
+
+  @@id([wallet, assetId])
+}
+
+/// A claim transaction handed to a holder to sign. The amount is reserved until it confirms or expires.
+model Claim {
+  id                   String        @id @default(cuid())
+  wallet               String
+  assetId              String
+  asset                DividendAsset @relation(fields: [assetId], references: [id])
+  amount               BigInt
+  status               ClaimStatus   @default(pending)
+  sig                  String        @unique
+  lastValidBlockHeight BigInt
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([wallet, status])
+  @@index([status, createdAt])
+}
+
+/// Where each indexer stream has read up to.
+model IndexerCursor {
+  name          String   @id
+  lastSignature String?
+  lastSlot      BigInt   @default(0)
+  updatedAt     DateTime @updatedAt
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  coinId         String
+  coin           Coin         @relation(fields: [coinId], references: [id])
+  reporterUserId String?
+  reporter       User?        @relation(fields: [reporterUserId], references: [id])
+  reason         String
+  details        String       @default("")
+  status         ReportStatus @default(open)
+  resolvedBy     String?
+  createdAt      DateTime     @default(now())
+  resolvedAt     DateTime?
+
+  @@index([status, createdAt])
+  @@index([coinId])
+}
+
+/// Every admin action, for audit.
+model AdminAction {
+  id          String   @id @default(cuid())
+  adminWallet String
+  action      String
+  target      String?
+  payload     Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/// Runtime switches the admin can flip without a deploy (e.g. launchesOpen).
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
