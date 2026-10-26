@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { Config } from "@divvy/shared";
-import { api } from "@/lib/api";
+import { sharedApi } from "@/lib/server-api";
 
 export const metadata: Metadata = { title: "Terms · Divvy" };
 
@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Terms · Divvy" };
  * legal text; the draft notice stays until NEXT_PUBLIC_TERMS_FINAL=true.
  */
 export default async function TermsPage() {
-  const c = await api<Config>("/api/config");
+  const c = await sharedApi<Config>("/api/config");
   const draft = process.env.NEXT_PUBLIC_TERMS_FINAL !== "true";
   return (
     <article className="terms">

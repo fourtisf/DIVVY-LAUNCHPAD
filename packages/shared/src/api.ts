@@ -321,12 +321,28 @@ export type LaunchStatus = z.infer<typeof LaunchStatusSchema>;
 
 /* ---------- auth ---------- */
 
-export const NonceResponseSchema = z.object({ nonce: z.string(), message: z.string(), expiresAt: iso });
+/** The Sign-In With Solana fields; wallets that support `signIn` render them into exactly `message`. */
+export const SiwsInputSchema = z.object({
+  domain: z.string(),
+  address: z.string(),
+  statement: z.string(),
+  uri: z.string(),
+  version: z.string(),
+  chainId: z.string(),
+  nonce: z.string(),
+  issuedAt: z.string(),
+  expirationTime: z.string(),
+});
+export const NonceResponseSchema = z.object({ nonce: z.string(), message: z.string(), input: SiwsInputSchema, expiresAt: iso });
+export type SiwsInput = z.infer<typeof SiwsInputSchema>;
+export type NonceResponse = z.infer<typeof NonceResponseSchema>;
 /** Bounded before any base58 decoding: decoding is quadratic, so an unbounded signature is a DoS (audit). */
 export const VerifyRequestSchema = z.object({
   address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
   signature: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{64,90}$/),
   nonce: z.string().regex(/^[0-9a-f]{32}$/),
+  /** Base64 of the bytes the wallet's `signIn` signed. It must equal the issued message exactly. */
+  signedMessage: z.string().max(2048).regex(/^[A-Za-z0-9+/]+={0,2}$/).optional(),
 });
 export const MeSchema = z.object({
   wallet: base58.nullable(),

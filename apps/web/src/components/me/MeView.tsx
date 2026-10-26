@@ -45,7 +45,7 @@ export function MeView() {
   const claim = (assetSymbol: string) =>
     run(assetSymbol, async () => {
       const { tx } = await api<{ tx: string }>("/api/claims/build", { method: "POST", body: JSON.stringify({ assetSymbol }) });
-      await signAndSend(wallet, connection, tx, { partiallySigned: true });
+      await signAndSend(wallet, connection, tx, { network: config.network, kind: "claim" });
       toast(`${assetSymbol} claimed`);
       await Promise.all([refresh(), reloadPayouts()]);
     });
@@ -53,7 +53,7 @@ export function MeView() {
   const claimCreator = () =>
     run("creator", async () => {
       const { tx } = await api<{ tx: string }>("/api/me/creator/claim/build", { method: "POST" });
-      await signAndSend(wallet, connection, tx);
+      await signAndSend(wallet, connection, tx, { network: config.network, kind: "creator-claim" });
       toast("Creator fees claimed");
       await reloadCreator();
     });

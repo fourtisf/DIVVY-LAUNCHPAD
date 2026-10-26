@@ -176,6 +176,9 @@ function imageFace(src: string, label: string): Promise<HTMLCanvasElement> {
         }),
       );
     img.onerror = () => res(logoFace());
+    // A cross-origin picture (object storage) would taint the canvas and WebGL would refuse it as a
+    // texture. Asking for CORS keeps it usable, and without CORS it falls back to the logo face.
+    img.crossOrigin = "anonymous";
     img.src = src;
   });
 }

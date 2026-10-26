@@ -1,15 +1,21 @@
 /**
  * PM2 process file for the Divvy VPS. See deploy/setup-vps.md (one-time setup) and docs/RUNBOOK.md (deploys).
  *
- * Run PM2 as the `divvy` user, from a login shell:
- *   sudo -iu divvy
- *   pm2 start  /srv/divvy/current/deploy/ecosystem.config.cjs                  # first start
- *   pm2 reload /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-web,divvy-api --update-env
- *   pm2 restart /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-worker --update-env
- *   pm2 save                                                                    # what systemd resurrects at boot
+ * Each app runs as its own OS user with its own PM2 daemon (audit: a web or API compromise must not
+ * reach the hot-wallet keys). `divvy` owns the releases and builds; it runs nothing.
+ *   divvy-web     divvy-web     env /etc/divvy/web.env
+ *   divvy-api     divvy-api     env /etc/divvy/api.env      (no keys)
+ *   divvy-worker  divvy-worker  env /etc/divvy/worker.env   (the only user that can read /etc/divvy/keys)
+ * Always pass --only, so each daemon runs just its own app:
+ *   sudo -iu divvy-web    pm2 start  /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-web
+ *   sudo -iu divvy-web    pm2 reload /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-web --update-env
+ *   sudo -iu divvy-api    pm2 reload /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-api --update-env
+ *   sudo -iu divvy-worker pm2 restart /srv/divvy/current/deploy/ecosystem.config.cjs --only divvy-worker --update-env
+ *   sudo -iu <user> pm2 save                                                    # what systemd resurrects at boot
  *
- * Environment. Every app is started as `node --env-file=/etc/divvy/divvy.env <script>` (Node 22), so:
- *   - secrets live only in /etc/divvy/divvy.env (chmod 600, owner divvy), never here or in the repo;
+ * Environment. Every app is started as `node --env-file=/etc/divvy/<app>.env <script>` (Node 22), so:
+ *   - secrets live only in their app's env file (chmod 600, owned by that app's user), never here or in
+ *     the repo, and each app sees only its own;
  *   - Node reads the file inside the process, so the values never land in PM2's dump (~/.pm2/dump.pm2)
  *     or in `pm2 env` output;
  *   - a missing file is a hard start failure (--env-file, not --env-file-if-exists);
@@ -22,16 +28,18 @@
  * Values set in `env` below are applied after the filter and override the env file.
  *
  * Paths can be overridden when this file is evaluated (staging boxes, local checks):
- *   DIVVY_ROOT (default /srv/divvy/current), DIVVY_ENV_FILE (/etc/divvy/divvy.env), DIVVY_LOG_DIR (/var/log/divvy).
+ *   DIVVY_ROOT (default /srv/divvy/current), DIVVY_ENV_DIR (/etc/divvy), DIVVY_LOG_DIR (/var/log/divvy).
+ * Logs go to DIVVY_LOG_DIR/<web|api|worker>/, each folder owned by that app's user.
  * PM2 resolves them at `pm2 start/reload` time and `pm2 save` stores the result.
  */
 const ROOT = process.env.DIVVY_ROOT || "/srv/divvy/current";
-const ENV_FILE = process.env.DIVVY_ENV_FILE || "/etc/divvy/divvy.env";
+const ENV_DIR = process.env.DIVVY_ENV_DIR || "/etc/divvy";
 const LOG_DIR = process.env.DIVVY_LOG_DIR || "/var/log/divvy";
 
+const envFile = (name) => `--env-file=${ENV_DIR}/${name}.env`;
 const logs = (name) => ({
-  out_file: `${LOG_DIR}/${name}.out.log`,
-  error_file: `${LOG_DIR}/${name}.err.log`,
+  out_file: `${LOG_DIR}/${name}/${name}.out.log`,
+  error_file: `${LOG_DIR}/${name}/${name}.err.log`,
   // One file per app even with several cluster instances (no -0/-1 suffixes).
   merge_logs: true,
 });
@@ -75,7 +83,7 @@ module.exports = {
       // to listen, then stops an old one. Instances share port 3000 through the cluster primary.
       exec_mode: "cluster",
       instances: 2,
-      node_args: [`--env-file=${ENV_FILE}`, "--max-old-space-size=512", ...CLUSTER_NODE_ARGS],
+      node_args: [envFile("web"), "--max-old-space-size=512", ...CLUSTER_NODE_ARGS],
       max_memory_restart: "700M",
       listen_timeout: 15000,
       kill_timeout: 10000,
@@ -89,11 +97,11 @@ module.exports = {
       cwd: `${ROOT}/apps/api`,
       script: "dist/server.js",
       // One instance in cluster mode: reloads are still zero-downtime (the replacement listens before the
-      // old process is stopped). Live events for WS /api/live are fanned out in-process today, so add
-      // instances only once they go through Redis pub/sub. SIWS nonces already need REDIS_URL set.
+      // old process is stopped). Live events reach the API through Redis pub/sub from the worker and
+      // sessions, nonces and rate limits are in Redis, so more instances would work; one is enough for now.
       exec_mode: "cluster",
       instances: 1,
-      node_args: [`--env-file=${ENV_FILE}`, "--max-old-space-size=384", ...CLUSTER_NODE_ARGS],
+      node_args: [envFile("api"), "--max-old-space-size=384", ...CLUSTER_NODE_ARGS],
       max_memory_restart: "512M",
       listen_timeout: 15000,
       // SIGINT runs app.close(), which closes WebSocket clients and drains requests.
@@ -112,9 +120,10 @@ module.exports = {
       // licence to scale: never `pm2 scale divvy-worker`, and never start a second copy by hand.
       exec_mode: "fork",
       instances: 1,
-      node_args: [`--env-file=${ENV_FILE}`, "--max-old-space-size=384"],
+      node_args: [envFile("worker"), "--max-old-space-size=384"],
       max_memory_restart: "512M",
-      // Room for a graceful drain once the payout engine handles SIGINT mid-round (Phase 4).
+      // On SIGINT the worker stops taking jobs and waits up to 120 s for running ones (a payout step,
+      // a launch bundle) to finish; this leaves 10 s on top before PM2 kills it.
       kill_timeout: 130000,
       env: { NODE_ENV: "production" },
       // The worker logs JSON lines with their own timestamps.

@@ -6,10 +6,10 @@ services:
       POSTGRES_USER: divvy
       POSTGRES_PASSWORD: divvy
       POSTGRES_DB: divvy
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]  # loopback only: the dev password is public
     volumes: [pgdata:/var/lib/postgresql/data]
   redis:
     image: redis:7
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]  # loopback only: Redis has no password here
 volumes:
   pgdata:

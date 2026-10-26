@@ -4,7 +4,7 @@ import bs58 from "bs58";
 import { KEYS, VerifyRequestSchema, type Me } from "@divvy/shared";
 import { sendError } from "../../errors";
 import type { Kv } from "../../kv";
-import { siwsMessage, verifyEd25519 } from "../../routes/auth";
+import { signedMessageMatches, siwsInput, siwsText, verifyEd25519 } from "../../routes/auth";
 import type { LiveDeps } from "../deps";
 import { amount } from "../data";
 import { endSession, getViewer, isBlockedCountry, requireViewer, startSession } from "../viewer";
@@ -31,9 +31,10 @@ export async function liveAuthRoutes(app: FastifyInstance, { d, kv }: { d: LiveD
     const nonce = randomBytes(16).toString("hex");
     const now = new Date();
     const expiresAt = new Date(now.getTime() + NONCE_TTL_SEC * 1000);
-    const message = siwsMessage(origin.host, origin.origin, address, nonce, now, expiresAt);
+    const input = siwsInput(origin.host, origin.origin, address, nonce, now, expiresAt, d.sol.cluster === "mainnet-beta" ? "mainnet" : d.sol.cluster);
+    const message = siwsText(input);
     await kv.setNonce(nonce, JSON.stringify({ address, message }), NONCE_TTL_SEC);
-    return { nonce, message, expiresAt: expiresAt.toISOString() };
+    return { nonce, message, input, expiresAt: expiresAt.toISOString() };
   });
 
   app.post("/api/auth/verify", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (req, reply) => {
@@ -44,6 +45,7 @@ export async function liveAuthRoutes(app: FastifyInstance, { d, kv }: { d: LiveD
     const { address, message } = JSON.parse(raw) as { address: string; message: string };
     const pk = decodeB58(address);
     const sig = decodeB58(body.data.signature);
+    if (address === body.data.address && !signedMessageMatches(body.data.signedMessage, message)) return sendError(reply, 401, "SIGN_IN_MISMATCH", "Your wallet signed a different message. Try again.");
     if (address !== body.data.address || !pk || !sig || !verifyEd25519(message, sig, pk)) return sendError(reply, 401, "BAD_SIGNATURE", "The signature doesn't match this wallet");
     await startSession(d, reply, address);
     return { ok: true, wallet: address };

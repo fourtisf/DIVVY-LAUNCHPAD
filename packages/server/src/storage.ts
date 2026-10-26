@@ -5,7 +5,7 @@
  *   permanent once a coin is created, so production should use durable storage (decision: owner).
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, normalize, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { z } from "zod";
 
@@ -81,8 +81,23 @@ const StorageEnv = z.discriminatedUnion("STORAGE_DRIVER", [
   }),
 ]);
 
+/**
+ * Token metadata URIs are written on chain at create time, so in production a picture must never
+ * live inside the release folder (lost on redeploy) or behind a URL only this machine can open (audit).
+ */
+export function assertProductionStorage(e: z.infer<typeof StorageEnv>, cwd = process.cwd()): void {
+  const base = new URL(e.PUBLIC_MEDIA_BASE);
+  if (base.protocol !== "https:") throw new Error("PUBLIC_MEDIA_BASE must be https in production");
+  if (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.)/.test(base.hostname)) throw new Error("PUBLIC_MEDIA_BASE must be a public host in production");
+  if (e.STORAGE_DRIVER !== "local") return;
+  if (!isAbsolute(e.STORAGE_DIR)) throw new Error("STORAGE_DIR must be an absolute path in production (e.g. /var/lib/divvy/media)");
+  const rel = relative(resolve(cwd), resolve(e.STORAGE_DIR));
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) throw new Error("STORAGE_DIR must be outside the release folder in production");
+}
+
 export function loadStorage(src: Record<string, string | undefined> = process.env): Storage {
   const e = StorageEnv.parse({ STORAGE_DRIVER: "local", ...Object.fromEntries(Object.entries(src).filter(([, v]) => v !== undefined && v !== "")) });
+  if (src.NODE_ENV === "production") assertProductionStorage(e);
   if (e.STORAGE_DRIVER === "local") return localStorage(e.STORAGE_DIR, e.PUBLIC_MEDIA_BASE);
   return s3Storage({ endpoint: e.S3_ENDPOINT, region: e.S3_REGION, bucket: e.S3_BUCKET, accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY, publicBase: e.PUBLIC_MEDIA_BASE });
 }

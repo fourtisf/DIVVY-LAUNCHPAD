@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { bpsLabel, usd, type Config } from "@divvy/shared";
-import { api } from "@/lib/api";
+import { sharedApi } from "@/lib/server-api";
 import { deliveryCopy } from "@/lib/copy";
 
 const pctLabel = (bps: number) => `${+(bps / 100).toFixed(2)}%`;
 
 export default async function HowPage() {
-  const c = await api<Config>("/api/config");
+  const c = await sharedApi<Config>("/api/config");
   const f = c.fees;
   return (
     <>

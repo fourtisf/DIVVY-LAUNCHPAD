@@ -219,6 +219,31 @@ describe("auth (SIWS) and signed-in routes", () => {
     expect((await get("/api/claims")).status).toBe(401);
   });
 
+  it("accepts a wallet signIn only when the signed bytes are the issued message", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const address = bs58.encode(publicKey.export({ format: "der", type: "spki" }).subarray(-32));
+    // A wallet rendering the SIWS fields in the standard layout produces exactly the issued message.
+    const n = (await get(`/api/auth/nonce?address=${address}`)).body as z.infer<typeof NonceResponseSchema>;
+    expect(n.input.domain).toBe("localhost:3000");
+    expect(n.message.startsWith(`${n.input.domain} wants you to sign in with your Solana account:\n${address}\n`)).toBe(true);
+    const ok = await app.inject({
+      method: "POST",
+      url: "/api/auth/verify",
+      payload: { address, signature: bs58.encode(sign(null, Buffer.from(n.message), privateKey)), nonce: n.nonce, signedMessage: Buffer.from(n.message).toString("base64") },
+    });
+    expect(ok.statusCode).toBe(200);
+
+    const n2 = (await get(`/api/auth/nonce?address=${address}`)).body as z.infer<typeof NonceResponseSchema>;
+    const other = n2.message.replace("Sign in to Divvy.", "Something else.");
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/auth/verify",
+      payload: { address, signature: bs58.encode(sign(null, Buffer.from(other), privateKey)), nonce: n2.nonce, signedMessage: Buffer.from(other).toString("base64") },
+    });
+    expect(r.statusCode).toBe(401);
+    expect((r.json() as { code: string }).code).toBe("SIGN_IN_MISMATCH");
+  });
+
   it("refuses oversized sign-in fields before decoding them (audit: quadratic base58 decode)", async () => {
     const address = bs58.encode(Buffer.alloc(32, 7));
     const n = (await get(`/api/auth/nonce?address=${address}`)).body as { nonce: string };

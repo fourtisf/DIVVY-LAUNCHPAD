@@ -23,11 +23,13 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
   const [side, setSide] = useState<"buy" | "sell">(lastSide);
-  const [amt, setAmt] = useState(side === "buy" ? "0.5" : "1000000");
-  const [bal, setBal] = useState<{ sol: number | null; tokens: number | null }>({ sol: null, tokens: null });
+  const live = config.flags.trading;
+  // Demo keeps the prototype's preset; live starts a sell empty so nobody sells a default by accident.
+  const sellPreset = live ? "" : "1000000";
+  const [amt, setAmt] = useState(side === "buy" ? "0.5" : sellPreset);
+  const [bal, setBal] = useState<{ sol: number | null; tokens: number | null; tokensRaw: bigint | null }>({ sol: null, tokens: null, tokensRaw: null });
   const [busy, setBusy] = useState(false);
   const [slippageBps, setSlippageBps] = useState(100);
-  const live = config.flags.trading;
   const wallet = publicKey?.toBase58() ?? null;
   const solUsd = config.quote.priceUsd;
   const price = coin.priceUsd;
@@ -35,20 +37,21 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
 
   // Balances only when an RPC is configured; the public endpoint is too rate-limited to poll.
   useEffect(() => {
-    if (!publicKey || !process.env.NEXT_PUBLIC_SOLANA_RPC_URL) return setBal({ sol: null, tokens: null });
+    if (!publicKey || !process.env.NEXT_PUBLIC_SOLANA_RPC_URL) return setBal({ sol: null, tokens: null, tokensRaw: null });
     let off = false;
     (async () => {
       const lamports = await connection.getBalance(publicKey).catch(() => null);
       const accts = await connection.getParsedTokenAccountsByOwner(publicKey, { mint: new PublicKey(coin.mint) }).catch(() => null);
-      const tokens = accts ? accts.value.reduce((a, x) => a + (x.account.data.parsed?.info?.tokenAmount?.uiAmount ?? 0), 0) : null;
-      if (!off) setBal({ sol: lamports == null ? null : lamports / 1e9, tokens });
+      // Raw base units, so "100%" sells exactly the balance (a float can round above it).
+      const tokensRaw = accts ? accts.value.reduce((a, x) => a + BigInt(x.account.data.parsed?.info?.tokenAmount?.amount ?? "0"), 0n) : null;
+      if (!off) setBal({ sol: lamports == null ? null : lamports / 1e9, tokens: tokensRaw === null ? null : Number(tokensRaw) / 1e6, tokensRaw });
     })();
     return () => {
       off = true;
     };
   }, [publicKey, connection, coin.mint]);
 
-  const v = parseFloat((amt || "0").replace(",", ".")) || 0;
+  const v = parseAmount(amt);
   const recv =
     side === "buy" ? num(((v * solUsd * 0.99) / price) * (1 - Math.min(0.25, v / 40))) + " $" + coin.ticker : sol((v * price * 0.99) / solUsd);
   const balLabel = wallet ? (side === "buy" ? (bal.sol != null ? `Balance ${bal.sol.toFixed(3)} SOL` : "") : bal.tokens != null ? `Balance ${num(bal.tokens)} $${coin.ticker}` : "") : "";
@@ -58,22 +61,30 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   const pick = (s: "buy" | "sell") => {
     setSide(s);
     lastSide = s;
-    setAmt(s === "buy" ? "0.5" : "1000000");
+    setAmt(s === "buy" ? "0.5" : sellPreset);
   };
 
   const trade = async () => {
     if (!wallet) return setVisible(true);
     setBusy(true);
     try {
-      const amountIn = side === "buy" ? BigInt(Math.round(v * 1e9)).toString() : BigInt(Math.round(v * 1e6)).toString();
+      const amountIn = toBaseUnits(amt, side === "buy" ? 9 : 6);
+      if (!amountIn) return toast("Enter an amount like 0.5");
       const r = await api<TradeBuildResponse>("/api/trade/build", { method: "POST", body: JSON.stringify({ mint: coin.mint, side, amountIn, slippageBps, wallet }) });
       // Demo mode builds nothing to sign.
       if (r.tx === null) return toast(side === "buy" ? `Bought ${recv} (demo)` : `Sold for ${recv} (demo)`);
+      // The server's numbers, checked before the wallet opens (audit): the minimum must match the slippage
+      // you chose, and a quote far below the estimate shown here is put to you first.
+      if (r.minOut.ui < r.expectedOut.ui * (1 - slippageBps / 10_000) * 0.999) return toast("The quote didn't match your slippage setting. Nothing was sent.");
+      const unit = side === "buy" ? `$${coin.ticker}` : "SOL";
+      const shownEstimate = side === "buy" ? ((v * solUsd * 0.99) / price) * (1 - Math.min(0.25, v / 40)) : (v * price * 0.99) / solUsd;
+      if (r.expectedOut.ui < shownEstimate * 0.85 && !window.confirm(`You'd get about ${num(r.expectedOut.ui)} ${unit} (at least ${num(r.minOut.ui)}), less than shown. Continue?`)) return;
       if (r.priceImpactBps > 1500 && !window.confirm(`This trade moves the price by about ${(r.priceImpactBps / 100).toFixed(1)}%. Continue?`)) return;
-      await signAndSend(walletCtx, connection, r.tx);
+      await signAndSend(walletCtx, connection, r.tx, { network: config.network, kind: "trade", coinMint: coin.mint });
       toast(side === "buy" ? `Bought ${num(r.expectedOut.ui)} $${coin.ticker}` : `Sold for ${sol(r.expectedOut.ui)}`);
     } catch (e) {
-      const m = errorText(e, "The trade didn't go through. Nothing was spent.");
+      // Errors after sending come back with their own wording; this one is only for before.
+      const m = errorText(e, "The trade didn't go through. Nothing was sent.");
       if (m) toast(m);
     } finally {
       setBusy(false);
@@ -112,7 +123,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
                 <button type="button" key={q} onClick={() => setAmt(q)}>{q} SOL</button>
               ))
             : ["25%", "50%", "100%"].map((q) => (
-                <button type="button" key={q} onClick={() => bal.tokens != null && setAmt(String(Math.round((bal.tokens * parseFloat(q)) / 100)))}>
+                <button type="button" key={q} onClick={() => bal.tokensRaw != null && setAmt(fromBaseUnits((bal.tokensRaw * BigInt(parseInt(q, 10))) / 100n, 6))}>
                   {q}
                 </button>
               ))}
@@ -158,6 +169,27 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       )}
     </div>
   );
+}
+
+/** "0.5" or "0,5" (one decimal separator, no thousands separators); anything else is 0. */
+function parseAmount(s: string): number {
+  const t = s.trim();
+  return /^\d+([.,]\d+)?$/.test(t) ? Number(t.replace(",", ".")) : 0;
+}
+
+/** Exact base units from the typed amount, without going through a float; null if it isn't a valid amount. */
+function toBaseUnits(s: string, decimals: number): string | null {
+  const t = s.trim().replace(",", ".");
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(t);
+  if (!m || (m[2]?.length ?? 0) > decimals) return null;
+  const v = BigInt(m[1]!) * 10n ** BigInt(decimals) + BigInt((m[2] ?? "").padEnd(decimals, "0") || "0");
+  return v > 0n ? v.toString() : null;
+}
+
+function fromBaseUnits(raw: bigint, decimals: number): string {
+  const s = raw.toString().padStart(decimals + 1, "0");
+  const frac = s.slice(-decimals).replace(/0+$/, "");
+  return s.slice(0, -decimals) + (frac ? "." + frac : "");
 }
 
 /** "$48k" style, as in the prototype copy. */

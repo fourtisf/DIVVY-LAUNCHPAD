@@ -4,7 +4,7 @@ import type { Config, Stats } from "@divvy/shared";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "./globals.css";
 import "./additions.css";
-import { api } from "@/lib/api";
+import { sharedApi } from "@/lib/server-api";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { Providers } from "@/components/Providers";
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#0A0F0D" };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const [config, stats] = await Promise.all([api<Config>("/api/config"), api<Stats>("/api/stats")]);
+  const [config, stats] = await Promise.all([sharedApi<Config>("/api/config"), sharedApi<Stats>("/api/stats")]);
   return (
     <html lang="en">
       <head>

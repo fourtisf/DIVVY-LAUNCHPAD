@@ -8,7 +8,7 @@
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import bs58 from "bs58";
-import { VerifyRequestSchema, type Me } from "@divvy/shared";
+import { VerifyRequestSchema, type Me, type SiwsInput } from "@divvy/shared";
 import type { Env } from "../env";
 import { sendError } from "../errors";
 import type { Kv } from "../kv";
@@ -29,20 +29,37 @@ export function verifyEd25519(message: string, signature: Uint8Array, publicKey:
   return verify(null, Buffer.from(message, "utf8"), key, signature);
 }
 
-export function siwsMessage(domain: string, uri: string, address: string, nonce: string, issuedAt: Date, expiresAt: Date): string {
+/** The SIWS fields for one sign-in; `siwsText` renders them in the standard (wallet `signIn`) layout. */
+export function siwsInput(domain: string, uri: string, address: string, nonce: string, issuedAt: Date, expiresAt: Date, chainId = "mainnet"): SiwsInput {
+  return { domain, address, statement: "Sign in to Divvy.", uri, version: "1", chainId, nonce, issuedAt: issuedAt.toISOString(), expirationTime: expiresAt.toISOString() };
+}
+
+export function siwsText(i: SiwsInput): string {
   return [
-    `${domain} wants you to sign in with your Solana account:`,
-    address,
+    `${i.domain} wants you to sign in with your Solana account:`,
+    i.address,
     "",
-    "Sign in to Divvy.",
+    i.statement,
     "",
-    `URI: ${uri}`,
-    "Version: 1",
-    "Chain ID: mainnet",
-    `Nonce: ${nonce}`,
-    `Issued At: ${issuedAt.toISOString()}`,
-    `Expiration Time: ${expiresAt.toISOString()}`,
+    `URI: ${i.uri}`,
+    `Version: ${i.version}`,
+    `Chain ID: ${i.chainId}`,
+    `Nonce: ${i.nonce}`,
+    `Issued At: ${i.issuedAt}`,
+    `Expiration Time: ${i.expirationTime}`,
   ].join("\n");
+}
+
+export function siwsMessage(domain: string, uri: string, address: string, nonce: string, issuedAt: Date, expiresAt: Date): string {
+  return siwsText(siwsInput(domain, uri, address, nonce, issuedAt, expiresAt));
+}
+
+/**
+ * A wallet `signIn` signs the message it rendered itself, so the API checks those bytes are the
+ * message it issued before checking the signature (audit: the wallet then also checks the domain).
+ */
+export function signedMessageMatches(signedMessage: string | undefined, message: string): boolean {
+  return signedMessage === undefined || Buffer.from(signedMessage, "base64").toString("utf8") === message;
 }
 
 function decodeB58(s: string): Uint8Array | null {
@@ -77,9 +94,10 @@ export async function authRoutes(
     const nonce = randomBytes(16).toString("hex");
     const now = new Date();
     const expiresAt = new Date(now.getTime() + NONCE_TTL_SEC * 1000);
-    const message = siwsMessage(origin.host, origin.origin, address, nonce, now, expiresAt);
+    const input = siwsInput(origin.host, origin.origin, address, nonce, now, expiresAt);
+    const message = siwsText(input);
     await kv.setNonce(nonce, JSON.stringify({ address, message }), NONCE_TTL_SEC);
-    return { nonce, message, expiresAt: expiresAt.toISOString() };
+    return { nonce, message, input, expiresAt: expiresAt.toISOString() };
   });
 
   app.post("/api/auth/verify", async (req, reply) => {
@@ -89,6 +107,7 @@ export async function authRoutes(
     if (!raw) return sendError(reply, 401, "NONCE_EXPIRED", "That sign-in request expired. Try again.");
     const { address, message } = JSON.parse(raw) as { address: string; message: string };
     if (address !== body.data.address) return sendError(reply, 401, "BAD_SIGNATURE", "The signature doesn't match this wallet");
+    if (!signedMessageMatches(body.data.signedMessage, message)) return sendError(reply, 401, "SIGN_IN_MISMATCH", "Your wallet signed a different message. Try again.");
     const pk = decodeB58(address);
     const sig = decodeB58(body.data.signature);
     if (!pk || !sig || !verifyEd25519(message, sig, pk)) return sendError(reply, 401, "BAD_SIGNATURE", "The signature doesn't match this wallet");
