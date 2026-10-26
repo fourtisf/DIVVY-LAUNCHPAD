@@ -5,12 +5,14 @@ import { useState } from "react";
 import useSWR from "swr";
 import { ago, num, short, usd, usdFull, type PayoutList } from "@divvy/shared";
 import { qs } from "@/lib/api";
-import { useAssets } from "@/lib/config";
+import { useAssets, useConfig } from "@/lib/config";
+import { deliveryCopy } from "@/lib/copy";
 import { Chip } from "../Chip";
 import { Countdown } from "../Countdown";
 
 export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: PayoutList; assetsInUse: string[]; nextRoundAt: string }) {
   const assets = useAssets();
+  const copy = deliveryCopy(useConfig());
   const [filter, setFilter] = useState("all");
   const key = "/api/payouts" + qs({ asset: filter === "all" ? null : filter, limit: 60 });
   const { data = initial } = useSWR<PayoutList>(key, { fallbackData: filter === "all" ? initial : undefined });
@@ -18,7 +20,7 @@ export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: Pa
   return (
     <>
       <h1 className="page-h">Payouts</h1>
-      <p className="page-lede">Every hour each coin&apos;s vault buys its stock and sends it to holders. These are the receipts, newest first. Each one is a transaction you can open.</p>
+      <p className="page-lede">Every hour each coin&apos;s vault buys its stock and {copy.payoutsLedeVerb} holders. These are the receipts, newest first. Each one is a transaction you can open.</p>
       <div className="tiles">
         <div><b className="up">{usdFull(s.paidUsd)}</b><span>Paid to holders</span></div>
         <div><b>{s.rounds.toLocaleString("en-US")}</b><span>Payout rounds</span></div>

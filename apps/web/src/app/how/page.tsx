@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { bpsLabel, usd, type Config } from "@divvy/shared";
 import { api } from "@/lib/api";
+import { deliveryCopy } from "@/lib/copy";
 
 const pctLabel = (bps: number) => `${+(bps / 100).toFixed(2)}%`;
 
@@ -45,9 +46,9 @@ export default async function HowPage() {
         <li>
           <span className="n">5</span>
           <div>
-            <h3>Holders are paid every hour</h3>
+            <h3>{deliveryCopy(c).howStepTitle}</h3>
             <p>
-              At the top of each hour the vault buys the coin&apos;s stock token and sends it to every wallet holding at least {usd(c.payouts.minHolderUsd)}, in proportion to what they hold. The curve, the pool and the launcher wallet are left out. Each round is a receipt on the payouts page, and a round more than {Math.round(c.payouts.lateAfterSec / 60)} minutes late turns red.
+              At the top of each hour the vault buys the coin&apos;s stock token and {deliveryCopy(c).howStepVerb} every wallet holding at least {usd(c.payouts.minHolderUsd)}, in proportion to what they hold. The curve, the pool and the launcher wallet are left out.{deliveryCopy(c).howStepExtra} Each round is a receipt on the payouts page, and a round more than {Math.round(c.payouts.lateAfterSec / 60)} minutes late turns red.
             </p>
           </div>
         </li>

@@ -65,7 +65,7 @@ export function makeSessionLookup(store: MockStore): SessionLookup {
 
 export async function authRoutes(
   app: FastifyInstance,
-  { store, env, kv, session, adminWallets }: { store: MockStore; env: Env; kv: Kv; session: SessionLookup; adminWallets: Set<string> },
+  { store, env, kv, session, adminWallets, blockedCountries = new Set<string>() }: { store: MockStore; env: Env; kv: Kv; session: SessionLookup; adminWallets: Set<string>; blockedCountries?: Set<string> },
 ) {
   const origin = new URL(env.WEB_ORIGIN);
 
@@ -114,7 +114,10 @@ export async function authRoutes(
     const s = session(req);
     const today = new Date().setUTCHours(0, 0, 0, 0);
     const launchesToday = s ? [...store.launches.values()].filter((l) => l.coin.creatorWallet === s.wallet && l.startedAt >= today).length : 0;
-    return { wallet: s?.wallet ?? null, isAdmin: !!s && adminWallets.has(s.wallet), x: null, launchesToday, launchesLeftToday: Math.max(0, 3 - launchesToday), claimable: [] };
+    // Demo data: the same header the live API reads (Nginx GeoIP2), checked against BLOCKED_COUNTRIES.
+    const geo = String(req.headers["x-geo-country"] ?? "").trim().toUpperCase();
+    const blocked = /^[A-Z]{2}$/.test(geo) && blockedCountries.has(geo);
+    return { wallet: s?.wallet ?? null, isAdmin: !!s && adminWallets.has(s.wallet), blocked, x: null, launchesToday, launchesLeftToday: Math.max(0, 3 - launchesToday), claimable: [] };
   });
 
   // X OAuth 2.0 linking is Phase 2. The routes exist so the contract is complete.

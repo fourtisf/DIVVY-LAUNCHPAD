@@ -12,6 +12,7 @@ import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { Keypair, type Connection } from "@solana/web3.js";
+import { Redis } from "ioredis";
 import { PrismaClient } from "@divvy/db";
 import { ApiErrorSchema, CheckResponseSchema, CoinDetailSchema, CoinListSchema, ConfigSchema, LaunchStatusSchema, MeSchema, StatsSchema, UploadResponseSchema } from "@divvy/shared";
 import { foldName, foldTicker } from "@divvy/shared";
@@ -65,7 +66,11 @@ describe.skipIf(!run)("live mode", () => {
     });
     execSync("./node_modules/.bin/prisma migrate deploy", { cwd: join(__dirname, "../../../packages/db"), env: { ...process.env, DATABASE_URL: DB }, stdio: "ignore" });
     prisma = new PrismaClient({ datasources: { db: { url: DB } } });
-    // Clean slate for every run.
+    // Clean slate for every run, rate-limit counters and launch cooldowns included.
+    const r = new Redis(REDIS!);
+    const stale = [...(await r.keys("divvy-rl:*")), ...(await r.keys("divvy:launch-cooldown:*"))];
+    if (stale.length) await r.del(...stale);
+    await r.quit();
     const tables = await prisma.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`;
     await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"public"."${t.tablename}"`).join(", ")} CASCADE`);
 

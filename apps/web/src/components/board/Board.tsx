@@ -7,6 +7,7 @@ import useSWR from "swr";
 import { minutesSince, num, usd, usdFull, type CoinList, type CoinSort, type CoinSummary, type Stats } from "@divvy/shared";
 import { coinsKey } from "@/lib/keys";
 import { useAssets, useConfig } from "@/lib/config";
+import { deliveryCopy } from "@/lib/copy";
 import { Chip } from "../Chip";
 import { CoinCard, type CardCoin } from "../CoinCard";
 import { HeroStage } from "../Coin3D";
@@ -67,7 +68,7 @@ export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders:
           <h1>
             Memecoins that pay you <span className="glow">real stock dividends.</span>
           </h1>
-          <p className="lede">Launch a coin for free. Every trade buys the stock you picked, like NVDAx or SPYx, and splits it between holders every hour.</p>
+          <p className="lede">Launch a coin for free. Every trade buys the stock you picked, like NVDAx or SPYx, {deliveryCopy(config).heroTail}</p>
           <div className="ctas">
             <Link className="btn btn-g btn-lg" href="/create">Create a coin</Link>
             <Link className="btn btn-ghost btn-lg" href="/how">How it works</Link>

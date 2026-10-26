@@ -69,10 +69,10 @@ export async function buildApp({ env, store, kv, live }: BuildOptions): Promise<
   }
 
   const session = makeSessionLookup(s);
-  const adminWallets = loadParams().adminWallets;
+  const { adminWallets, blockedCountries } = loadParams();
   await app.register(publicRoutes, { store: s });
   await app.register(createRoutes, { store: s, session });
-  await app.register(authRoutes, { store: s, env, kv: kv_, session, adminWallets });
+  await app.register(authRoutes, { store: s, env, kv: kv_, session, adminWallets, blockedCountries });
   await app.register(extrasRoutes, { store: s, session, adminWallets });
   await app.register(tradeRoutes, { store: s, session });
   await app.register(liveRoutes, { store: s });

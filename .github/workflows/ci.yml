@@ -130,6 +130,8 @@ jobs:
           NODE_ENV: test
           API_MODE: mock
           LOG_LEVEL: warn
+          # The browser's Origin must match, or state-changing requests get 403 BAD_ORIGIN.
+          WEB_ORIGIN: http://127.0.0.1:3000
         run: nohup node apps/api/dist/server.js > "$RUNNER_TEMP/api.log" 2>&1 &
 
       - name: Start the web app

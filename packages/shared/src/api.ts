@@ -326,6 +326,8 @@ export const VerifyRequestSchema = z.object({ address: base58, signature: z.stri
 export const MeSchema = z.object({
   wallet: base58.nullable(),
   isAdmin: z.boolean(),
+  /** The visitor's country can't launch or claim (HANDOFF §10). Known even when signed out. */
+  blocked: z.boolean(),
   x: z.object({ userId: z.string(), handle: z.string() }).nullable(),
   launchesToday: z.number().int(),
   launchesLeftToday: z.number().int(),

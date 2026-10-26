@@ -22,12 +22,14 @@ import {
 } from "@divvy/shared";
 import { qs } from "@/lib/api";
 import { useAssets, useConfig } from "@/lib/config";
+import { deliveryCopy } from "@/lib/copy";
 import { Chip } from "../Chip";
 import { CoinFlip3D } from "../Coin3D";
 import { Countdown } from "../Countdown";
 import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 import { Chart } from "./Chart";
+import { ReportButton } from "./ReportButton";
 import { TradeBox } from "./TradeBox";
 
 type List<T> = { items: T[]; nextCursor?: string | null };
@@ -95,6 +97,7 @@ export function CoinView({ coin, initialMeter, initialPayouts }: { coin: CoinDet
             </button>
             <span className="tag"><Icon name="lock" />Ticker locked forever</span>
             <span className="tag"><Icon name="shield" />Private bundle launch</span>
+            <ReportButton mint={coin.mint} ticker={coin.ticker} />
           </div>
         </div>
       </div>
@@ -241,7 +244,7 @@ export function CoinView({ coin, initialMeter, initialPayouts }: { coin: CoinDet
                   At today&apos;s volume you&apos;d receive about <b>{num(daily / px)} {coin.dividendAsset}</b> a day, worth <b>{usd(daily)}</b>.
                 </div>
               </div>
-              <p className="note">Wallets holding at least {minHolder} at the hourly snapshot are paid. The curve, the pool and the launcher wallet are left out.</p>
+              <p className="note">Wallets holding at least {minHolder} at the hourly snapshot are {deliveryCopy(config).cardNoteVerb}. The curve, the pool and the launcher wallet are left out.</p>
             </div>
           </div>
           <div className="panel">

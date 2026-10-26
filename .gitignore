@@ -13,3 +13,7 @@ coverage/
 id.json
 /artifacts/
 dump.rdb
+
+# Playwright
+playwright-report/
+test-results/

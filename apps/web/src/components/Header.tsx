@@ -17,7 +17,8 @@ export function navOf(path: string): "board" | "payouts" | "how" | "create" {
 }
 
 export function ConnectButton() {
-  const { publicKey, disconnect, connected } = useWallet();
+  const { publicKey, connected } = useWallet();
+  const router = useRouter();
   const { setVisible } = useWalletModal();
   const toast = useToast();
   const was = useRef(connected);
@@ -31,8 +32,8 @@ export function ConnectButton() {
       className="btn btn-ghost"
       id="connectBtn"
       type="button"
-      aria-label={addr ? "Disconnect wallet" : "Connect wallet"}
-      onClick={() => (addr ? void disconnect() : setVisible(true))}
+      aria-label={addr ? "Your payouts and wallet" : "Connect wallet"}
+      onClick={() => (addr ? router.push("/me") : setVisible(true))}
     >
       {addr ? (
         <>

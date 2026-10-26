@@ -5,8 +5,10 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
 import { num, sol, type CoinDetail, type TradeBuildResponse } from "@divvy/shared";
-import { api, ApiRequestError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useConfig } from "@/lib/config";
+import { errorText } from "@/lib/session";
+import { signAndSend } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { useToast } from "../Toasts";
 
@@ -16,13 +18,16 @@ let lastSide: "buy" | "sell" = "buy";
 export function TradeBox({ coin }: { coin: CoinDetail }) {
   const config = useConfig();
   const toast = useToast();
-  const { publicKey } = useWallet();
+  const walletCtx = useWallet();
+  const { publicKey } = walletCtx;
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
   const [side, setSide] = useState<"buy" | "sell">(lastSide);
   const [amt, setAmt] = useState(side === "buy" ? "0.5" : "1000000");
   const [bal, setBal] = useState<{ sol: number | null; tokens: number | null }>({ sol: null, tokens: null });
   const [busy, setBusy] = useState(false);
+  const [slippageBps, setSlippageBps] = useState(100);
+  const live = config.flags.trading;
   const wallet = publicKey?.toBase58() ?? null;
   const solUsd = config.quote.priceUsd;
   const price = coin.priceUsd;
@@ -61,11 +66,15 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
     setBusy(true);
     try {
       const amountIn = side === "buy" ? BigInt(Math.round(v * 1e9)).toString() : BigInt(Math.round(v * 1e6)).toString();
-      const r = await api<TradeBuildResponse>("/api/trade/build", { method: "POST", body: JSON.stringify({ mint: coin.mint, side, amountIn, slippageBps: 100, wallet }) });
-      // Signing and sending the built transaction arrives with Phase 3; in demo mode there is no tx.
-      if (r.tx === null) toast(side === "buy" ? `Bought ${recv} (demo)` : `Sold for ${recv} (demo)`);
+      const r = await api<TradeBuildResponse>("/api/trade/build", { method: "POST", body: JSON.stringify({ mint: coin.mint, side, amountIn, slippageBps, wallet }) });
+      // Demo mode builds nothing to sign.
+      if (r.tx === null) return toast(side === "buy" ? `Bought ${recv} (demo)` : `Sold for ${recv} (demo)`);
+      if (r.priceImpactBps > 1500 && !window.confirm(`This trade moves the price by about ${(r.priceImpactBps / 100).toFixed(1)}%. Continue?`)) return;
+      await signAndSend(walletCtx, connection, r.tx);
+      toast(side === "buy" ? `Bought ${num(r.expectedOut.ui)} $${coin.ticker}` : `Sold for ${sol(r.expectedOut.ui)}`);
     } catch (e) {
-      toast(e instanceof ApiRequestError ? e.message : "Couldn't build the trade");
+      const m = errorText(e, "The trade didn't go through. Nothing was spent.");
+      if (m) toast(m);
     } finally {
       setBusy(false);
     }
@@ -112,6 +121,18 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       <div className="kv"><span>You receive</span><b id="recv">{recv}</b></div>
       <div className="kv"><span>Route</span><b id="route">{side === "buy" ? (graduated ? "SOL into the Raydium pool" : "SOL into the bonding curve") : graduated ? "Raydium pool to SOL" : "Bonding curve to SOL"}</b></div>
       <div className="kv"><span>Trading fee</span><b>{feeLabel}</b></div>
+      {live && (
+        <div className="kv">
+          <span>Max slippage</span>
+          <b>
+            <select className="slip" aria-label="Max slippage" value={slippageBps} onChange={(e) => setSlippageBps(Number(e.target.value))}>
+              {[50, 100, 200, 500].map((b) => (
+                <option key={b} value={b}>{b / 100}%</option>
+              ))}
+            </select>
+          </b>
+        </div>
+      )}
       <button
         className={"btn btn-lg " + (!wallet || side === "buy" ? "btn-g" : "btn-red")}
         style={{ width: "100%", marginTop: 14 }}

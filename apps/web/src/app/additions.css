@@ -15,3 +15,37 @@
 .wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover{background:var(--g-soft)!important}
 .wallet-adapter-modal-list-more{font-family:var(--ui)!important;color:var(--muted)!important}
 .wallet-adapter-modal-middle-button{background:var(--g)!important;color:var(--g-ink)!important;font-family:var(--ui)!important}
+
+/* Trade box: max slippage (live mode only; the prototype has no such row). */
+.kv .slip{background:transparent;border:0;color:inherit;font:inherit;font-weight:inherit;text-align:right;cursor:pointer;padding:0}
+.kv .slip:focus-visible{outline:2px solid var(--g);outline-offset:2px;border-radius:4px}
+.kv .slip option{background:var(--s1,#0F1714);color:var(--text,#E6F2EC)}
+
+/* Create form, live mode: "Link your X account" sits where the typed handle was. */
+.tinput.xlink{text-align:left;cursor:pointer;color:var(--g-hi)}
+.tinput.xlink:hover{border-color:var(--g)}
+
+/* /me and /admin (not in the prototype; built from its panels, tables and buttons). */
+.me-actions{display:flex;gap:10px;flex-wrap:wrap;margin:-6px 0 22px}
+.me-warn{color:var(--red);margin:-8px 0 18px}
+.admin-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.admin-row .tinput{flex:1;min-width:220px}
+.admin-acts{white-space:nowrap}
+.admin-acts .btn{padding:6px 10px;font-size:13px;margin-left:6px}
+
+/* /terms */
+.terms{max-width:760px;margin-bottom:80px}
+.terms h3{margin:26px 0 8px}
+.terms p{color:var(--muted);line-height:1.6}
+.terms-draft{color:var(--lime)}
+.foot a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+
+/* Coin page: report a coin (moderation queue). */
+.tag.report{cursor:pointer;font:inherit;font-size:13px}
+.tag.report:hover{color:var(--red);border-color:var(--red-soft)}
+.report-modal .in{padding:24px}
+.report-reasons{display:grid;gap:8px;margin:14px 0}
+.report-reason{display:flex;gap:10px;align-items:center;color:var(--muted);cursor:pointer}
+.report-reason input{accent-color:var(--g)}
+.report-modal textarea{width:100%;resize:vertical;min-height:72px}
+.report-acts{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}

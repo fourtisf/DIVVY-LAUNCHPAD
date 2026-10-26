@@ -7,7 +7,7 @@ import type { Kv } from "../../kv";
 import { siwsMessage, verifyEd25519 } from "../../routes/auth";
 import type { LiveDeps } from "../deps";
 import { amount } from "../data";
-import { endSession, getViewer, requireViewer, startSession } from "../viewer";
+import { country, endSession, getViewer, requireViewer, startSession } from "../viewer";
 
 const NONCE_TTL_SEC = 300;
 const b64url = (b: Buffer) => b.toString("base64url");
@@ -55,7 +55,9 @@ export async function liveAuthRoutes(app: FastifyInstance, { d, kv }: { d: LiveD
 
   app.get("/api/me", async (req): Promise<Me> => {
     const v = await getViewer(d, req);
-    if (!v) return { wallet: null, isAdmin: false, x: null, launchesToday: 0, launchesLeftToday: d.params.launchesPerWalletPerDay, claimable: [] };
+    const c = country(d, req);
+    const blocked = !!c && d.params.blockedCountries.has(c);
+    if (!v) return { wallet: null, isAdmin: false, blocked, x: null, launchesToday: 0, launchesLeftToday: d.params.launchesPerWalletPerDay, claimable: [] };
     const dayStart = new Date(new Date().setUTCHours(0, 0, 0, 0));
     const [launchesToday, credits, prices] = await Promise.all([
       d.prisma.launch.count({ where: { userId: v.userId, createdAt: { gte: dayStart }, step: { not: "failed" } } }),
@@ -65,6 +67,7 @@ export async function liveAuthRoutes(app: FastifyInstance, { d, kv }: { d: LiveD
     return {
       wallet: v.wallet,
       isAdmin: v.isAdmin,
+      blocked,
       x: v.xUserId && v.xHandle ? { userId: v.xUserId, handle: v.xHandle } : null,
       launchesToday,
       launchesLeftToday: Math.max(0, d.params.launchesPerWalletPerDay - launchesToday),
