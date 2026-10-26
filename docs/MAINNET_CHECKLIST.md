@@ -14,7 +14,7 @@ Nothing in this file has been done yet.
 - pushes (`payouts/deliver.ts`);
 - claim builds (`apps/worker/src/claims.ts`).
 
-The worker also refuses to start if the RPC's genesis hash doesn't match `SOLANA_CLUSTER`. Payouts stay in dry-run until `PAYOUTS_DRY_RUN=false`.
+The worker and the live API also refuse to start if the RPC's genesis hash doesn't match `SOLANA_CLUSTER`. Payouts stay in dry-run until `PAYOUTS_DRY_RUN=false`.
 
 ## 1. Owner decisions (HANDOFF §12)
 
@@ -36,14 +36,15 @@ The details are in `docs/AUDIT.md`, "Open owner decisions".
 - [ ] **Thresholds:**
       - `MIN_ROUND_USD`: the spec says $5; the economics model suggests $1 with batched swaps.
       - `MIN_HOLDER_USD`, `AUTO_PUSH_MIN_USD`, `PUSH_NEW_ATA_MIN_USD` and `MAX_SWAP_IMPACT_BPS`.
-- [ ] **Hourly caps**, each set on purpose and not left at its default (HANDOFF §9):
-      - `SWAP_HOURLY_CAP_LAMPORTS` (default 100 SOL): what the fee claimer may swap into stocks.
+- [ ] **Hourly caps and the swap size limit**, each set on purpose and not left at its default (HANDOFF §9):
+      - `SWAP_HOURLY_CAP_LAMPORTS` (default 100 SOL): what the fee claimer may swap into stocks in an hour.
+      - `SWAP_BATCH_MAX_LAMPORTS` (default 20 SOL): the largest swap per stock per hour. It halves after a refusal for price impact and grows back after good swaps.
       - `PUSH_HOURLY_CAP_USD` (default $25,000): what the payout vault may send.
       - `LAUNCHER_HOURLY_CAP_LAMPORTS` (default 3 SOL): what the launcher may spend on creates and tips.
-      - Hitting a cap stops that step for the hour and sends a critical alert. Until NEW-2 is fixed, a swap batch over the swap cap or the impact limit is never split and never pays.
+      - Over a swap or send cap, the part that fits goes out and the rest waits for the next hour, with an alert. If a stock's holders' share is regularly over its size limit, its payouts fall further behind every hour.
 - [ ] **First live run: the dry-run backlog** (RB-3).
       - The first run with `PAYOUTS_DRY_RUN=false` sweeps every platform fee collected since the PlatformConfig's first trade.
-      - It pays the holders' share of all of it to whoever holds at that round.
+      - It pays the holders' share of all of it, within the hourly swap budget, to whoever holds at each round until the backlog is used up.
       - Decide between:
         - (a) keeping the backlog small by dry-running on mainnet only with launches paused;
         - (b) paying the holders the dry-run rounds computed (not built);
@@ -64,10 +65,8 @@ The details are in `docs/AUDIT.md`, "Open owner decisions".
 
 ## 2. Audit
 
-- [ ] Internal audit findings in `docs/AUDIT.md` are fixed or explicitly accepted. In particular:
-      - NEW-1: graduated-coin trades fail in the browser on lookup-table transactions. Neither the e2e tests nor the devnet rehearsal can catch it.
-      - NEW-2: swap batches are never split.
-      - Every row marked "partly fixed".
+- [ ] Internal audit findings in `docs/AUDIT.md` are fixed or explicitly accepted, in particular every row marked "partly fixed" or "open".
+- [ ] The GitHub Actions in `.github/workflows/ci.yml` are pinned to full commit SHAs (WEB-12).
 - [ ] **Third-party audit** of the money paths before real funds. Scope:
       - `packages/solana/src/live/*`: the transaction builders, the event decoders and the mainnet gate.
       - `apps/worker`: the launch pipeline (`launch.ts`), the dividend engine (`payouts/*`) and claims (`claims.ts`). Also recommended: `indexer.ts`, whose output decides each coin's share.
@@ -145,14 +144,22 @@ This section starts only after the sign-off at the bottom is complete. Until the
 
 **Before step 1 (no spend), the server matches the split layout** (WEB-1; `deploy/ecosystem.config.cjs`, `deploy/setup-vps.md`):
 
-- [ ] **Separate users.** `divvy-web`, `divvy-api` and `divvy-worker` each run their own PM2 daemon with `--only` their own app. `divvy` owns the releases and builds, and runs nothing.
-- [ ] **Separate env files.** `/etc/divvy/web.env`, `/etc/divvy/api.env` and `/etc/divvy/worker.env` exist, each `chmod 600` and owned by its app's user. No shared `divvy.env` is left.
-      - Only `worker.env` names keypair files.
-      - `api.env` has no key paths and sets its own `JUP_API_KEY_API` (API-10).
-      - `web.env` holds only `WEB_ORIGIN`, `API_INTERNAL_URL` and the `NEXT_PUBLIC_*` values.
-- [ ] **The keys are unreadable to the web and API.** As `divvy-api` and as `divvy-web`, reading anything in `/etc/divvy/keys` fails.
-- [ ] **Media storage.** `NODE_ENV=production` refuses a bad `STORAGE_DIR` and `PUBLIC_MEDIA_BASE`. `STORAGE_DIR` is outside `/srv/divvy` (NEW-4), or S3 is set up as decided in section 1.
-- [ ] **Browser RPC.** `NEXT_PUBLIC_SOLANA_RPC_URL` is set in the web build (WEB-9), and its origin is in the CSP `connect-src`.
+- [ ] **Separate users.**
+      - `divvy-web`, `divvy-api` and `divvy-worker` each run their own PM2 daemon with `--only` their own app.
+      - `divvy` owns the releases and builds, and runs nothing.
+      - `divvy-backup` runs the nightly dump.
+- [ ] **Separate env files**, laid out as in `deploy/setup-vps.md` §8. No shared `divvy.env` is left. Each file is `chmod 600` and owned by the user that reads it:
+
+      | File | Owner | What it holds |
+      |---|---|---|
+      | `/etc/divvy/web.env` | `divvy-web` | Only `WEB_ORIGIN` and `API_INTERNAL_URL`. |
+      | `/etc/divvy/api.env` | `divvy-api` | Its own `JUP_API_KEY_API` (API-10) and no key paths. |
+      | `/etc/divvy/worker.env` | `divvy-worker` | The only file that names keypair files. |
+      | `/etc/divvy/build.env` | `divvy` | Only the public `NEXT_PUBLIC_*` values, which are built into the bundle. |
+      | `/etc/divvy/backup.env` | `divvy-backup` | The backup settings. |
+- [ ] **The keys are unreadable to every other user.** As `divvy-api`, `divvy-web`, `divvy` and `divvy-backup`, reading anything in `/etc/divvy/keys` fails.
+- [ ] **Media storage.** `STORAGE_DIR` is `/var/lib/divvy/media` (outside the release; the apps refuse anything inside it, NEW-4), or S3 is set up as decided in section 1.
+- [ ] **Browser RPC.** `NEXT_PUBLIC_SOLANA_RPC_URL` is set in `build.env` before the build (WEB-9), and its origin is in the CSP `connect-src`.
 - [ ] **Dependencies.** Re-run `pnpm audit --prod`. Review anything not already covered by DEP-1 to DEP-5 and record it in `docs/AUDIT.md`.
 
 Steps:
@@ -163,7 +170,7 @@ Steps:
 2. [ ] Create Divvy's PlatformConfig: `fee_rate` 6000, `creator_fee_rate` 1500, with `FEE_WALLET` and `NFT_WALLET` set to the fee claimer's public key.
        - The script defaults both to the admin key, and payouts refuse to run unless `platform_fee_wallet` is the fee claimer.
        - Command: `FEE_WALLET=<fee claimer> NFT_WALLET=<fee claimer> I_HAVE_OWNER_APPROVAL=yes npx tsx create-platform-config.ts --send`.
-3. [ ] Fund the launcher with a small balance and keep `LAUNCHER_HOURLY_CAP_LAMPORTS` low. Set `SWAP_HOURLY_CAP_LAMPORTS` and `PUSH_HOURLY_CAP_USD` in `worker.env` to the values chosen in section 1.
+3. [ ] Fund the launcher with a small balance and keep `LAUNCHER_HOURLY_CAP_LAMPORTS` low. Set `SWAP_HOURLY_CAP_LAMPORTS`, `SWAP_BATCH_MAX_LAMPORTS` and `PUSH_HOURLY_CAP_USD` in `worker.env` to the values chosen in section 1.
 4. [ ] Set `DIVVY_MAINNET_ENABLED=true`, with `PAYOUTS_DRY_RUN=true` and launches paused from `/admin`.
 5. [ ] One test launch (`test-launch.ts --send`, Jito only). Check the pool, the metadata, and that the indexer marks it live.
 6. [ ] A small buy and sell from the UI.
@@ -175,13 +182,13 @@ Steps:
        - `unattributedLamports` stays 0.
 8. [ ] Live payouts (`PAYOUTS_DRY_RUN=false`), with the first rounds watched by hand.
        - The backlog decision from section 1 is applied.
-       - Each stock's first swap fits under `SWAP_HOURLY_CAP_LAMPORTS` and `MAX_SWAP_IMPACT_BPS` (NEW-2).
+       - The backlog drains within the swap budget at the expected rate (NEW-2). Watch the swap-budget alerts and the per-stock size limit.
        - Receipts open on the explorer.
 9. [ ] Open launches.
 
 ## 6. Operations
 
-- [ ] Telegram alerts arrive (low balance, late round, indexer lag, attribution gap).
+- [ ] Telegram alerts arrive (low balance, late round, indexer lag, attribution gap, empty fee vault).
 - [ ] Backups run and a restore drill passed (`deploy/backup/pg-restore.md`).
 - [ ] Load test of the board: 1,000 coins, 50 requests per second (HANDOFF Phase 5).
 - [ ] `docs/RUNBOOK.md` read by whoever is on call.

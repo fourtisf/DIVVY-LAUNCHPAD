@@ -10,11 +10,11 @@ This file records five internal reviews of the Divvy monorepo, all written on 20
 - an on-chain money-path review of the launch pipeline, the dividend engine, swaps, delivery and claims;
 - notes from the agent that rewrote `docs/RUNBOOK.md`.
 
-It also records a `pnpm audit --prod` run and the issues found while re-checking.
+It also records a `pnpm audit --prod` run and the issues found while re-checking and fixing.
 
 **This is not a third-party audit.** A third-party audit of the money paths is still required before mainnet. Its scope and the sign-off are in `docs/MAINNET_CHECKLIST.md`.
 
-The reviews read an older state of the code. Each finding was re-checked against the code at commit `fe9d234`, which includes the fixes from commits `8db9efb` and `fe9d234`. This file cites functions and files rather than the reviews' line numbers. A test is named only where its body was read and it exercises the fix.
+The reviews read an older state of the code. Each finding was re-checked against the code at commit `68409dc`, which includes the fixes from commits `8db9efb`, `fe9d234` and `68409dc`. Deploy docs were checked as they are in the working tree. This file cites functions and files rather than the reviews' line numbers. A test is named only where its body was read and it exercises the fix.
 
 This environment has no mainnet RPC. Anything that depends on the deployed programs or on live data is listed under "Needs on-chain verification" (R1 to R13), together with the read-only check that settles it.
 
@@ -31,20 +31,20 @@ This environment has no mainnet RPC. Anything that depends on the deployed progr
 |---|---|---|---|---|---|---|
 | API security (API) | 10 | 0 | 0 | 0 | 0 | 10 |
 | Indexer and data (DATA) | 14 | 4 | 0 | 8 | 0 | 26 |
-| Web and deploy (WEB) | 9 | 3 | 1 | 0 | 0 | 13 |
-| On-chain money paths (MONEY) | 17 | 3 | 0 | 7 | 0 | 27 |
-| Runbook agent notes (RB) | 10 | 1 | 1 | 0 | 3 | 15 |
+| Web and deploy (WEB) | 9 | 2 | 2 | 0 | 0 | 13 |
+| On-chain money paths (MONEY) | 18 | 2 | 0 | 7 | 0 | 27 |
+| Runbook agent notes (RB) | 11 | 0 | 1 | 0 | 3 | 15 |
 | Dependencies (DEP) | 0 | 1 | 4 | 0 | 0 | 5 |
-| Found while re-checking (NEW) | 0 | 0 | 0 | 0 | 4 | 4 |
-| **Total** | **60** | **12** | **6** | **15** | **7** | **100** |
+| Found while re-checking and fixing (NEW) | 5 | 0 | 0 | 0 | 0 | 5 |
+| **Total** | **67** | **9** | **7** | **15** | **3** | **101** |
 
 The 15 "needs on-chain verification" rows overlap. They reduce to R1 to R13 below; R11 and R13 also cover points raised while re-checking. WEB-14 (dependencies) is counted under DEP.
 
-The open items that matter most for mainnet:
-- **NEW-1:** graduated-coin trades fail in the browser.
-- **NEW-2:** a swap batch that is too large is never split.
+What matters most for mainnet now:
 - **RB-3:** the first live run pays out the whole dry-run backlog. This is an owner decision.
 - **R2 and R11:** these can stop payouts or lose trades.
+- **DEP-1:** the Next.js upgrade (owner decision).
+- **The 11 partly fixed rows.**
 
 ## API security (`apps/api`, `packages/server`)
 
@@ -96,18 +96,18 @@ The open items that matter most for mainnet:
 
 | ID | Severity | Finding | Status | Where and how |
 |---|---|---|---|---|
-| WEB-1 | High | The web app, API and worker ran as one OS user, so a web or API compromise could read the hot-wallet keys. | fixed | `deploy/ecosystem.config.cjs` runs each app as its own user (`divvy-web`, `divvy-api`, `divvy-worker`) with its own env file (`/etc/divvy/web.env`, `api.env`, `worker.env`). `.env.example` says which settings go in which file. `deploy/setup-vps.md` (updated alongside this record, not yet committed) creates those users, puts the keys in `/etc/divvy/keys` for `divvy-worker` only, generates them with Node's built-in crypto, and explains how to move an existing single-user server. The fix only counts once the server is built this way. This is a go-live check in the checklist, and the apps won't start on the old layout. |
+| WEB-1 | High | The web app, API and worker ran as one OS user, so a web or API compromise could read the hot-wallet keys. | fixed | `deploy/ecosystem.config.cjs` runs each app as its own user (`divvy-web`, `divvy-api`, `divvy-worker`) with its own env file (`/etc/divvy/web.env`, `api.env`, `worker.env`). `.env.example` says which settings go in which file. `deploy/setup-vps.md` (updated alongside this record, not yet committed) does the rest:<br>• `divvy` only builds, reading the public `NEXT_PUBLIC_*` values from `/etc/divvy/build.env`;<br>• a separate `divvy-backup` user reads `/etc/divvy/backup.env`;<br>• the keys live in `/etc/divvy/keys`, readable by `divvy-worker` only;<br>• the keys are generated with Node's built-in crypto or `solana-keygen`, never the release's packages;<br>• it explains how to move an existing single-user server.<br>The fix only counts once the server is built this way. This is a go-live check in the checklist, and the apps won't start on the old layout. |
 | WEB-2 | High | All server-side API calls shared one rate-limit bucket, so one visitor could take the site down. | fixed | `apps/web/src/lib/server-api.ts` forwards the visitor's IP (from Nginx's `X-Real-IP`) and country, and shares `/api/config` and `/api/stats` between renders for 5 s. Nginx limits pages with the `divvy_web` zone. No test. |
-| WEB-3 | Medium | The browser signed whatever the API built, and showed a local estimate instead of the quote. | partly fixed | `checkTransaction` (`apps/web/src/lib/txcheck.ts`) does five checks:<br>• the wallet must be a signer and, except for claims, the fee payer;<br>• only the expected programs may run;<br>• SOL and token moves to other people's accounts are refused;<br>• token accounts created for other owners are refused;<br>• a trade must include the coin's mint.<br>`TradeBox.tsx` also checks the server's `minOut` against the chosen slippage and asks before a quote far below the estimate. Left:<br>• LaunchLab buy/sell arguments aren't decoded from the instruction;<br>• Jupiter route instructions are accepted whole;<br>• the box still shows the local estimate before the quote.<br>See NEW-1: this check breaks every Jupiter transaction. |
-| WEB-4 | Medium | Sign-in used raw `signMessage`, so the wallet never checked the domain. | partly fixed | `apps/web/src/lib/session.tsx` uses the wallet's `signIn` when it has one. The API requires the signed bytes to equal the issued message (`signedMessageMatches`, `apps/api/src/routes/auth.ts`). The fallback checks that the message names this host and wallet. Test: `contract.test.ts` "accepts a wallet signIn only when the signed bytes are the issued message". Left: the API still accepts plain `signMessage` signatures, which wallets without `signIn` need, so a phishing page can still collect one. Admin sessions still last 7 days, with no new signature asked before admin actions. |
+| WEB-3 | Medium | The browser signed whatever the API built, and showed a local estimate instead of the quote. | partly fixed | `checkTransaction` (`apps/web/src/lib/txcheck.ts`) does five checks:<br>• the wallet must be a signer and, except for claims, the fee payer;<br>• only the expected programs may run;<br>• SOL and token moves to other people's accounts are refused;<br>• token accounts created for other owners are refused;<br>• a trade must include the coin's mint.<br>`TradeBox.tsx` also checks the server's `minOut` against the chosen slippage and asks before a quote far below the estimate. Left:<br>• LaunchLab buy/sell arguments aren't decoded from the instruction;<br>• Jupiter route instructions are accepted whole;<br>• the box still shows the local estimate before the quote.<br>Test: `apps/web/src/lib/txcheck.test.ts` (see NEW-1). |
+| WEB-4 | Medium | Sign-in used raw `signMessage`, so the wallet never checked the domain. | accepted risk | `apps/web/src/lib/session.tsx` uses the wallet's `signIn` when it has one. The API requires the signed bytes to equal the issued message (`signedMessageMatches`, `apps/api/src/routes/auth.ts`). The fallback checks that the message names this host and wallet. Test: `contract.test.ts` "accepts a wallet signIn only when the signed bytes are the issued message". Admin powers now end 12 hours after sign-in (`ADMIN_SESSION_MS`, `apps/api/src/live/viewer.ts`); test: `live.test.ts` "signs in with a DB-backed session and flags admins". Accepted: the API still accepts plain `signMessage` signatures, because wallets without `signIn` need them, so a phishing page can still collect one for a non-admin session. |
 | WEB-5 | Medium | `/API/...` spellings reached the API through the Next rewrite, skipping Nginx's API rules (including the launch pause). | fixed | `experimental.caseSensitiveRoutes` is set in `apps/web/next.config.mjs`. Nginx answers any other `/api` spelling with 404, and `/api/` is a `^~` prefix (`deploy/nginx/divvy.conf`). |
-| WEB-6 | Medium | The local storage defaults would break on-chain metadata URIs. | fixed | `assertProductionStorage` (`packages/server/src/storage.ts`) runs in both the API and the worker through `loadStorage`. In production it refuses a relative `STORAGE_DIR`, one inside the app folder, and a `PUBLIC_MEDIA_BASE` that isn't public https. Test: `packages/server/test/storage.test.ts` "production storage guard". See NEW-4. |
+| WEB-6 | Medium | The local storage defaults would break on-chain metadata URIs. | fixed | `assertProductionStorage` (`packages/server/src/storage.ts`) runs in both the API and the worker through `loadStorage`. In production it refuses a relative `STORAGE_DIR`, one inside the app folder, and a `PUBLIC_MEDIA_BASE` that isn't public https. Test: `packages/server/test/storage.test.ts` "production storage guard". The release-root gap is closed too (NEW-4). |
 | WEB-7 | Medium | The CSP broke the Mobile Wallet Adapter on Android. | fixed | `connect-src` allows `ws://localhost:*` and `upgrade-insecure-requests` is removed (`divvy.conf`). It hasn't been tried on an Android phone yet (checklist). |
 | WEB-8 | Medium | Errors after a send still said "Nothing was spent", inviting a second trade. | fixed | After a confirmation error, `signAndSend` (`apps/web/src/lib/tx.ts`) checks the signature status and raises `SentUnconfirmed` ("check the explorer before trying again"). "Nothing was sent" is now only the fallback for errors before sending (`TradeBox.tsx`). |
 | WEB-9 | Low | Amount parsing and the sell presets were wrong. | partly fixed | `TradeBox.tsx` now parses decimals strictly, converts to exact base units with BigInt, starts with an empty sell field in live mode, and takes "100%" from the raw balance. Left: the percentage buttons still do nothing without `NEXT_PUBLIC_SOLANA_RPC_URL` (set it in production). |
 | WEB-10 | Low | Switching to S3 storage would break images (CSP, and a tainted WebGL canvas). | fixed | `img.crossOrigin = "anonymous"` is set in `apps/web/src/three/scenes.ts`. `divvy.conf` documents adding the bucket's origin to `img-src` and a CORS rule. This becomes a config step once a storage provider is chosen (owner decision). |
 | WEB-11 | Low | The geofence let unknown countries through. | fixed | Same fix as API-8. |
-| WEB-12 | Low | CI pins GitHub Actions to tags, not commit SHAs. | accepted risk | `.github/workflows/ci.yml` runs with `permissions: contents: read`, uses no secrets, runs on `push` and `pull_request` (not `pull_request_target`) and deploys nothing. |
+| WEB-12 | Low | CI pins GitHub Actions to tags, not commit SHAs. | accepted risk | `.github/workflows/ci.yml` runs with `permissions: contents: read`, uses no secrets, runs on `push` and `pull_request` (not `pull_request_target`) and deploys nothing. The mainnet checklist still asks for SHA pins before mainnet. |
 | WEB-13 | Low | `docker-compose.yml` published Postgres and Redis on all interfaces. | fixed | Both are bound to `127.0.0.1`. |
 | WEB-14 | Not given | Dependencies. | see DEP-1 to DEP-5 | The review knew of no advisory for next 14.2.35. `pnpm audit --prod` found 36. |
 
@@ -118,22 +118,22 @@ The open items that matter most for mainnet:
 | MONEY-1 | High | A confirmed swap batch's output was shared with rounds that never paid into it (a double payout). | fixed | `stepSwaps` (`apps/worker/src/payouts/engine.ts`) records `swapBatchId` on the funding rounds when the batch is created, and splits the output only among them. Rounds that arrive later are carried. Resumed hours open no new rounds (`resumeOnly`). Test: `engine.test.ts` "a round that turns up after its hour's swap is carried". |
 | MONEY-2 | High | A vault claim not attributed before its hour ended was never attributed. | fixed | Same fix as DATA-3. |
 | MONEY-3 | High | A swap that landed could be treated as failed and swapped again. | fixed | Only a "failed on chain" error refuses the batch. Any other error after signing leaves the batch at `sent`, and the next run asks the chain (`outcome`). The batch goes back to pending only after a failed outcome, or after 5 minutes without one. No test of the outcome path. |
-| MONEY-4 | High | One RPC error while reading the vault moved an hour of holders' fees to Divvy. | fixed | `vaultBalance` (`payouts/chain.ts`) passes RPC errors on. An empty vault produces a claim that covers no trades, so those fees stay for the next claim (`stepClaim`). Nothing alerts if the vault stays empty while fees keep being indexed, which is how a no-go on R2 would show up. |
+| MONEY-4 | High | One RPC error while reading the vault moved an hour of holders' fees to Divvy. | fixed | `vaultBalance` (`payouts/chain.ts`) passes RPC errors on. An empty vault produces a claim that covers no trades, so those fees stay for the next claim (`stepClaim`). If the vault is empty while at least 0.01 SOL of indexed fees are owed since the last claim, `alertEmptyVault` sends a critical alert, in dry-run and live. That is how a no-go on R2 would show up. |
 | MONEY-5 | Medium | Concurrent settles restored a credit twice. | fixed | `settleTransfers` (`deliver.ts`) and `settleClaim` (`claims.ts`) move only pending rows, and only the call that moved a row restores the credit. Test: `engine.test.ts` "two settlers expiring the same transfer restore the credit once". The claim race isn't tested. |
 | MONEY-6 | Medium | Claim and transfer expiry read statuses before the block height, with no margin. | fixed | `reconcileClaims` and `reconcileTransfers` read the block height first, then the statuses, and expire only 150 blocks past `lastValidBlockHeight` (`EXPIRY_MARGIN`). `engine.test.ts` "claims: reserves the credit, then confirms or gives it back" covers expiry, not the race. |
 | MONEY-7 | Medium | A launch was marked failed while its create could still land. | fixed | Same fix as DATA-4. |
 | MONEY-8 | Medium | The swap guards checked the quote, not the transaction that was signed, and the public RPC send could be sandwiched. | fixed | `swap` (`payouts/chain.ts`) checks the built swap: mints, `inAmount`, price impact, and `minOut` against the reference floor. It then simulates it, sends it as a Jito bundle on mainnet, and alerts if the output is below the minimum. No test: the engine tests stub the chain. |
 | MONEY-9 | Medium | The fee claimer signed whatever instructions Jupiter returned. | fixed | `checkSwapInstructions` (`payouts/swapguard.ts`) allows ComputeBudget, Jupiter, wrapping and unwrapping SOL, and token accounts for the fee claimer or payout vault. The simulation bounds the SOL spent and the minimum received. Test: `apps/worker/test/swapguard.test.ts`. The simulation bounds aren't tested. |
-| MONEY-10 | Medium | One bad recipient blocked its whole push batch forever. | fixed | A failed batch is retried one recipient at a time. Wallets that still fail are skipped for pushes for 7 days (`deliverCredits`). No test. |
+| MONEY-10 | Medium | One bad recipient blocked its whole push batch forever. | fixed | A failed batch is retried one recipient at a time (`deliverCredits`). A wallet that still fails is skipped for 24 hours, each wallet on its own clock, with a warning alert (`blockedWallets`, `blockWallet`). Its credit stays and is retried, so it isn't stranded under push. No test. |
 | MONEY-11 | Medium | The holder snapshot could be gamed by flash holding and by moving balances while pages were read. | partly fixed | `presnapshot.ts` takes a snapshot at a secret minute in the middle of the hour. `holdersForRound` pays each wallet on the smaller of that and its balance at the round, and refuses snapshots that add up to more than the supply. Test: `engine.test.ts` "pays each wallet on the smaller of its mid-hour and round balances". Left: paged snapshots aren't pinned to one slot, and the supply check misses double counts smaller than the frozen or burned balance. |
 | MONEY-12 | Low | Trades after the claim in its own slot were never paid. | fixed | Same fix as DATA-2. |
-| MONEY-13 | Low | There were no spend caps on fee-claimer swaps or payout-vault sends. | fixed | `stepSwaps` enforces `SWAP_HOURLY_CAP_LAMPORTS` (default 100 SOL) and `deliverCredits` enforces `PUSH_HOURLY_CAP_USD` (default $25,000), both from `apps/worker/src/env.ts`. See NEW-2. |
-| MONEY-14 | Low | Hours older than the previous one were never resumed, and stale dust could be paid twice. | partly fixed | `apps/worker/src/index.ts` resumes unfinished hours up to 24 hours back. A coin's rounds run in order, and dust comes only from delivered rounds (`stepOpenRounds`, `previousDust`). Left: a round stuck for more than 24 hours is never resumed, and it holds back that coin's later rounds until someone steps in. |
-| MONEY-15 | Low | The payout vault paid the fee for every claim, with no minimum and no back-off. | fixed | When a price is known, claims under `AUTO_PUSH_MIN_USD` are refused. A claim that fails on chain blocks the next one for an hour (`buildClaim`, `settleClaim`). The vault is still the fee payer. |
+| MONEY-13 | Low | There were no spend caps on fee-claimer swaps or payout-vault sends. | fixed | The caps come from `apps/worker/src/env.ts`:<br>• Swaps: `SWAP_HOURLY_CAP_LAMPORTS` (default 100 SOL), plus a per-stock size limit, `SWAP_BATCH_MAX_LAMPORTS` (default 20 SOL). `stepOpenRounds` budgets against both and `stepSwaps` checks the cap again before sending. Over budget, part is paid and the rest carries (NEW-2).<br>• Sends: `PUSH_HOURLY_CAP_USD` (default $25,000). `deliverCredits` sends what fits and leaves the rest for the next hour. The send cap has no test of its own. |
+| MONEY-14 | Low | Hours older than the previous one were never resumed, and stale dust could be paid twice. | fixed | `apps/worker/src/index.ts` resumes every unfinished earlier hour, however old, and sends a critical alert once a round is more than a day old. A coin's rounds run in order, and dust comes only from delivered rounds (`stepOpenRounds`, `previousDust`). The mid-hour snapshot is kept for 26 hours, or until its round snapshots or carries (`dropPreSnapshot`), so a late round is still capped by it. No test of the resume loop. |
+| MONEY-15 | Low | The payout vault paid the fee for every claim, with no minimum and no back-off. | fixed | Claims under `AUTO_PUSH_MIN_USD` are refused, and claims for a stock with no price wait (`NO_PRICE`). A claim that fails on chain blocks the next one for an hour (`buildClaim`, `settleClaim`). The vault is still the fee payer. |
 | MONEY-16 | Low | Item status wasn't tied to amounts. | fixed | `markItems` (`deliver.ts`) marks the oldest credited items only up to the amount sent or claimed. The partial case isn't tested. |
 | MONEY-17 | Low | CPMM creator-fee collections had no recovery. | fixed | `stepCpmmCreatorFees` asks the chain about rows left at 0 lamports, then creates the allocation or removes the row. |
 | MONEY-18 | Low | Program-owned holders got credits nobody can claim. | partly fixed | `deliverCredits` never creates a token account for an off-curve wallet. Left: `classifyHolders` (`plan.ts`) still gives them a share, which then sits in `Credit`. |
-| MONEY-19 | Low | The mainnet gate trusted the `SOLANA_CLUSTER` label. | fixed | The worker checks the RPC's genesis hash when it starts (`assertClusterMatchesRpc`, `packages/solana/src/live/config.ts`). The constants aren't logged in VERIFIED.md yet (R13). |
+| MONEY-19 | Low | The mainnet gate trusted the `SOLANA_CLUSTER` label. | fixed | The worker, and the API in live mode (`apps/api/src/server.ts`), check the RPC's genesis hash when they start (`assertClusterMatchesRpc`, `packages/solana/src/live/config.ts`). The constants aren't logged in VERIFIED.md yet (R13). |
 | MONEY-20 | Low | Two money steps relied on there being a single worker process. | fixed | `stepSnapshots` credits only after a conditional step change. `stepSwaps` moves a batch from `pending` to `sent` before swapping. The Redis lock is renewed for as long as a run lasts (`apps/worker/src/lock.ts`). |
 | MONEY-V1 | Not given | The TradeEvent layout. Reordered fee fields would pass the sanity checks. | needs on-chain verification | R1 |
 | MONEY-V2 | Not given | Whether `PoolState.platform_fee` still accrues per pool. | needs on-chain verification | R2 |
@@ -154,9 +154,9 @@ The open items that matter most for mainnet:
 | RB-5 | Not given | The meter showed "late" in dry-run. | fixed | See DATA-12. |
 | RB-6 | Not given | Redis being down took the API down, and `/api/health` answers 200 with `ok:false`. | fixed | The rate limiter has `skipOnError: true` (`app.ts`). The 200-with-body behaviour is documented in `docs/RUNBOOK.md`, and its checks read `.ok`. |
 | RB-7 | Not given | The API and the worker wrote media to different folders. | fixed | See WEB-6. |
-| RB-8 | Not given | The payout lock was shorter than a run, and SIGTERM didn't wait for running jobs. | fixed | `withLock` renews the lock while the job runs (`lock.ts`). On SIGINT or SIGTERM the worker waits up to 120 s for running jobs (`index.ts`), which fits inside PM2's 130 s `kill_timeout`. |
+| RB-8 | Not given | The payout lock was shorter than a run, and SIGTERM didn't wait for running jobs. | fixed | `withLock` renews the lock while the job runs (`lock.ts`). On SIGINT or SIGTERM, the queue workers stop taking jobs straight away, and the worker waits up to 120 s for running jobs (`index.ts`). That fits inside PM2's 130 s `kill_timeout`. |
 | RB-9 | Not given | The admin late-round count included dry-run rounds. | fixed | It is now filtered by the current `dryRun` (`apps/api/src/live/routes/admin.ts`). |
-| RB-10 | Not given | Hidden coins were still listed in `/api/payouts`, `/api/stats` and live events. | partly fixed | Lists, receipts and live events now leave hidden coins out (`public.ts`, `live/routes/live.ts`). Left: the `/api/payouts` summary counts (`rounds`, `walletPayments`) still include them. |
+| RB-10 | Not given | Hidden coins were still listed in `/api/payouts`, `/api/stats` and live events. | fixed | Lists, receipts and live events now leave hidden coins out (`public.ts`, `live/routes/live.ts`). The `/api/payouts` summary counts (`rounds`, `walletPayments`) now leave them out too. |
 | RB-11 | Not given | Comments in the PM2 and Nginx files were out of date. | fixed | They have been updated. |
 | RB-12 | Not given | Round and swap-batch status `failed` is never set. | open | Low. Failures are carried instead, so the API's `failed` filters never match anything. |
 | RB-13 | Not given | The Jito alert fires per failed attempt, not on a failure rate (HANDOFF §8). | open | Low. It is limited to one alert per 15 minutes (`launch.ts`). |
@@ -184,14 +184,17 @@ The open items that matter most for mainnet:
 | DEP-4 | High | deepmerge-ts below 8, through the Prisma CLI's config loader. | accepted risk | Used only at migrate and build time, on Divvy's own config. |
 | DEP-5 | 4 moderate | stream-json below 3.6 and uuid below 11.1.1, through `@solana/web3.js` and jayson. | accepted risk | Not reached. web3.js loads only `jayson/lib/client/browser`, which never requires stream-json. It calls uuid v4 without a `buf` argument; the advisory needs v3, v5 or v6 with `buf`. |
 
-## Found while re-checking
+## Found while re-checking and fixing
+
+NEW-1 to NEW-4 were found while re-checking the reviews. NEW-5 was found while fixing. All five are now fixed in commit `68409dc`.
 
 | ID | Severity | Finding | Status | Where and how |
 |---|---|---|---|---|
-| NEW-1 | Medium | The browser's transaction check throws on any transaction that uses address lookup tables, so graduated-coin (Jupiter) trades can't be made from the UI. | open | `checkTransaction` (`apps/web/src/lib/txcheck.ts`) passes empty `accountKeysFromLookups` to `getAccountKeys`. In web3.js 1.99, `MessageV0.getAccountKeys` throws ("mismatch in the number of account keys from lookups") unless the counts match. `swapTransaction` (`packages/solana/src/live/jupiter.ts`) compiles Jupiter routes with Jupiter's lookup tables. The trade fails before the wallet opens, with "Nothing was sent". It fails closed, so no funds are at risk. Fix: build the key list from the static keys and treat lookup-table accounts as unknown. Neither the e2e tests (mock mode builds no transaction) nor the devnet rehearsal (no Jupiter on devnet) would catch it. |
-| NEW-2 | Medium | A swap batch over `SWAP_HOURLY_CAP_LAMPORTS`, or over `MAX_SWAP_IMPACT_BPS`, is never split. It is refused every hour and keeps growing. | open | `stepSwaps` makes one batch per stock per hour. `refuse()` carries its rounds, and the next hour's batch holds them plus the new fees. `chunkSwap` in `payouts/plan.ts` exists and is tested, but nothing calls it. Every coin paying that stock stops paying until someone raises the cap by hand. This is most likely on the first live run (RB-3). |
-| NEW-3 | Low | Concurrent launches can starve the database connection pool. | open | The launch transaction (`create.ts`) holds a pooled connection while it waits on `pg_advisory_xact_lock`. The lock holder then runs `launchChecks` on `d.prisma`, which needs a second connection. If as many launches are waiting as there are pool connections, the holder can't get one: it fails with a 500 after Prisma's pool timeout, and other API routes wait as well. Fix: run the checks inside the lock on `tx`. |
-| NEW-4 | Low | The production storage guard checks the app's folder, not the release. | open | `assertProductionStorage` compares `STORAGE_DIR` with `process.cwd()` (`/srv/divvy/current/apps/<app>`). So `/srv/divvy/current/data/media`, which is inside the release through the `current` symlink, passes. Fix: refuse anything under `/srv/divvy`, or compare against the release root. |
+| NEW-1 | Medium | The browser's transaction check threw on any transaction that uses address lookup tables, so graduated-coin (Jupiter) trades couldn't be made from the UI. | fixed | `checkTransaction` (`apps/web/src/lib/txcheck.ts`) used to call `getAccountKeys` with empty lookup keys, which web3.js 1.99 refuses. It now reads only the static keys; programs can't come from a lookup table. An index past the static keys is a lookup-table account and reads as unknown. Test: `apps/web/src/lib/txcheck.test.ts` "passes a Jupiter route compiled with address lookup tables" compiles a real v0 route with a lookup table. `pnpm test` now runs it (`apps/web` has a `test` script). |
+| NEW-2 | Medium | A swap batch over `SWAP_HOURLY_CAP_LAMPORTS`, or over `MAX_SWAP_IMPACT_BPS`, was never split. It was refused every hour and kept growing, which stopped every coin paying that stock. | fixed | `stepOpenRounds` (`payouts/engine.ts`) gives each stock an hourly budget: the smaller of its adaptive size limit and what's left of `SWAP_HOURLY_CAP_LAMPORTS`. The size limit starts at `SWAP_BATCH_MAX_LAMPORTS`. `budgetRounds` (`plan.ts`) gives every coin the same fraction of its waiting share. The allocation that crosses the budget is split, so the rest stays carried. The size limit halves after a refusal for price impact or a quote off the reference price, and grows back by half after good swaps (`shrinkSwapLimit`, `growSwapLimit`). `chunkSwap` was removed. Tests: `engine.test.ts` "pays a backlog over the swap budget in part, carries the rest, and halves the size after an impact refusal (audit)" and `plan.test.ts` "budgets rounds". |
+| NEW-3 | Low | Concurrent launches could starve the database connection pool. | fixed | The checks inside the lock now run on the advisory-lock transaction's own connection (`launchChecks` with `prisma: tx` in `apps/api/src/live/routes/create.ts`). No test. |
+| NEW-4 | Low | The production storage guard checked the app's folder, not the release. | fixed | `assertProductionStorage` also refuses a `STORAGE_DIR` inside the workspace root, meaning the nearest folder holding `pnpm-workspace.yaml`. It checks both the path the app was started from and its realpath (`packages/server/src/storage.ts`). Test: `packages/server/test/storage.test.ts` (`../../data/media` is refused). |
+| NEW-5 | Medium | A vault claim whose transaction failed on chain got a trade marker from the indexer. It was then attributed with 0 lamports over real trades, scaling every coin to 0, and those trades fell outside the next claim's range. | fixed | `Indexer.follow` (`apps/worker/src/indexer.ts`) no longer marks a claim whose signature has `err`. `recoverClaim` then sees the failure and gives the claim an empty range, so its trades roll into the next claim. No test. |
 
 ## Needs on-chain verification
 
@@ -207,7 +210,7 @@ None of these can be checked here, because this environment has no mainnet RPC. 
 **R2. Whether `PoolState.platform_fee` still accrues per pool.** (DATA-V8, MONEY-V2; VERIFIED item 6)
 - **Check:** run `read-launchlab-configs.ts --pool-of <a busy PlatformConfig>`, for example StonkFun's `6BwHH…`. It prints the pool's `platformFeeCounter` and the platform fee vault balance. Run it twice, some minutes apart.
 - **Go:** the counter stays unchanged while the platform vault grows.
-- **No-go:** the counter grows. Fees would then sit in each pool, Divvy's hourly vault claim would sweep nothing, trades would roll forward every hour and no holder would ever be paid. Nothing alerts on this (see MONEY-4). A per-pool `claim_platform_fee` path must be built first.
+- **No-go:** the counter grows. Fees would then sit in each pool, Divvy's hourly vault claim would sweep nothing, trades would roll forward every hour and no holder would ever be paid. The critical `vault-empty` alert fires in this case (MONEY-4). A per-pool `claim_platform_fee` path must be built first.
 - **During go-live:** the 24-hour mainnet dry-run (go-live step 7) also shows it, as `vaultBalance` in the log stays 0 while indexed fees grow.
 
 **R3. The curve vault's owner is the LaunchLab authority PDA.** (MONEY-V3)
@@ -233,7 +236,7 @@ None of these can be checked here, because this environment has no mainnet RPC. 
 **R5. DefaultAccountState Frozen on xStock mints and new token accounts.** (MONEY-V5; VERIFIED item 11)
 - **Check:** `fetch-xstocks.ts` prints `defaultAccountState` for each mint.
 - **Go:** the state is initialized, or the extension isn't present.
-- **No-go:** the state is frozen. New token accounts would start frozen, so pushes that create an account and every claim to a new account would fail. Failed claims start the 1-hour back-off, and failed pushes put the wallet on the 7-day skip list. Leave that stock out, or agree a thaw process with the issuer.
+- **No-go:** the state is frozen. New token accounts would start frozen, so pushes that create an account and every claim to a new account would fail. Failed claims start the 1-hour back-off, and a failed push skips the wallet for 24 hours before trying again. Leave that stock out, or agree a thaw process with the issuer.
 
 **R6. Compute-unit limits of real transactions.** (MONEY-V6)
 - **Limits in the code:**
@@ -307,7 +310,7 @@ None of these can be checked here, because this environment has no mainnet RPC. 
 - **Why it matters:** `GENESIS_HASH` in `packages/solana/src/live/config.ts` (mainnet `5eykt4…`, devnet `EtWTRA…`) isn't logged in `docs/VERIFIED.md`.
 - **Check:** call `getGenesisHash` on the production mainnet RPC and on a devnet RPC, then log both values with their source.
 - **Go:** they equal the constants.
-- **No-go:** the worker refuses to start, so it fails closed. Correct the constant from a cited source.
+- **No-go:** the worker and the live API refuse to start, so they fail closed. Correct the constant from a cited source.
 
 ## Open owner decisions
 
@@ -328,7 +331,13 @@ None of these can be checked here, because this environment has no mainnet RPC. 
    - xStocks are offered to non-U.S. persons only (VERIFIED item 11).
 6. **Thresholds and caps.**
    - Thresholds: `MIN_ROUND_USD` (the spec says $5; the economics model suggests $1 with batched swaps), `MIN_HOLDER_USD`, `AUTO_PUSH_MIN_USD`, `PUSH_NEW_ATA_MIN_USD`, `MAX_SWAP_IMPACT_BPS`.
-   - Hourly caps: `SWAP_HOURLY_CAP_LAMPORTS` (default 100 SOL), `PUSH_HOURLY_CAP_USD` (default $25,000), `LAUNCHER_HOURLY_CAP_LAMPORTS` (default 3 SOL). Each should be set on purpose, not left at its default. Until NEW-2 is fixed, a batch over the swap cap or the impact limit never pays.
+   - Hourly caps and the swap size limit. Each should be set on purpose, not left at its default:
+     - `SWAP_HOURLY_CAP_LAMPORTS` (default 100 SOL);
+     - `SWAP_BATCH_MAX_LAMPORTS`, the largest swap per stock per hour (default 20 SOL);
+     - `PUSH_HOURLY_CAP_USD` (default $25,000);
+     - `LAUNCHER_HOURLY_CAP_LAMPORTS` (default 3 SOL).
+
+     Money over the swap budget waits and is paid in later hours. If a stock's holders' share is regularly larger than its size limit, payouts for that stock fall further behind every hour (the budget alert fires).
 7. **Next.js 15.5 upgrade (DEP-1).** It changes the stack CLAUDE.md pins, so it needs the owner's OK. It is recommended before mainnet.
 8. **Dividend assets at launch** (HANDOFF §12). Insert them from `fetch-xstocks.ts` output, after R4 and R5.
 9. **Copy that doesn't match how the money moves.** On chain:
@@ -360,14 +369,17 @@ What `apps/worker/src/payouts/engine.ts` does today on the first run with `PAYOU
   - The real platform fee vault keeps every platform fee since the PlatformConfig's first trade, including the test launch.
 - **The first live claim starts from zero.** `stepClaim` looks for the previous claim with the same `dryRun` value. There is none, so the claim starts at `fromTradeId = 0` and `fromSlot = 0` and sweeps the vault's whole balance.
 - **It re-checks every trade since launch.** `attributeVaultClaim` covers every curve trade the indexer has stored, from the first one up to the claim's position in the stream. Before attributing, it asks the RPC for the status of every one of those signatures and deletes trades it can't find (R11c).
-- **Each coin gets all its fees at once.**
-  - Each coin gets its all-time indexed platform fees.
-  - The holders' 5/6 of them opens one round per coin in the current hour. Coins under `MIN_ROUND_USD` carry.
+- **Each coin is credited all its fees at once.**
+  - Each coin's allocations hold its all-time indexed platform fees.
   - Dry-run allocations are never reused, and dry-run `PayoutItem`s never become credits.
-- **One swap per stock covers the whole backlog.** If it is over `SWAP_HOURLY_CAP_LAMPORTS` or `MAX_SWAP_IMPACT_BPS`, it is refused and carried every hour after (NEW-2).
+- **The backlog is paid out over several hours** (NEW-2).
+  - Each stock's swap takes at most its size limit (`SWAP_BATCH_MAX_LAMPORTS`, default 20 SOL) and what's left of `SWAP_HOURLY_CAP_LAMPORTS`.
+  - Every coin paying that stock gets the same fraction of its share each hour; the rest stays carried.
+  - A coin whose fraction is under `MIN_ROUND_USD` carries whole that hour.
+  - A refusal for price impact halves the next hour's size.
 - **Who gets it:**
-  - The holders at that round, each capped by the secret mid-hour snapshot of the hour before. The pre-snapshot job also runs during dry-run.
-  - Holders who sold during dry-run get nothing. Anyone who buys more than an hour before go-live shares in the whole backlog.
+  - Each hour's part goes to the holders at that hour's round, each capped by the secret mid-hour snapshot of the hour before. The pre-snapshot job also runs during dry-run.
+  - Holders who sold during dry-run get nothing. Anyone who buys more than an hour before go-live shares in the backlog for as long as it lasts.
 - **A test shows this:** `engine.test.ts` "live: claims, attributes, swaps…" runs live right after the dry-run test and pays the same trades again.
 - **Size:** the backlog equals the last dry-run `vaultBalance` that `stepClaim` logged. The meters' `pendingUsd` shows the holders' part (DATA-13).
 
@@ -376,4 +388,4 @@ Options:
 - **(b) Pay the backlog to the holders the dry-run rounds already computed.** This would turn dry-run `PayoutItem`s into credits, which isn't built.
 - **(c) Set the backlog aside before going live.** A one-off claim with its own accounting, which isn't built and is a mainnet spend that needs approval.
 
-Whichever option is chosen, the first swap must fit under the swap cap and the impact limit, or NEW-2 must be fixed first.
+Whichever option is chosen, divide the backlog by the swap budget to see how many hours it takes to drain, and set `SWAP_BATCH_MAX_LAMPORTS` and `SWAP_HOURLY_CAP_LAMPORTS` knowing that.

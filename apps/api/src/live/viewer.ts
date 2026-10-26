@@ -6,6 +6,8 @@ import type { LiveDeps } from "./deps";
 
 export const SESSION_COOKIE = "divvy_session";
 export const SESSION_TTL_MS = 7 * 24 * 3600_000;
+/** Admin powers last 12 hours from sign-in; after that the admin signs in again (audit: a stolen week-long cookie). */
+export const ADMIN_SESSION_MS = 12 * 3600_000;
 
 export interface Viewer {
   userId: string;
@@ -30,7 +32,7 @@ export async function getViewer(d: LiveDeps, req: FastifyRequest): Promise<Viewe
   if (token && token.length <= 128) {
     const s = await d.prisma.session.findUnique({ where: { id: tokenHash(token) }, include: { user: true } });
     if (s && s.expiresAt > new Date())
-      v = { userId: s.userId, wallet: s.user.wallet, xUserId: s.user.xUserId, xHandle: s.user.xHandle, isAdmin: d.params.adminWallets.has(s.user.wallet) };
+      v = { userId: s.userId, wallet: s.user.wallet, xUserId: s.user.xUserId, xHandle: s.user.xHandle, isAdmin: d.params.adminWallets.has(s.user.wallet) && Date.now() - s.createdAt.getTime() < ADMIN_SESSION_MS };
   }
   req.viewerCache = v;
   return v;

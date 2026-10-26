@@ -292,7 +292,7 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
         take: q.data.limit + 1,
         include: { coin: { include: { dividendAsset: true } } },
       }),
-      d.prisma.payoutRound.aggregate({ where: PAID, _count: true, _sum: { holdersPaid: true } }),
+      d.prisma.payoutRound.aggregate({ where: { ...PAID, coin: { hidden: false } }, _count: true, _sum: { holdersPaid: true } }),
       d.prisma.payoutRound.count({ where: { dryRun: false, status: { in: ["late", "failed"] }, hour: { gte: new Date(topOfHour(now) - HOUR) } } }),
       pendingHoldersLamports(d),
       d.prices().then((p) => p.solUsd),

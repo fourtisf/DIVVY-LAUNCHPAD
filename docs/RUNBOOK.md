@@ -5,11 +5,11 @@ How to deploy, roll back and handle incidents on the production VPS. One-time se
 **What runs.** Each app runs as its own OS user, under its own PM2 daemon, with its own env file (`deploy/setup-vps.md`, "How the server is split"). `divvy-web` serves the site. `divvy-api` runs in live mode (PostgreSQL, Redis and the Solana RPC) and holds no private keys. `divvy-worker` holds the three hot-wallet keys and runs everything that signs: the launch pipeline, the claim builder, the indexer, the hourly dividend engine and the small ops jobs. The user `divvy` owns the releases and runs nothing. Two values, set the same in `/etc/divvy/api.env` and `/etc/divvy/worker.env`, decide what the worker may send:
 
 - `PAYOUTS_DRY_RUN` (default `true`). Dry-run computes every round from real chain data and signs nothing, and holder claims are refused. Turning it off needs the owner's approval ("Payouts: dry-run and going live").
-- `DIVVY_MAINNET_ENABLED` (default `false`), the mainnet gate. With `SOLANA_CLUSTER=mainnet-beta` and the gate off, nothing is signed and sent: launches fail with "Launches aren't open yet", claims answer "Claims aren't open yet", and live payout runs stop. Dry-run payouts still run. Devnet is always allowed. The worker won't start if the RPC isn't on `SOLANA_CLUSTER` ("Worker or API won't start").
+- `DIVVY_MAINNET_ENABLED` (default `false`), the mainnet gate. With `SOLANA_CLUSTER=mainnet-beta` and the gate off, nothing is signed and sent: launches fail with "Launches aren't open yet", claims answer "Claims aren't open yet", and live payout runs stop. Dry-run payouts still run. Devnet is always allowed. Neither the API nor the worker starts if the RPC isn't on `SOLANA_CLUSTER` ("Worker or API won't start").
 
 **Rules that always apply (CLAUDE.md):**
 
-- No mainnet spend without the owner's explicit approval in chat. That covers funding or topping up wallets, sweeping funds, turning off payout dry-run, turning on the mainnet gate, raising the Jito tip, the launcher's hourly cap or the swap and send caps, and PlatformConfig changes.
+- No mainnet spend without the owner's explicit approval in chat. That covers funding or topping up wallets, sweeping funds, turning off payout dry-run, turning on the mainnet gate, raising the Jito tip, the launcher's hourly cap, the swap and send caps or the largest swap size, and PlatformConfig changes.
 - Key material never goes in the repo, the database, logs, chats or tickets. An admin's `divvy_session` cookie is a credential too.
 - Creates go only through Jito bundles. Never rebroadcast one through an RPC, and never reveal a mint address or a create signature before its create lands.
 - Never edit or delete `PayoutRound`, `PayoutItem`, `VaultClaim`, `FeeAllocation`, `SwapBatch`, `Credit`, `PayoutTransfer`, `Claim` or `Trade` rows by hand, never move an `IndexerCursor`, and never send tokens by hand. Every engine step is idempotent and resumes on its own; a hand edit breaks the ledger.
@@ -23,7 +23,7 @@ How to deploy, roll back and handle incidents on the production VPS. One-time se
 |---|---|
 | Web | PM2 `divvy-web` (user `divvy-web`), cluster ×2, `127.0.0.1:3000` |
 | API | PM2 `divvy-api` (user `divvy-api`), cluster ×1, `127.0.0.1:4000`, WebSocket `/api/live`. Live mode, no keys. |
-| Worker | PM2 `divvy-worker` (user `divvy-worker`), fork ×1, **never more than one**. Jobs, in UTC (`apps/worker/src/index.ts`): payouts every 10 minutes (`*/10 * * * *`: each tick first finishes unfinished hours from the last 24 hours, then runs the current hour, which minute 0 starts); the mid-hour presnapshot check, the launch, claim and transfer reconcilers, prices, hot-wallet status and market stats every minute; reserved tickers `17 3 * * *`. The indexer polls every `INDEXER_POLL_MS` (4 s) and also wakes on PlatformConfig logs. On SIGINT or SIGTERM it waits up to 120 s for running jobs; PM2 kills it at 130 s (`kill_timeout`). |
+| Worker | PM2 `divvy-worker` (user `divvy-worker`), fork ×1, **never more than one**. Jobs, in UTC (`apps/worker/src/index.ts`): payouts every 10 minutes (`*/10 * * * *`: each tick first finishes every unfinished earlier hour, then runs the current hour, which minute 0 starts); the mid-hour presnapshot check, the launch, claim and transfer reconcilers, prices, hot-wallet status and market stats every minute; reserved tickers `17 3 * * *`. The indexer polls every `INDEXER_POLL_MS` (4 s) and also wakes on PlatformConfig logs. On SIGINT or SIGTERM it stops taking jobs, scheduled or queued, and waits up to 120 s for running ones; PM2 kills it at 130 s (`kill_timeout`). |
 | PM2 | One daemon per app user, brought back at boot by `pm2-divvy-web`, `pm2-divvy-api` and `pm2-divvy-worker` (systemd). Always pass `--only <app>` with the process file. |
 | Admin | `https://divvy.example/admin`, signed in with a wallet listed in `ADMIN_WALLETS`, or the admin API with curl ("Admin API") |
 | Process file | `/srv/divvy/current/deploy/ecosystem.config.cjs` |
@@ -33,7 +33,7 @@ How to deploy, roll back and handle incidents on the production VPS. One-time se
 | App logs | `/var/log/divvy/web/web.{out,err}.log`, `/var/log/divvy/api/api.{out,err}.log`, `/var/log/divvy/worker/worker.{out,err}.log` (the worker writes one JSON object per line), `/var/log/divvy/backup/backup.log`. The `adm` group can read them. |
 | Nginx | `/etc/nginx/sites-available/divvy.conf`, logs `/var/log/nginx/divvy.{access,error}.log`. Rate limits per client IP: pages 20 r/s (burst 120; `/_next/static/` unlimited), `/api/` 20 r/s (burst 60), uploads 10 a minute, `POST /api/launch` 4 a minute. Over the limit answers HTTP 429 `RATE_LIMITED`. Any `/api` spelling other than lowercase `/api/...` answers 404. |
 | PostgreSQL 16 | `127.0.0.1:5432`, database `divvy`, role `divvy` (password in `/home/divvy-backup/.pgpass`) |
-| Redis 7 | `127.0.0.1:6379`, password in `REDIS_URL`. Keys: `divvy:lock:<job>` (job locks), `divvy:alert:<key>` (alert throttle), `divvy:prices` (1 h TTL), `divvy:status` (10 min TTL), `divvy:presnap:<round hour>:<coinId>`, `divvy:presnap-minute:<round hour>` and `divvy:presnap-done:<round hour>` (mid-hour snapshot, secret), `divvy:swap-spend:<payout hour>` and `divvy:push-usd:<UTC hour>` (spend caps), `divvy:push-blocked:<assetId>` (push blocklist), `divvy:claim-backoff:<wallet>:<assetId>`, `divvy:launcher-spend:<UTC hour>`, `divvy:launch-cooldown:<wallet>`, `divvy:launch-lock:<wallet>`, `divvy:siws:<nonce>`, `divvy:x-oauth:<state>`, `divvy-rl:*` (API rate limits), `bull:divvy-launch:*` and `bull:divvy-claims:*` (queues). Pub/sub channel `divvy:live`. |
+| Redis 7 | `127.0.0.1:6379`, password in `REDIS_URL`. Keys: `divvy:lock:<job>` (job locks), `divvy:alert:<key>` (alert throttle), `divvy:prices` (1 h TTL), `divvy:status` (10 min TTL), `divvy:presnap:<round hour>:<coinId>`, `divvy:presnap-minute:<round hour>` and `divvy:presnap-done:<round hour>` (mid-hour snapshot, secret), `divvy:swap-spend:<payout hour>` and `divvy:push-usd:<UTC hour>` (spend caps), `divvy:swap-limit:<live|dry>:<assetId>` (largest swap per asset), `divvy:push-blocked-at:<assetId>` (push blocklist, a hash of wallet and time), `divvy:claim-backoff:<wallet>:<assetId>`, `divvy:launcher-spend:<UTC hour>`, `divvy:launch-cooldown:<wallet>`, `divvy:launch-lock:<wallet>`, `divvy:siws:<nonce>`, `divvy:x-oauth:<state>`, `divvy-rl:*` (API rate limits), `bull:divvy-launch:*` and `bull:divvy-claims:*` (queues). Pub/sub channel `divvy:live`. |
 | Backups | `/var/backups/divvy/` (owned by `divvy-backup`), cron 03:40 UTC running `/usr/local/bin/divvy-pg-backup` (an installed copy of `deploy/backup/pg-backup.sh`), 14 days local, offsite via `RCLONE_REMOTE` |
 | Launch pause | The admin pause (`launchesOpen`), or the Nginx switch `/etc/nginx/divvy-launches-paused` (see "Pausing launches") |
 
@@ -72,7 +72,7 @@ CI must be green on the commit you deploy. Deploys are zero-downtime for web and
   rcli EXISTS divvy:lock:payouts                                                                     # 0
   grep -E '"msg":"payouts: (run|failed)"' /var/log/divvy/worker/worker.out.log | tail -1 | jq -r .t   # after the last tick
   ```
-  On a restart the worker stops starting scheduled jobs and waits up to 120 seconds for running ones to finish. A run that takes longer is cut off when PM2 kills the worker at 130 seconds and leaves its lock behind for up to 15 minutes, so the next tick skips; a later tick resumes where the run stopped.
+  On a restart the worker stops taking new jobs, scheduled or queued, and waits up to 120 seconds for running ones to finish. A run that takes longer is cut off when PM2 kills the worker at 130 seconds and leaves its lock behind for up to 15 minutes, so the next tick skips; a later tick resumes where the run stopped.
 - **Not while a launch is sending.** `dbq -c "SELECT step, count(*) FROM \"Launch\" WHERE step IN ('checking', 'bundling') GROUP BY 1"` should print no rows. A launch cut off mid-send is recovered by the launch reconciler (see "Launch stuck in bundling"), but its user waits longer. In a busy period, pause launches first.
 - **Not between 03:30 and 04:15 UTC.** The backup holds read locks, and a migration's `ALTER TABLE` would wait behind them while blocking every query that comes after it.
 
@@ -211,7 +211,7 @@ A release built before the per-app split ships a process file that reads `/etc/d
 Admins are wallets listed in `ADMIN_WALLETS` (comma-separated, in `api.env` and, to keep `envcheck` clean, `worker.env`; the API reads it at start, so reload the API after changing it). The admin page at `https://divvy.example/admin` covers the daily work: the launch switch with a reason, hot-wallet balances, late rounds, indexer lag, and the report queue with hide, resolve and dismiss. Use the API with curl when the page can't do it (hiding a coin nobody reported) or from the server:
 
 1. Sign in on the site with the admin wallet.
-2. In the browser's developer tools (Application or Storage, then Cookies), copy the value of `divvy_session`. It's a sign-in for 7 days: never paste it into a chat, a ticket or a file.
+2. In the browser's developer tools (Application or Storage, then Cookies), copy the value of `divvy_session`. It's a sign-in for 7 days, with admin powers for the first 12 hours (after that, sign out and in again): never paste it into a chat, a ticket or a file.
 3. On the server, paste the shell helpers, then run `read -rs DIVVY_SESSION` and paste the value (nothing is echoed). The `admin` helper passes it to curl on stdin, so it never shows up in `ps` or the shell history.
 4. When you're done, `unset DIVVY_SESSION` and sign out on the site (that deletes the session).
 
@@ -248,20 +248,24 @@ grep '"msg":"alert: ' /var/log/divvy/worker/worker.out.log | tail -20 | jq -r '"
 | Payouts stopped: on-chain fee rates {…} don't match the configured split {…} | Every payout run stops before the claim, dry-run included. The rates implied by `FEE_*` differ from LaunchLab's GlobalConfig (protocol rate) or Divvy's PlatformConfig on chain. Critical, hourly. | Compare the two objects. Don't change `FEE_*` or the PlatformConfig to make it pass: the split is the owner's call, and an on-chain change needs rules 2 and 3. Runs resume on the next tick once they match. |
 | Payouts stopped: PlatformConfig.platform_fee_wallet is not the fee claimer key | `FEE_CLAIMER_KEYPAIR_PATH` loads a key that isn't the PlatformConfig's fee wallet. Critical, hourly. | Check the path against `pubkeys.txt`. After a key rotation, the PlatformConfig update has to land first ("Rotating a compromised hot wallet key", step 5). |
 | Payouts stopped: no SOL price in the cache | `divvy:prices` is gone (1-hour TTL), so the prices job has been failing for about an hour. Critical, hourly. | "Prices missing". |
+| The platform fee vault is empty, but indexed trades owe it \<n\> lamports since the last claim. Fees may not be reaching the vault (docs/AUDIT.md R2). | The shared platform vault is empty while the curve trades indexed since the last claim owe it at least 0.01 SOL. Dry-run included. This is how a no-go on audit check R2 shows up in production: the fees stay in each pool, and no holder would ever be paid. Critical, every 6 hours. | Stop and tell the owner. Don't go live, or go back to dry-run, until R2 has been checked (`docs/AUDIT.md`, R2). In live mode nothing is lost meanwhile: an empty claim covers no trades, so they stay in the next claim's range. |
 | Vault claim \<sig\> didn't land; fees roll into the next claim | A live vault claim failed on chain, or had no status 5 minutes after it was signed. Its row is reset to cover no trades; the fees stay in the vault for the next claim. | Confirm with `rpc getSignatureStatuses '[["<sig>"], {"searchTransactionHistory": true}]'`. If it repeats, check the fee claimer's SOL and the RPC. |
 | Indexer hasn't reached vault claim \<sig\>; payouts wait for it | A live claim landed, but the indexer hasn't reached its transaction, and attribution waited 3 minutes for it. Until it does, no new claim is made and no new rounds open; rounds already open carry on. Critical. | Fix the indexer ("Indexer lag above 60 seconds"). Every tick retries ("Vault claims and trade markers"). |
 | Vault claim \<sig\> wasn't seen in the PlatformConfig stream; attributed by slot (trades in its own slot may shift by one claim) | The indexer moved past the claim's slot without matching its signature, so the claim was placed after the last indexed trade at or before its slot. | Nothing for a one-off. If it repeats, tell the owner. |
 | \<n\> indexed trade(s) never finalized and were removed before attributing claim \<sig\> | Trades in the claim's range whose transactions are missing or failed at finality (a dropped fork) were deleted, so they take no share of the claim. Critical. | Tell the owner. Never re-insert trades by hand. |
-| Vault claim \<sig\>: paid less than indexed fees | The claim brought in less than the indexed platform fees of its trades, so each coin's share was scaled down pro rata. Expected after a claim placed by slot; the rest arrives with the next claim. Live only in practice. | If it repeats or is large, look for a claim nobody recorded (a vault claim made outside the worker, or a `VaultClaim` row with no `attributedAt`) and tell the owner. If the claim's `lamports` is 0 and its signature failed on chain (`rpc getSignatureStatuses`), its fees come in with the next claim as unattributed lamports: tell the owner. |
+| Vault claim \<sig\>: paid less than indexed fees | The claim brought in less than the indexed platform fees of its trades, so each coin's share was scaled down pro rata. Expected after a claim placed by slot; the rest arrives with the next claim. Live only in practice. | If it repeats or is large, look for a claim nobody recorded (a vault claim made outside the worker, or a `VaultClaim` row with no `attributedAt`) and tell the owner. |
 | Vault claim \<sig\>: \<n\> lamports not tied to any trade | The claim brought in more than the indexed fees, by more than 1% of the claim or 0.01 SOL, whichever is larger. The surplus stays with Divvy and isn't paid to holders. Usually missed trades. Live only in practice. | Check the indexer (cursor, "Indexer stopped" alerts) and tell the owner. Never edit `FeeAllocation`. |
-| \<SYMBOL\> swap for \<hour\> not done: \<reason\>. Holders' share carries to the next round. | The asset's swap batch is skipped (`SwapBatch.status = 'skipped'`), its rounds become `carried` with the reason in `error`, and the lamports go back to the pool for the next hour. Reasons: the token is paused by its issuer; the transfer hook is enabled (critical); no route; price impact over `MAX_SWAP_IMPACT_BPS`; the quote is off the reference price (critical, also sent when the price cache has no price for the asset); over the hourly swap cap (critical, "Spend caps"); `swap refused: …` (critical, "Swap guard"); the swap failed on chain. | Nothing, if it's one hour. If it repeats, check the asset's route on Jupiter and its price in `divvy:prices`. Don't raise `MAX_SWAP_IMPACT_BPS` or `SWAP_SLIPPAGE_BPS` without the owner. |
+| \<SYMBOL\> swap for \<hour\> not done: \<reason\>. Holders' share carries to the next round. | The asset's swap batch is skipped (`SwapBatch.status = 'skipped'`), its rounds become `carried` with the reason in `error`, and the lamports go back to the pool for the next hour. Reasons: the token is paused by its issuer; the transfer hook is enabled (critical); no route; price impact over `MAX_SWAP_IMPACT_BPS`; the quote is off the reference price (critical, also sent when the price cache has no price for the asset); after either of those two, the asset's next swap is half the size ("Spend caps"); over the hourly swap cap (critical; a backstop, since rounds are already sized to the cap); `swap refused: …` (critical, "Swap guard"); the swap failed on chain. | Nothing, if it's one hour. If it repeats, check the asset's route on Jupiter and its price in `divvy:prices`. Don't raise `MAX_SWAP_IMPACT_BPS` or `SWAP_SLIPPAGE_BPS` without the owner. |
+| Holders' money waiting for asset \<assetId\> (\<n\> lamports) is over this hour's swap budget (\<b\>); paying part now, the rest carries | The coins paying in that asset have more waiting than this hour's swap may take, so each gets a pro-rata part of the budget and the rest stays carried. Once per asset per hour. | Nothing if it clears within a few hours. If it comes back every hour, "Spend caps". |
 | \<SYMBOL\> swap \<sig\> delivered \<n\>, below its minimum \<m\> | A live swap landed with less than Jupiter's minimum output. The rounds still go on with what arrived. Critical. | Tell the owner. Look at the transaction on an explorer. |
 | Fee claimer holds less SOL than the holders' share it must swap | The fee claimer's balance is under the swap amount plus 0.02 SOL. The run stops at the swap (rounds stay `allocated`) and every tick retries. The claimed fees should be sitting in that wallet, so SOL has left it. Critical. | Compare its balance with the unswapped holders' share ("Hot wallet below threshold"). A drop you can't explain is a compromised key. Top-ups need the owner. |
 | \<n\> payout round(s) for \<hour\> are late | Rounds not delivered by the hour + 60 minutes + `LATE_AFTER_SEC` (15 minutes) are marked `late` and show red. "(dry-run)" at the end means dry-run rounds. Critical. | "Payout round late or failed". |
 | No \<SYMBOL\> price; deliveries for it wait | Live delivery can't apply its USD thresholds without the asset's price. Credits stay where they are. | "Prices missing". Deliveries resume once the price is back. |
 | \<SYMBOL\> is paused by its issuer; deliveries wait (or: is using a transfer hook) | The asset's Token-2022 mint is paused or has a transfer hook. No pushes and no claims for it (claims answer that the asset is paused or can't be claimed). Credits stay. Critical. | Tell the owner and watch the issuer's notices. A transfer hook needs code support before payouts of that asset can go out. |
 | Payout vault holds \<n\> \<SYMBOL\> base units but owes \<m\> more on top of \<r\> in flight; sends stopped | The ledger owes more of that asset than the payout vault holds, counting pending transfers and claims. Pushes of that asset stop. Critical. | Stop and tell the owner. Run the credits check in "Switching dry-run to live". Never send tokens by hand or edit `Credit`. If it can't be explained, go back to dry-run. |
-| Payout vault hourly send cap ($\<n\>) reached; sends wait | This UTC hour's sends would pass `PUSH_HOURLY_CAP_USD`. Credits stay; every tick tries again, and the count starts over at the next UTC hour. Critical. | "Spend caps". |
+| Payout vault hourly send cap ($\<n\>) reached: \<k\> \<SYMBOL\> sends wait for the next hour | The sends that fit under `PUSH_HOURLY_CAP_USD` this UTC hour went out; these credits wait, and the count starts over at the next UTC hour. Critical. | "Spend caps". |
+| Sending \<SYMBOL\> to \<wallet\> keeps failing; its credit waits and is retried once a day | A send to that wallet alone was refused or failed on chain, so the wallet is skipped for 24 hours. Once a day per wallet. | Usually nothing: the holder's token account is frozen or needs a memo. "Push blocklist". |
+| Payout rounds for \<hour\> are still unfinished after a day; their coins get no new rounds until they finish (RUNBOOK "Stuck rounds") | Rounds of that hour still aren't `delivered` 24 hours later. Every tick still resumes them, but those coins' new fees wait. Critical, every 6 hours. | "Stuck rounds". |
 
 ### Launches, indexer and wallets
 
@@ -288,16 +292,16 @@ Two alerts come from outside the worker:
 
 ## Payouts: dry-run and going live
 
-**What a run does.** Every 10 minutes the worker first finishes any hour from the last 24 hours whose rounds aren't all `delivered` (oldest first, in the current mode), then runs the current hour (`apps/worker/src/payouts/engine.ts`):
+**What a run does.** Every 10 minutes the worker first finishes every earlier hour whose rounds aren't all `delivered` (oldest first, in the current mode; after a day it also alerts, "Stuck rounds"), then runs the current hour (`apps/worker/src/payouts/engine.ts`):
 
 1. **Checks.** The on-chain fee rates and fee wallet must match the config (`Payouts stopped: …`), and the price cache must have a SOL price. A live run also passes the mainnet gate.
 2. **Older claims.** Every vault claim not yet attributed is finished first, oldest first ("Vault claims and trade markers").
 3. **Claim.** One vault claim per hour (`VaultClaim`, unique per hour and mode). Live: `claim_platform_fee_from_vault`, signed by the fee claimer; the row is written before the transaction is sent, so a crash can't lose a claim. Dry-run: nothing is signed. The claim is simulated as exactly the indexed fees since the previous dry-run claim, and the real vault balance is logged next to it (`payouts: dry-run vault claim`).
 4. **Attribution.** The claim covers the curve trades between the previous claim's marker and its own (`fromTradeId < Trade.id <= toTradeId`). Their `platformFee` is split per coin into `FeeAllocation` rows (holders' and Divvy's buckets). A live claim waits for the indexer to place it, and only finalized trades count.
-5. **Rounds.** Per coin, a holders' bucket under `MIN_ROUND_USD` becomes a `carried` round and stays in the pool. Otherwise a `PayoutRound` opens at step `allocated` (unique per coin, hour and mode). A coin whose earlier round isn't `delivered` yet gets no new round: its money waits in the pool.
+5. **Rounds.** Per coin, a holders' bucket under `MIN_ROUND_USD` becomes a `carried` round and stays in the pool. Otherwise a `PayoutRound` opens at step `allocated` (unique per coin, hour and mode). A coin whose earlier round isn't `delivered` yet gets no new round: its money waits in the pool. Each dividend asset has a swap budget for the hour; a coin's bucket over its share is paid in part and the rest stays in the pool ("Spend caps").
 6. **Swaps.** One Jupiter swap per dividend asset (`SwapBatch`), shared pro rata between its rounds. Dry-run takes the quote. A live swap passes the hourly cap and the swap guard, and on mainnet goes out as a Jito bundle. A refused swap carries the bucket to the next hour (see the swap alert).
 7. **Snapshot.** Holders are read from the chain (Helius DAS, falling back to `getProgramAccounts`) and each balance is capped by the mid-hour presnapshot ("Mid-hour presnapshot"). Excluded wallets and holders under `MIN_HOLDER_USD` are left out (`HolderBalance."excludedReason"`), and entitlements are written as `PayoutItem` rows. Live rounds also add to each wallet's `Credit`.
-8. **Delivery** (live only). Credits move out of the payout vault in batches of `PUSH_BATCH_SIZE`, within the hourly send cap and skipping wallets on the push blocklist. A credit is debited in the same database transaction that records the `PayoutTransfer`, before sending; the transfer reconciler confirms it, or gives the credit back once its blockhash has expired. Both models send to wallets that already hold the asset's token account once the credit passes `AUTO_PUSH_MIN_USD`. Push also creates the account for the others once their credit passes `PUSH_NEW_ATA_MIN_USD`; under claim, they claim from their page and pay their own account rent.
+8. **Delivery** (live only). Credits move out of the payout vault in batches of `PUSH_BATCH_SIZE`, up to the hourly send cap (the rest waits for the next hour), skipping wallets on the push blocklist. A credit is debited in the same database transaction that records the `PayoutTransfer`, before sending; the transfer reconciler confirms it, or gives the credit back once its blockhash has expired. Both models send to wallets that already hold the asset's token account once the credit passes `AUTO_PUSH_MIN_USD`. Push also creates the account for the others once their credit passes `PUSH_NEW_ATA_MIN_USD`; under claim, they claim from their page and pay their own account rent.
 9. **Finish.** Rounds become `delivered`, with status `late` past the deadline.
 
 Earlier hours run in resume-only mode: steps 1, 2 and 6 to 9, with no new claim and no new rounds, since new money always goes to the current hour. A failure there is logged as `payouts: resume failed`, and the tick goes on to the current hour.
@@ -309,14 +313,14 @@ Dry-run still loads the fee claimer and payout vault keys: the first to check th
 Each claim covers a range of indexed trades, not slots. Its start is the previous claim's marker; its end (`VaultClaim."toTradeId"`) is set like this:
 
 - **Dry-run:** the highest `Trade.id` when the claim is made.
-- **Live:** when the indexer reaches the claim's own transaction in the PlatformConfig stream, it sets the marker to the highest trade id indexed so far (`markClaim` in `apps/worker/src/indexer.ts`). Every trade before it was swept by that claim; trades after it, even in the same slot, belong to the next claim.
+- **Live:** when the indexer reaches the claim's own transaction in the PlatformConfig stream, it sets the marker to the highest trade id indexed so far (`markClaim` in `apps/worker/src/indexer.ts`). Every trade before it was swept by that claim; trades after it, even in the same slot, belong to the next claim. A claim whose transaction failed on chain swept nothing and gets no marker.
 - **Fallback:** if the indexer has moved past the claim's slot without matching the signature, attribution places the claim after the last trade at or before its slot, and alerts "attributed by slot".
 
 Attribution then waits up to 60 seconds for the claim's slot to be finalized and checks every fee-paying trade in the range. Trades not finalized yet stop the tick ("some trades in the claim aren't finalized yet; retrying later"); trades whose transactions are missing or failed are deleted, with a critical alert.
 
 **Claims go in order.** Older claims are attributed first, and a claim waiting for its marker holds every later one. No new claim is made while the newest one has no marker ("previous vault claim isn't placed in the trade stream yet"). So one live claim the indexer can't reach stops new claims and new rounds for every coin; rounds already open still swap, snapshot and deliver.
 
-**After a crash.** A live claim row with no amount and no marker is checked against the chain on the next tick: landed means its amount and slot are filled in (the indexer still sets the marker); failed, or no status 5 minutes after signing, means the row is reset to cover no trades and the fees roll into the next claim ("Vault claim \<sig\> didn't land"); otherwise the tick waits ("vault claim \<sig\> still pending; retrying later").
+**After a crash.** A live claim row with no amount and no marker is checked against the chain on the next tick: landed means its amount and slot are filled in (the indexer still sets the marker); failed, or no status 5 minutes after signing, means the row is reset to cover no trades and the fees roll into the next claim's range ("Vault claim \<sig\> didn't land"); otherwise the tick waits ("vault claim \<sig\> still pending; retrying later").
 
 ```bash
 dbq -c "SELECT hour, \"dryRun\", sig, lamports, \"fromTradeId\", \"toTradeId\", \"toSlot\", \"attributedAt\", \"createdAt\"
@@ -330,10 +334,10 @@ An unattributed live row with an empty `toTradeId` and a `toSlot` above the curs
 
 Once an hour, at a random minute between :05 and :54, the worker records the balances of every coin that may pay at the next hour: coins traded in the last 2 hours, or with fees waiting for a round (`apps/worker/src/payouts/presnapshot.ts`). The round then pays each wallet on the smaller of that balance and its balance at the round snapshot, so a wallet has to hold across both moments. A wallet missing from the presnapshot gets nothing from that round.
 
-- Redis: the minute in `divvy:presnap-minute:<round hour>`, a done flag in `divvy:presnap-done:<round hour>`, and the balances in the hash `divvy:presnap:<round hour>:<coinId>` (kept 3 hours). `<round hour>` is the ISO time of the next full hour, for example `2026-10-26T15:00:00.000Z`.
+- Redis: the minute in `divvy:presnap-minute:<round hour>`, a done flag in `divvy:presnap-done:<round hour>`, and the balances in the hash `divvy:presnap:<round hour>:<coinId>`, deleted once the round has its own snapshot or is carried, and kept 26 hours at most. `<round hour>` is the ISO time of the next full hour, for example `2026-10-26T15:00:00.000Z`.
 - **The minute is secret.** Anyone who knows it can time a buy. Never post it or these keys' contents.
 - Logs: `presnapshot: taken` with the round hour and the number of coins, once an hour; `presnapshot: failed` with a coin and the error.
-- A coin without a presnapshot (it failed, Redis lost it, or the worker was down at that minute) is paid on its round snapshot alone. So is a round resumed more than about 2 hours after its hour, once the hash has expired.
+- A coin without a presnapshot (it failed, Redis lost it, or the worker was down at that minute) is paid on its round snapshot alone. So is a round resumed more than a day after its hour, once the hash has expired.
 
 ```bash
 grep -E '"msg":"presnapshot: (taken|failed)"' /var/log/divvy/worker/worker.out.log | tail -5 | jq -c '{t, msg, roundHour, coins, coinId, error}'
@@ -344,20 +348,28 @@ If `presnapshot: taken` is missing for an hour, that hour's rounds pay on the ro
 
 ### Spend caps
 
-Three hourly caps bound what the hot wallets can move (HANDOFF §9). All three are live only, and raising any of them is the owner's call (rule 3).
+Hourly limits bound what the hot wallets can move (HANDOFF §9). The swap budget shapes dry-run rounds too (dry-run keeps its own size limits), so dry-run shows what live would do; the send cap and the swap backstop count live sends only. Raising any of them is the owner's call (rule 3).
 
-| Cap | Counted in | When it's hit |
-|---|---|---|
-| `SWAP_HOURLY_CAP_LAMPORTS` (100 SOL), the fee claimer's swaps | `divvy:swap-spend:<payout hour>`, reserved before each swap | That asset's swap is refused for the hour ("…not done: over the hourly swap cap…", critical) and its rounds are carried. The lamports join the next hour's bucket. |
-| `PUSH_HOURLY_CAP_USD` ($25,000), the payout vault's sends | `divvy:push-usd:<YYYY-MM-DDTHH>`, reserved per asset for the whole delivery plan of a tick | That asset's sends wait ("Payout vault hourly send cap … reached", critical). Credits stay; every tick tries again and the count starts over each UTC hour. |
-| `LAUNCHER_HOURLY_CAP_LAMPORTS` (3 SOL), the launcher's creates and tips | `divvy:launcher-spend:<YYYY-MM-DDTHH>` | New launches are refused until the next UTC hour (see the launcher alert). |
+**Swaps.** When rounds open (step 5), each dividend asset gets a budget for the hour, the smaller of two amounts: its size limit less what this hour's rounds of that asset already hold, and what's left of `SWAP_HOURLY_CAP_LAMPORTS` (100 SOL) after every round opened this hour.
+
+- If the coins paying in that asset have more waiting than the budget, each gets a pro-rata part ("Holders' money waiting for asset … is over this hour's swap budget", a warning). The oldest money goes first, and the `FeeAllocation` row that crosses the line is split: the part that fits funds the round, and the rest becomes a new row with no `vaultClaimId` and `lamports` 0 that stays in the pool. Those rows are carried money, not errors. A part under `MIN_ROUND_USD` makes the whole bucket a `carried` round.
+- **Size limit.** `SWAP_BATCH_MAX_LAMPORTS` (20 SOL) per asset per hour. After a swap is refused for price impact or a quote off the reference price, the asset's limit becomes half that swap's size (at least 0.01 SOL), kept in `divvy:swap-limit:<live|dry>:<assetId>` for 7 days. Each good swap grows it by half again, up to the maximum, and then the key is deleted.
+- At swap time, `divvy:swap-spend:<payout hour>` still counts every live swap against `SWAP_HOURLY_CAP_LAMPORTS` as a backstop ("…not done: over the hourly swap cap…").
+
+**Sends.** Each tick sends the credits that fit under what's left of `PUSH_HOURLY_CAP_USD` ($25,000) this UTC hour, largest first, and the rest wait for the next hour ("Payout vault hourly send cap … reached: \<k\> … sends wait", critical). The count is `divvy:push-usd:<YYYY-MM-DDTHH>`. A single credit worth more than the whole cap never goes: raising the cap is the only way it moves.
+
+**Launches.** `LAUNCHER_HOURLY_CAP_LAMPORTS` (3 SOL) for the launcher's creates and tips, counted in `divvy:launcher-spend:<YYYY-MM-DDTHH>`. New launches are refused until the next UTC hour (see the launcher alert).
 
 ```bash
 rcli GET "divvy:swap-spend:$(date -u +%Y-%m-%dT%H):00:00.000Z"   # lamports reserved for this hour's swaps
-rcli GET "divvy:push-usd:$(date -u +%Y-%m-%dT%H)"                  # USD reserved for sends this UTC hour
+rcli GET "divvy:push-usd:$(date -u +%Y-%m-%dT%H)"                  # USD sent or reserved this UTC hour
+dbq -c "SELECT id, symbol FROM \"DividendAsset\" ORDER BY symbol"
+rcli GET divvy:swap-limit:live:<assetId>; rcli TTL divvy:swap-limit:live:<assetId>   # empty: the full SWAP_BATCH_MAX_LAMPORTS
+dbq -c "SELECT c.ticker, sum(f.\"holdersLamports\") AS waiting FROM \"FeeAllocation\" f JOIN \"Coin\" c ON c.id = f.\"coinId\"
+        WHERE f.\"roundId\" IS NULL AND NOT f.\"dryRun\" GROUP BY 1 ORDER BY 2 DESC LIMIT 20"
 ```
 
-Both the swap and the send cap are all or nothing: a single asset whose hourly swap, or whose whole delivery plan, is above the cap is refused every hour, and a carried swap grows each time. If the alert comes back every hour, the cap is below the real volume (for example the first live run, or a backlog after a pause), and nothing moves until it's raised. If trading doesn't explain the volume, stop and tell the owner before anything else. To raise one, with the owner's approval: set the new value in `worker.env`, then restart the worker (Deploy step 4, minding the payout lock).
+A budget or send-cap alert that clears within a few hours is a busy period. One that comes back every hour means the cap or limit is below the real volume, for example on the first live run or after a pause, and the backlog only shrinks by one budget an hour. If trading doesn't explain the volume, stop and tell the owner before anything else. Otherwise, with the owner's approval, set the new value in `worker.env` and restart the worker (Deploy step 4, minding the payout lock). After the price-impact cause is gone (a pool refilled, a bad route fixed), `rcli DEL divvy:swap-limit:live:<assetId>` puts the asset back at its full size; repeated impact refusals mean the asset can't absorb that much per hour, so leave the limit to adapt.
 
 ### Swap guard
 
@@ -372,15 +384,13 @@ A refusal signs nothing: the batch is skipped, its rounds are carried, and a cri
 
 ### Push blocklist
 
-A wallet goes on `divvy:push-blocked:<assetId>` (a Redis set) when a transfer to it alone fails: refused by the preflight simulation or failed on chain, for example a frozen token account or one that requires a memo. A failing batch is first retried one wallet at a time, so one bad recipient doesn't hold up the others. Delivery skips blocked wallets and their credit stays in `Credit`. The whole set expires 7 days after the last wallet was added.
-
-Under claim, a blocked holder can still claim. Under push there's no claim, so the credit waits until the set expires or you remove the wallet.
+When a send to one wallet alone fails (refused by the preflight simulation, or failed on chain, for example a frozen token account or one that requires a memo), the wallet goes into the Redis hash `divvy:push-blocked-at:<assetId>` with the time. A failing batch is first retried one wallet at a time, so one bad recipient doesn't hold up the others. Delivery skips the wallet for 24 hours, then tries again; a refused send costs nothing, because preflight refuses it before it's broadcast. Its credit stays in `Credit` meanwhile, and under claim the holder can still claim. A warning ("Sending \<SYMBOL\> to \<wallet\> keeps failing…") goes out once a day per wallet.
 
 ```bash
 dbq -c "SELECT id, symbol FROM \"DividendAsset\" ORDER BY symbol"
-rcli SMEMBERS divvy:push-blocked:<assetId>; rcli TTL divvy:push-blocked:<assetId>
+rcli HGETALL divvy:push-blocked-at:<assetId>      # wallet, then the time it was blocked (ms since 1970)
 grep '"msg":"deliver: send refused"' /var/log/divvy/worker/worker.out.log | tail -5 | jq -c '{t, sig, error}'
-rcli SREM divvy:push-blocked:<assetId> <wallet>     # once the cause is gone; a new failure puts it back
+rcli HDEL divvy:push-blocked-at:<assetId> <wallet>  # retry on the next tick, once the cause is gone
 ```
 
 ### Holder claims (claim model)
@@ -391,7 +401,9 @@ The API queues each claim and the worker builds it (`apps/worker/src/claims.ts`)
 - "Claims aren't open yet" in dry-run, and on mainnet while the gate is off;
 - "Your last claim failed. Try again in an hour." for one hour after that wallet's claim of that asset failed on chain (`divvy:claim-backoff:<wallet>:<assetId>`), because the vault pays every attempt's fee;
 - "You have a claim waiting…" while one is pending;
-- "There's nothing to claim yet", or "You can claim once it's worth $\<n\>" below `AUTO_PUSH_MIN_USD` (skipped when the asset has no price);
+- "There's nothing to claim yet";
+- "\<SYMBOL\> claims are paused while its price updates…" (`NO_PRICE`) while the price cache has no price for the asset ("Prices missing");
+- "You can claim once it's worth $\<n\>" below `AUTO_PUSH_MIN_USD`;
 - a paused asset, or one with a transfer hook.
 
 A built claim reserves the whole credit until the transaction confirms, or until the chain is 150 blocks past its `lastValidBlockHeight`, when the credit comes back. To lift a backoff early, once the holder has fixed the cause: `rcli DEL divvy:claim-backoff:<wallet>:<assetId>`.
@@ -413,7 +425,7 @@ Do this from your admin shell, with the helpers pasted. These checks should pass
    dbq -c "SELECT hour, lamports, sum(lamports) OVER (ORDER BY hour) AS cumulative, \"unattributedLamports\", \"fromTradeId\", \"toTradeId\"
            FROM \"VaultClaim\" WHERE \"dryRun\" ORDER BY hour DESC LIMIT 6"
    ```
-   While nothing has ever claimed the vault, each hour's `cumulative` (every indexed platform fee so far) should match that hour's `vaultBalance`, give or take the trades that landed between the trade read and the balance read. Those show up in the next hour. A gap that grows hour after hour means fees reach the vault that the indexer doesn't see: tell the owner before going live. `vaultBalance` of `-1` means the balance read failed.
+   A "The platform fee vault is empty…" alert here means stop: it's audit check R2 failing (see that alert). While nothing has ever claimed the vault, each hour's `cumulative` (every indexed platform fee so far) should match that hour's `vaultBalance`, give or take the trades that landed between the trade read and the balance read. Those show up in the next hour. A gap that grows hour after hour means fees reach the vault that the indexer doesn't see: tell the owner before going live. `vaultBalance` of `-1` means the balance read failed.
 3. **`unattributedLamports`.** In dry-run it is 0 by construction (the simulated claim is the indexed fees), so step 2 is the real test. It becomes the number to watch in live mode.
 4. **Rounds finish on time and look right.**
    ```bash
@@ -446,8 +458,8 @@ Do this from your admin shell, with the helpers pasted. These checks should pass
 - On mainnet, `DIVVY_MAINNET_ENABLED=true` is already set, which itself needs `docs/MAINNET_CHECKLIST.md` complete and signed off by the owner. Without it the live run stops with `payouts: failed` ("Refusing to send "payouts" on mainnet").
 - The dry-run checks above pass, and there are no `Payouts stopped` alerts.
 - The fee claimer holds SOL for its transaction fees (and, on mainnet, the Jito tip per swap), and each swap needs 0.02 SOL of headroom over its amount (the claimed fees fund the swaps themselves). The payout vault holds SOL for its transaction fees and, under push, for new holders' token accounts. Funding needs the owner's approval.
-- The delivery model in `PAYOUT_DELIVERY` is the one the owner chose (HANDOFF §3.4), and `SWAP_HOURLY_CAP_LAMPORTS` and `PUSH_HOURLY_CAP_USD` are the values the owner set.
-- **The owner knows the size of the first round.** Live claims start from trade 0 (no live claim exists yet), and nothing has claimed the vault during dry-run. So the first live run sweeps everything the vault has collected since launch, and its rounds pay the holders' share of all of it to whoever holds at that snapshot. The amount is the latest `vaultBalance` in step 2 above. If an asset's share of it is above `SWAP_HOURLY_CAP_LAMPORTS`, that swap is refused every hour until the cap is raised ("Spend caps").
+- The delivery model in `PAYOUT_DELIVERY` is the one the owner chose (HANDOFF §3.4), and `SWAP_HOURLY_CAP_LAMPORTS`, `SWAP_BATCH_MAX_LAMPORTS` and `PUSH_HOURLY_CAP_USD` are the values the owner set.
+- **The owner knows the size of the first round.** Live claims start from trade 0 (no live claim exists yet), and nothing has claimed the vault during dry-run. So the first live run sweeps everything the vault has collected since launch, and its rounds pay the holders' share of all of it to whoever holds at that snapshot. The amount is the latest `vaultBalance` in step 2 above. A holders' share bigger than the swap budget is paid over several hours, at most one budget per asset per hour; the rest stays carried until then ("Spend caps").
 
 **Steps.** Do this between minutes 20 and 50 of an hour, so the switch doesn't meet the minute-0 run.
 
@@ -502,7 +514,7 @@ Credits carry over in `Credit` either way. Transfers and claims already pending 
 
 Set `PAYOUTS_DRY_RUN=true` in both `api.env` and `worker.env`, then reload the API and restart the worker (Deploy step 4). From the next tick:
 
-- No vault claims, swaps or pushes. Live rounds that aren't `delivered` stop where they are. They resume only if live mode is back within 24 hours of their hour ("Limits of automatic recovery").
+- No vault claims, swaps or pushes. Live rounds that aren't `delivered` stop where they are, and resume when live mode is back (with the "still unfinished after a day" alert if that's more than 24 hours later).
 - Holder claims are refused ("Claims aren't open yet"); credits stay in `Credit`.
 - Pending `PayoutTransfer` and `Claim` rows still settle, because the reconcilers don't depend on the mode.
 
@@ -532,7 +544,7 @@ The SLA is a finished round within 60 minutes of the hour, plus `LATE_AFTER_SEC`
    grep '"msg":"payouts' /var/log/divvy/worker/worker.out.log | tail -20 | jq -c '{t, msg, hour, dryRun, rounds, error, coinId, asset}'
    ```
    - `payouts: run` ends every successful tick, with the hour's counts.
-   - `payouts: resuming an earlier hour` comes before it for each unfinished hour of the last 24 hours, and `payouts: resume failed` carries the error that stopped one. The tick still goes on to the current hour.
+   - `payouts: resuming an earlier hour` comes before it for each unfinished earlier hour, and `payouts: resume failed` carries the error that stopped one. The tick still goes on to the current hour.
    - `payouts: failed` carries the error that stopped the current hour.
    - `payouts: another worker holds the lock, skipping` means the lock is held (see Fix).
    - `payouts: snapshot failed, will retry` names a coin, and `payouts: swap not confirmed` an asset, that the next tick retries.
@@ -565,21 +577,48 @@ The SLA is a finished round within 60 minutes of the hour, plus `LATE_AFTER_SEC`
 **Fix:**
 
 - **Stale lock.** A worker killed mid-run never releases `divvy:lock:payouts`. A running worker renews it every 5 minutes, so a live lock's `PTTL` stays between 600 000 and 900 000 ms. Well under 600 000 means nobody is renewing it: check there is exactly one worker (Check 1), then `rcli DEL divvy:lock:payouts`, or let it expire. The next tick runs normally.
-- **Re-running.** There is no manual command. Every 10 minutes the worker resumes from the last completed step, for the current hour and every unfinished hour of the last 24 hours. Fix the cause, and the next tick finishes the round (marked `late` if it's past the deadline). Never delete or edit `PayoutRound`, `PayoutItem` or the other ledger rows to force a run, and never send tokens by hand.
-- **Not fixable within the grace period.** The round stays `late` and is still finished once the cause is fixed, as long as that happens within the limits below. Tell the owner.
+- **Re-running.** There is no manual command. Every 10 minutes the worker resumes from the last completed step, for the current hour and every unfinished earlier hour. Fix the cause, and the next tick finishes the round (marked `late` if it's past the deadline). Never delete or edit `PayoutRound`, `PayoutItem` or the other ledger rows to force a run, and never send tokens by hand.
+- **Not fixable within the grace period.** The round stays `late` and is still finished once the cause is fixed. Tell the owner. After a day, "Stuck rounds".
 
-**Limits of automatic recovery.** These need the owner and a code change, not a row edit:
+**Limits of automatic recovery:**
 
-- Only hours from the last 24 hours are resumed, and only in the current mode. A round that still isn't `delivered` after that stays at its step with its lamports or swapped tokens. Because a coin's rounds run in order, that coin gets no new rounds until it's resolved.
-- Rounds left unfinished by a switch between dry-run and live stay where they are until that mode is back.
-- A round resumed more than about 2 hours after its hour has lost its mid-hour presnapshot and pays on its own snapshot.
+- Only rounds in the current mode are resumed. Rounds left unfinished by a switch between dry-run and live stay where they are until that mode is back.
+- A coin gets no new round while an earlier one is open, so a round that can't finish holds back that coin's new fees. After a day the worker alerts: "Stuck rounds".
 
 ```bash
 dbq -c "SELECT hour, \"dryRun\", sig, lamports, \"toTradeId\", \"createdAt\" FROM \"VaultClaim\" WHERE \"attributedAt\" IS NULL ORDER BY \"createdAt\""
-dbq -c "SELECT r.hour, r.\"dryRun\", r.step, count(*) FROM \"PayoutRound\" r
-        WHERE r.step <> 'delivered' AND r.hour < date_trunc('hour', now() AT TIME ZONE 'UTC') - interval '24 hours'
-        GROUP BY 1, 2, 3 ORDER BY 1"
 ```
+
+### Stuck rounds
+
+**Signs:** the alert "Payout rounds for \<hour\> are still unfinished after a day…", or `lateRounds` that never goes back to 0. Every tick still resumes these rounds, but their coins get no new rounds, so those coins' new fees wait in the pool, until the old ones are `delivered`.
+
+**Find them:**
+
+```bash
+dbq -c "SELECT r.hour, r.\"dryRun\", c.ticker, a.symbol, r.status, r.step, r.\"solIn\", r.\"assetOut\", r.error, r.\"startedAt\"
+        FROM \"PayoutRound\" r JOIN \"Coin\" c ON c.id = r.\"coinId\" JOIN \"DividendAsset\" a ON a.id = c.\"dividendAssetId\"
+        WHERE r.step <> 'delivered' AND r.hour < date_trunc('hour', now() AT TIME ZONE 'UTC')
+        ORDER BY r.hour, c.ticker"
+dbq -c "SELECT b.hour, a.symbol, b.\"dryRun\", b.status, b.\"lamportsIn\", b.sig, b.error, b.\"updatedAt\"
+        FROM \"SwapBatch\" b JOIN \"DividendAsset\" a ON a.id = b.\"assetId\"
+        WHERE b.status IN ('pending', 'sent') ORDER BY b.hour"
+grep -E '"msg":"payouts: (resuming an earlier hour|resume failed|snapshot failed, will retry|swap not confirmed)"' /var/log/divvy/worker/worker.out.log | tail -10 | jq -c '{t, msg, hour, coinId, asset, error}'
+```
+
+A round whose `dryRun` doesn't match `PAYOUTS_DRY_RUN` only moves once that mode is back: leave it and tell the owner. Otherwise the step says what it's waiting for:
+
+| Step | Waiting for | What clears it |
+|---|---|---|
+| `allocated` | The asset's swap. Its `SwapBatch` is `pending` (the fee claimer is short of SOL, or a run failed before signing) or `sent` (the outcome is being checked; after 5 minutes without a landed transaction it's built again). | The fee claimer's SOL ("Hot wallet below threshold"), the RPC, and Jupiter. A swap that gets refused also clears it: its rounds become `carried` and the money returns to the pool. |
+| `swapped` | The holder snapshot (`payouts: snapshot failed, will retry` names the coin). | The RPC (DAS or `getProgramAccounts`). |
+| `snapshotted` | The finish step, which comes after live delivery; `payouts: resume failed` carries the error. Credits are already booked. | Whatever that error names, usually the RPC. |
+
+**Safe options:**
+
+- Fix the cause. The next tick, within 10 minutes, resumes from the last completed step; every step is idempotent.
+- Check the run's preconditions too: a rates mismatch, no SOL price or the mainnet gate stops resumed hours as well (`payouts: resume failed`).
+- Never delete or edit `PayoutRound`, `FeeAllocation`, `SwapBatch`, `PayoutItem` or `Credit` rows to unblock a coin, and never send tokens by hand. If the cause can't be fixed, stop and tell the owner: it needs a reviewed code change.
 
 ### Payout transfers or claims stuck pending
 
@@ -613,7 +652,7 @@ dbq -c "SELECT r.hour, c.ticker, i.\"amountAsset\", i.status, i.\"sendSig\" FROM
 dbq -c "SELECT a.id, a.symbol, cr.amount FROM \"Credit\" cr JOIN \"DividendAsset\" a ON a.id = cr.\"assetId\" WHERE cr.wallet = '$W'"
 dbq -c "SELECT c.ticker, h.\"snapshotHour\", h.balance, h.\"excludedReason\" FROM \"HolderBalance\" h JOIN \"Coin\" c ON c.id = h.\"coinId\"
         WHERE h.wallet = '$W' ORDER BY h.\"snapshotHour\" DESC LIMIT 20"
-rcli SISMEMBER divvy:push-blocked:<assetId> "$W"          # 1: on the push blocklist
+rcli HGET divvy:push-blocked-at:<assetId> "$W"            # a time: on the push blocklist for 24 h from then
 ```
 
 `excludedReason = 'small'` means the holding was under `MIN_HOLDER_USD` at the snapshot. A holder who bought after the hour's secret presnapshot, or sold before the round, is paid on the smaller balance ("Mid-hour presnapshot"). A `credited` item with a `Credit` balance is waiting for a threshold: `AUTO_PUSH_MIN_USD` for a wallet that holds the asset's token account, `PUSH_NEW_ATA_MIN_USD` for one that doesn't (push), or for the holder to claim (claim). A wallet on the push blocklist waits too ("Push blocklist").
@@ -690,7 +729,7 @@ The three hot wallets:
 
 - **Launcher:** create rent and Jito tips. Its spend is capped per UTC hour by `LAUNCHER_HOURLY_CAP_LAMPORTS`.
 - **Payout vault:** holds the dividend tokens; pays transaction fees for pushes and claims, and token-account rent for new holders under push. Its sends are capped per hour by `PUSH_HOURLY_CAP_USD`.
-- **Fee claimer:** signs vault claims and swaps (and pays the Jito tip for swaps on mainnet); holds the claimed SOL until it's swapped. Its swaps are capped per hour by `SWAP_HOURLY_CAP_LAMPORTS`.
+- **Fee claimer:** signs vault claims and swaps (and pays the Jito tip for swaps on mainnet); holds the claimed SOL until it's swapped. Its swaps are capped per hour by `SWAP_HOURLY_CAP_LAMPORTS`, and per asset by `SWAP_BATCH_MAX_LAMPORTS`.
 
 The alert threshold is `HOT_WALLET_MIN_SOL` (one value for all three). Thresholds and spend caps are the owner's call (HANDOFF §9).
 
@@ -743,7 +782,7 @@ grep -iE 'jito|429' /var/log/divvy/worker/worker.out.log | tail -20
 
 ### RPC down
 
-**Signs:** trade-box build errors, indexer lag, payout runs failing, `launch-reconcile: failed` or `transfers-reconcile: failed`, or a worker that won't start.
+**Signs:** trade-box build errors, indexer lag, payout runs failing, `launch-reconcile: failed` or `transfers-reconcile: failed`, or an API or worker that won't start.
 
 **Check:**
 
@@ -756,7 +795,7 @@ Look at the provider's status page.
 
 **Fix:**
 
-- **Server side.** Switch `SOLANA_RPC_URL` and `SOLANA_WS_URL` in `/etc/divvy/api.env` and `/etc/divvy/worker.env` to the backup provider. Keep that provider's details in the ops log beforehand. It must serve the same cluster: the worker refuses to start otherwise ("Worker or API won't start"). Holder snapshots try Helius DAS first and fall back to `getProgramAccounts`, so a non-Helius backup works; set `HOLDERS_VIA_DAS=false` in `worker.env` to skip the failing DAS call. Then reload the API and restart the worker (Deploy step 4, minding the payout lock).
+- **Server side.** Switch `SOLANA_RPC_URL` and `SOLANA_WS_URL` in `/etc/divvy/api.env` and `/etc/divvy/worker.env` to the backup provider. Keep that provider's details in the ops log beforehand. It must serve the same cluster: the API and the worker refuse to start otherwise ("Worker or API won't start"). Holder snapshots try Helius DAS first and fall back to `getProgramAccounts`, so a non-Helius backup works; set `HOLDERS_VIA_DAS=false` in `worker.env` to skip the failing DAS call. Then reload the API and restart the worker (Deploy step 4, minding the payout lock).
 - **Browser side.** `NEXT_PUBLIC_SOLANA_RPC_URL` is baked into the web build:
   1. Add the new origin, as both `https://` and `wss://`, to `connect-src` in the Nginx CSP (keep `ws://localhost:*`), then run `sudo nginx -t && sudo systemctl reload nginx`.
   2. Change the value in `/etc/divvy/build.env`.
@@ -786,7 +825,7 @@ df -h /var/lib/redis
 - **Stopped or crashed:** run `sudo systemctl restart redis-server`. The apps reconnect on their own; confirm with `pm2all logs --lines 30 --nostream` and `curl -fsS http://127.0.0.1:4000/api/health`.
 - **`MISCONF ... RDB snapshots`:** the disk is full or failing. Free space, then run `rcli BGSAVE`; Redis accepts writes again after a good save.
 - **`OOM command not allowed`:** `maxmemory` is reached under `noeviction`. Find the large keys with `rcli --bigkeys`, raise `maxmemory` in `/etc/redis/redis.conf`, and restart Redis. Never switch to an evicting policy: locks, nonces and queues must not vanish silently.
-- **Afterwards:** check that the next payout tick ran (the payout playbook). Losing Redis data is acceptable, because correctness lives in Postgres (unique coin + hour). Lost launch jobs are re-queued by the launch reconciler after 5 minutes; a lost claim request just fails, and the holder tries again. A lost presnapshot means that hour pays on the round snapshot alone, and lost cap counters start from zero for the rest of the hour.
+- **Afterwards:** check that the next payout tick ran (the payout playbook). Losing Redis data is acceptable, because correctness lives in Postgres (unique coin + hour). Lost launch jobs are re-queued by the launch reconciler after 5 minutes; a lost claim request just fails, and the holder tries again. A lost presnapshot means that hour pays on the round snapshot alone. Lost cap counters start from zero for the rest of the hour, lost swap limits go back to `SWAP_BATCH_MAX_LAMPORTS`, and wallets on the push blocklist are tried again.
 
 ### Worker or API won't start
 
@@ -799,9 +838,9 @@ pm2as divvy-api logs divvy-api --err --lines 40 --nostream
 
 | Error | Fix |
 |---|---|
-| `SOLANA_CLUSTER is "<cluster>" but the RPC's genesis hash is <hash>` (worker) | The mainnet gate trusts `SOLANA_CLUSTER`, so the worker checks the RPC's genesis hash at start and refuses a mismatch. Correct whichever is wrong in `worker.env` (and `api.env`). Never relabel the cluster to match a mainnet RPC: going to mainnet goes through `docs/MAINNET_CHECKLIST.md`. |
-| An RPC or network error before `worker started` | The genesis check needs the RPC, so the worker doesn't start while the RPC is unreachable ("RPC down"). |
-| `STORAGE_DIR must be an absolute path …`, `STORAGE_DIR must be outside the release folder …`, `PUBLIC_MEDIA_BASE must be https …` or `… a public host …` | Fix the storage block in both `api.env` and `worker.env` (`deploy/setup-vps.md` §8). |
+| `SOLANA_CLUSTER is "<cluster>" but the RPC's genesis hash is <hash>` (API or worker) | The mainnet gate and the transactions the API builds trust `SOLANA_CLUSTER`, so both apps check the RPC's genesis hash at start (the API in live mode) and refuse a mismatch. Correct whichever is wrong, in both `api.env` and `worker.env`. Never relabel the cluster to match a mainnet RPC: going to mainnet goes through `docs/MAINNET_CHECKLIST.md`. |
+| An RPC or network error at start | The genesis check needs the RPC, so neither app starts while it's unreachable ("RPC down"). |
+| `STORAGE_DIR must be an absolute path …`, `STORAGE_DIR must be outside the release folder …`, `PUBLIC_MEDIA_BASE must be https …` or `… a public host …` | Fix the storage block in both `api.env` and `worker.env` (`deploy/setup-vps.md` §8). "Inside the release" means under the folder that holds `pnpm-workspace.yaml`, by the path the app was started from or the real one, so `/srv/divvy/current/data/media` is refused. |
 | A Node error naming `/etc/divvy/<app>.env` | The file is missing, or not owned by the app's user: `sudo ls -l /etc/divvy/`. |
 | `API_MODE=mock … refusing to start with NODE_ENV=production` | Set `API_MODE=live` in `api.env`. |
 | `API_MODE=live needs …`, or a validation error naming a variable | That variable is missing or malformed in the app's own env file. |

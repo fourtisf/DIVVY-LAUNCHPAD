@@ -144,6 +144,10 @@ describe.skipIf(!run)("live mode", () => {
     expect(((await get("/api/me", u)).json() as { isAdmin: boolean }).isAdmin).toBe(false);
     expect((await get("/api/admin/overview", u)).statusCode).toBe(403);
     expect((await get("/api/admin/overview", a)).statusCode).toBe(200);
+    // Admin powers end 12 hours after sign-in, even though the session itself lasts a week (audit).
+    await prisma.session.updateMany({ where: { user: { wallet: admin.address } }, data: { createdAt: new Date(Date.now() - 13 * 3_600_000) } });
+    expect((await get("/api/admin/overview", a)).statusCode).toBe(403);
+    expect(((await get("/api/me", a)).json() as { wallet: string; isAdmin: boolean })).toMatchObject({ wallet: admin.address, isAdmin: false });
   });
 
   it("uploads, launches through the queue, and hides the mint until it lands", async () => {
