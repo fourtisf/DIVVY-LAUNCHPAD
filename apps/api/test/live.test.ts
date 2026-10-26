@@ -33,9 +33,13 @@ function keypair() {
   return { address: bs58.encode(publicKey.export({ format: "der", type: "spki" }).subarray(-32)), privateKey };
 }
 
+/** Age of the test wallets' first transaction, in days (the free-launch guard reads it). */
+let walletAgeDays = 30;
+
 const fakeConn = {
   rpcEndpoint: "https://rpc.invalid",
   getBalance: async () => 2_000_000_000,
+  getSignaturesForAddress: async () => (walletAgeDays > 0 ? [{ signature: "s", slot: 1, err: null, blockTime: Math.floor(Date.now() / 1000) - walletAgeDays * 86_400 }] : []),
   getLatestBlockhash: async () => ({ blockhash: bs58.encode(Buffer.alloc(32, 3)), lastValidBlockHeight: 100 }),
   getAccountInfo: async () => null,
   getMultipleAccountsInfo: async () => [null, null],
@@ -159,6 +163,12 @@ describe.skipIf(!run)("live mode", () => {
     expect((await post("/api/launch", body, { ...u, "x-geo-country": "US" })).statusCode).toBe(451);
     expect((await post("/api/launch", body, { ...u, origin: "https://evil.example" })).statusCode).toBe(403);
     expect((await post("/api/launch", { ...body, website: "javascript:alert(1)" }, u)).statusCode).toBe(422);
+    // Without X, a brand-new wallet can't launch for free, however much SOL it holds.
+    walletAgeDays = 0;
+    expect(((await post("/api/launch", body, u)).json() as { code: string }).code).toBe("NEEDS_X_OR_SOL");
+    walletAgeDays = 30;
+    // Symbols are refused instead of being dropped from the minted ticker.
+    expect(((await post("/api/launch", { ...body, ticker: "MOONPIG!" }, u)).json() as { code: string }).code).toBe("TICKER_CHARS");
 
     const res = await post("/api/launch", body, u);
     expect(res.statusCode).toBe(201);

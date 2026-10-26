@@ -70,7 +70,7 @@ export async function refreshMarketStats(d: WorkerDeps, coinIds?: string[]): Pro
   const { solUsd } = await d.prices();
   const ids = coins.map((c) => c.id);
   const now = Date.now();
-  const [curve, cpmm, vols, ago, spark, lastTrades] = await Promise.all([
+  const [curve, cpmm, vols, ago, spark] = await Promise.all([
     curveStates(d, coins.filter((c) => c.status === "live")),
     cpmmStates(d, coins.filter((c) => c.status === "graduated")),
     d.prisma.$queryRaw<{ coinId: string; vol: bigint }[]>`
@@ -87,12 +87,10 @@ export async function refreshMarketStats(d: WorkerDeps, coinIds?: string[]): Pro
       where: { coinId: { in: ids }, tf: "m5", ts: { gte: new Date(now - 28 * TF_MS["5m"]) } },
       select: { coinId: true, ts: true, c: true },
     }),
-    d.prisma.trade.groupBy({ by: ["coinId"], where: { coinId: { in: ids } }, _max: { ts: true, priceSol: true } }),
   ]);
   const volBy = new Map(vols.map((v) => [v.coinId, BigInt(v.vol)]));
   const agoBy = new Map<string, number>();
   for (const a of ago) if (a.isBefore || !agoBy.has(a.coinId)) agoBy.set(a.coinId, Number(a.price));
-  const lastBy = new Map(lastTrades.map((t) => [t.coinId, t._max.ts]));
   const sparkBy = new Map<string, { ts: number; c: number }[]>();
   for (const s of spark) {
     const arr = sparkBy.get(s.coinId) ?? [];
@@ -116,7 +114,6 @@ export async function refreshMarketStats(d: WorkerDeps, coinIds?: string[]): Pro
       volume24hLamports: vol,
       volume24hUsd: (Number(vol) / 1e9) * solUsd,
       spark: points.length ? points : [Math.round(mcap)],
-      lastTradeAt: lastBy.get(c.id) ?? null,
       ...(st.progressBps !== undefined ? { progressBps: st.progressBps } : {}),
       ...(st.realBase !== undefined ? { realBase: st.realBase, realQuote: st.realQuote } : {}),
     };

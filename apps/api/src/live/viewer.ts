@@ -73,10 +73,23 @@ export const country = (d: LiveDeps, req: FastifyRequest): string | null => {
   return c && /^[A-Z]{2}$/.test(c) ? c : null;
 };
 
+/** Country codes GeoIP/Cloudflare use for "unknown" and Tor; never allowed to launch or claim. */
+const UNKNOWN_COUNTRIES = new Set(["XX", "T1"]);
+
+/**
+ * Whether this visitor may not launch or claim (HANDOFF §10). In production an unknown country is
+ * refused too: the GeoIP header is set by Nginx on every request, so a missing value means we can't
+ * tell where the visitor is (audit).
+ */
+export function isBlockedCountry(d: LiveDeps, req: FastifyRequest): boolean {
+  const c = country(d, req);
+  if (!c) return d.env.NODE_ENV === "production";
+  return UNKNOWN_COUNTRIES.has(c) || d.params.blockedCountries.has(c);
+}
+
 /** Launching and claiming stock tokens are refused from blocked countries (HANDOFF §10). */
 export async function refuseBlockedCountry(d: LiveDeps, req: FastifyRequest, reply: FastifyReply): Promise<boolean> {
-  const c = country(d, req);
-  if (c && d.params.blockedCountries.has(c)) {
+  if (isBlockedCountry(d, req)) {
     await sendError(reply, 451, "REGION_BLOCKED", "Divvy isn't available in your country");
     return true;
   }

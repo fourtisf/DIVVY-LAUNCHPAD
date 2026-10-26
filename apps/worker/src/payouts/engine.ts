@@ -20,8 +20,10 @@ import { publishLive } from "@divvy/server";
 import type { WorkerDeps } from "../deps";
 import { refreshPaidStats } from "../stats";
 import type { PayoutChain } from "./chain";
+import { SwapRejected } from "./swapguard";
 import { deliverCredits } from "./deliver";
-import { attributeClaim, classifyHolders, entitlements, isLate, quoteLooksWrong, shouldCarry, splitPlatformFee, splitSwapOutput } from "./plan";
+import { readPreSnapshot } from "./presnapshot";
+import { attributeClaim, classifyHolders, entitlements, isLate, quoteLooksWrong, referenceFloor, shouldCarry, splitPlatformFee, splitSwapOutput } from "./plan";
 
 const COIN_DECIMALS = 6;
 const TX_OPTS = { timeout: 120_000, maxWait: 10_000 };
@@ -37,7 +39,11 @@ export interface RunSummary {
 
 export const topOfHour = (now = new Date()) => new Date(Math.floor(now.getTime() / 3_600_000) * 3_600_000);
 
-export async function runPayouts(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: boolean, now = () => new Date()): Promise<RunSummary> {
+/**
+ * `resumeOnly` finishes an earlier hour's open rounds without claiming or opening new ones there
+ * (new money always goes to the current hour; audit: a resumed hour must not gain rounds).
+ */
+export async function runPayouts(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: boolean, now = () => new Date(), opts: { resumeOnly?: boolean } = {}): Promise<RunSummary> {
   const mismatch = await chain.ratesMismatch();
   if (mismatch) {
     await d.alerts.send("payouts-rates", "critical", `Payouts stopped: ${mismatch}`, 3600);
@@ -50,10 +56,15 @@ export async function runPayouts(d: WorkerDeps, chain: PayoutChain, hour: Date, 
   }
   if (!dryRun) assertCanSend(d.sol, "payouts");
 
-  const claim = await stepClaim(d, chain, hour, dryRun);
-  await stepAttribute(d, chain, claim.id, dryRun);
-  if (!dryRun && d.env.CPMM_CREATOR_FEES) await stepCpmmCreatorFees(d, chain);
-  await stepOpenRounds(d, hour, dryRun, prices.solUsd);
+  // Claims are attributed in order: an older one (indexer was behind) is finished before a new one
+  // is made, so trade ranges never overlap and no claimed lamports are left unallocated (audit).
+  await attributePending(d, chain, dryRun);
+  if (!opts.resumeOnly) {
+    const claim = await stepClaim(d, chain, hour, dryRun);
+    await attributeVaultClaim(d, chain, claim.id);
+    if (!dryRun && d.env.CPMM_CREATOR_FEES) await stepCpmmCreatorFees(d, chain);
+    await stepOpenRounds(d, hour, dryRun, prices.solUsd);
+  }
   const swaps = await stepSwaps(d, chain, hour, dryRun, prices);
   await stepSnapshots(d, chain, hour, dryRun, prices.solUsd);
   if (!dryRun) await deliverCredits(d);
@@ -61,12 +72,12 @@ export async function runPayouts(d: WorkerDeps, chain: PayoutChain, hour: Date, 
 
   const rounds = await d.prisma.payoutRound.groupBy({ by: ["status"], where: { hour, dryRun }, _count: true });
   const count = (s: string) => rounds.find((r) => r.status === s)?._count ?? 0;
-  const final = await d.prisma.vaultClaim.findUniqueOrThrow({ where: { id: claim.id } });
+  const final = await d.prisma.vaultClaim.findUnique({ where: { hour_dryRun: { hour, dryRun } } });
   return {
     hour: hour.toISOString(),
     dryRun,
-    claimedLamports: final.lamports.toString(),
-    unattributedLamports: final.unattributedLamports.toString(),
+    claimedLamports: (final?.lamports ?? 0n).toString(),
+    unattributedLamports: (final?.unattributedLamports ?? 0n).toString(),
     rounds: { ok: count("ok"), carried: count("carried"), failed: count("failed"), late: count("late") },
     swaps,
   };
@@ -74,65 +85,108 @@ export async function runPayouts(d: WorkerDeps, chain: PayoutChain, hour: Date, 
 
 /* ---------- A. vault claim ---------- */
 
-async function stepClaim(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: boolean) {
-  const key = { hour_dryRun: { hour, dryRun } };
-  const existing = await d.prisma.vaultClaim.findUnique({ where: key });
-  if (existing) return recoverClaim(d, chain, existing);
+const maxTradeId = async (d: WorkerDeps) => (await d.prisma.trade.aggregate({ _max: { id: true } }))._max.id ?? 0n;
 
-  const prev = await d.prisma.vaultClaim.findFirst({ where: { dryRun, attributedAt: { not: null } }, orderBy: { toSlot: "desc" } });
+async function stepClaim(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: boolean) {
+  const existing = await d.prisma.vaultClaim.findUnique({ where: { hour_dryRun: { hour, dryRun } } });
+  if (existing) return existing;
+
+  // The previous claim (attributed by now) ends where this one starts.
+  const prev = await d.prisma.vaultClaim.findFirst({ where: { dryRun }, orderBy: { createdAt: "desc" } });
+  if (prev && prev.toTradeId === null) throw new Error("previous vault claim isn't placed in the trade stream yet");
+  const fromTradeId = prev?.toTradeId ?? 0n;
   const fromSlot = prev?.toSlot ?? 0n;
 
   if (dryRun) {
     // Simulated sweep: exactly the indexed fees since the last dry-run claim. The real vault balance is
-    // logged so the two can be compared by hand.
+    // logged so the two can be compared by hand (a gap means missed trades).
+    const toTradeId = await maxTradeId(d);
     const toSlot = await chain.indexedSlot();
-    const agg = await d.prisma.trade.aggregate({ where: { venue: "curve", slot: { gt: fromSlot, lte: toSlot } }, _sum: { platformFee: true } });
+    const agg = await d.prisma.trade.aggregate({ where: { venue: "curve", id: { gt: fromTradeId, lte: toTradeId } }, _sum: { platformFee: true } });
     const vault = await chain.vaultBalance().catch(() => -1n);
-    d.log("payouts: dry-run vault claim", { hour, fromSlot, toSlot, indexed: agg._sum.platformFee ?? 0n, vaultBalance: vault });
-    return d.prisma.vaultClaim.create({ data: { hour, dryRun, lamports: agg._sum.platformFee ?? 0n, fromSlot, toSlot } });
+    d.log("payouts: dry-run vault claim", { hour, fromTradeId, toTradeId, indexed: agg._sum.platformFee ?? 0n, vaultBalance: vault });
+    return d.prisma.vaultClaim.create({ data: { hour, dryRun, lamports: agg._sum.platformFee ?? 0n, fromSlot, toSlot, fromTradeId, toTradeId } });
   }
 
-  // Live: the row exists before the transaction is sent, so a crash can't lose a claim.
-  let row = await d.prisma.vaultClaim.create({ data: { hour, dryRun, lamports: 0n, fromSlot, toSlot: fromSlot } });
+  // Live: the row exists before the transaction is sent, so a crash can't lose a claim. The indexer
+  // sets toTradeId when it reaches the claim transaction in the PlatformConfig stream.
+  let row = await d.prisma.vaultClaim.create({ data: { hour, dryRun, lamports: 0n, fromSlot, toSlot: fromSlot, fromTradeId } });
   const r = await chain.claimVault(async (sig) => {
     row = await d.prisma.vaultClaim.update({ where: { id: row.id }, data: { sig } });
   });
-  if (!r) {
-    // Nothing in the vault: attribute up to what's indexed (all of it should be zero-fee).
-    return d.prisma.vaultClaim.update({ where: { id: row.id }, data: { toSlot: await chain.indexedSlot() } });
-  }
+  // Nothing in the vault: this claim covers no trades; they stay for the next one.
+  if (!r) return d.prisma.vaultClaim.update({ where: { id: row.id }, data: { toTradeId: fromTradeId } });
   return d.prisma.vaultClaim.update({ where: { id: row.id }, data: { lamports: r.lamports, toSlot: r.slot } });
 }
 
 /** A live claim row left by a crash: find out whether its transaction landed. */
 async function recoverClaim(d: WorkerDeps, chain: PayoutChain, row: Prisma.VaultClaimGetPayload<object>) {
-  if (row.dryRun || row.attributedAt || !row.sig || row.lamports > 0n) return row;
-  const o = await chain.outcome(row.sig, "vault");
+  if (row.dryRun || row.attributedAt || row.lamports > 0n || row.toTradeId !== null) return row;
+  const o = row.sig ? await chain.outcome(row.sig, "vault") : ({ status: "failed" } as const);
   if (o.status === "landed") return d.prisma.vaultClaim.update({ where: { id: row.id }, data: { lamports: o.delta, toSlot: o.slot } });
   if (o.status === "failed" || Date.now() - row.createdAt.getTime() > 5 * 60_000) {
-    // Never landed: the vault still holds the fees; the next hour claims them.
-    await d.alerts.send(`claim-lost-${row.id}`, "warn", `Vault claim ${row.sig} didn't land; fees roll into the next hour`);
-    return d.prisma.vaultClaim.update({ where: { id: row.id }, data: { sig: null, toSlot: row.fromSlot } });
+    // Never sent or never landed: the vault still holds the fees and the next claim sweeps them.
+    if (row.sig) await d.alerts.send(`claim-lost-${row.id}`, "warn", `Vault claim ${row.sig} didn't land; fees roll into the next claim`);
+    return d.prisma.vaultClaim.update({ where: { id: row.id }, data: { sig: null, toTradeId: row.fromTradeId } });
   }
   throw new Error(`vault claim ${row.sig} still pending; retrying later`);
 }
 
 /* ---------- B. attribution ---------- */
 
-async function stepAttribute(d: WorkerDeps, chain: PayoutChain, claimId: string, dryRun: boolean) {
-  const claim = await d.prisma.vaultClaim.findUniqueOrThrow({ where: { id: claimId } });
+async function attributePending(d: WorkerDeps, chain: PayoutChain, dryRun: boolean) {
+  const open = await d.prisma.vaultClaim.findMany({ where: { dryRun, attributedAt: null }, orderBy: { createdAt: "asc" } });
+  for (const c of open) {
+    await recoverClaim(d, chain, c);
+    await attributeVaultClaim(d, chain, c.id);
+  }
+}
+
+/** Polling interval while waiting for the indexer or finality (tests shorten it). */
+export const timing = { pollMs: 5000 };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms === 5000 ? timing.pollMs : ms));
+
+async function attributeVaultClaim(d: WorkerDeps, chain: PayoutChain, claimId: string) {
+  let claim = await d.prisma.vaultClaim.findUniqueOrThrow({ where: { id: claimId } });
   if (claim.attributedAt) return;
-  // Every trade the claim swept must be indexed first, or its fees would look unattributed.
-  for (let i = 0; i < 36 && (await chain.indexedSlot()) < claim.toSlot; i++) await new Promise((r) => setTimeout(r, 5000));
-  if ((await chain.indexedSlot()) < claim.toSlot) {
-    await d.alerts.send("indexer-behind-claim", "critical", `Indexer is behind the vault claim (slot ${claim.toSlot}); payouts wait for it`);
+
+  // Wait for the indexer to reach the claim transaction (it sets toTradeId). If it has gone past the
+  // claim's slot without seeing it, place the claim by slot instead and say so.
+  for (let i = 0; claim.toTradeId === null && i < 36; i++) {
+    if ((await chain.indexedSlot()) > claim.toSlot) {
+      const last = await d.prisma.trade.aggregate({ where: { slot: { lte: claim.toSlot } }, _max: { id: true } });
+      const toTradeId = last._max.id ?? claim.fromTradeId;
+      claim = await d.prisma.vaultClaim.update({ where: { id: claim.id }, data: { toTradeId: toTradeId > claim.fromTradeId ? toTradeId : claim.fromTradeId } });
+      await d.alerts.send(`claim-by-slot-${claim.id}`, "warn", `Vault claim ${claim.sig} wasn't seen in the PlatformConfig stream; attributed by slot (trades in its own slot may shift by one claim)`);
+      break;
+    }
+    await sleep(5000);
+    claim = await d.prisma.vaultClaim.findUniqueOrThrow({ where: { id: claimId } });
+  }
+  if (claim.toTradeId === null) {
+    await d.alerts.send("indexer-behind-claim", "critical", `Indexer hasn't reached vault claim ${claim.sig ?? claim.id}; payouts wait for it`);
     throw new Error("indexer behind the vault claim");
   }
-  const fees = await d.prisma.trade.groupBy({
-    by: ["coinId"],
-    where: { venue: "curve", slot: { gt: claim.fromSlot, lte: claim.toSlot } },
-    _sum: { platformFee: true },
-  });
+  const range = { gt: claim.fromTradeId, lte: claim.toTradeId };
+
+  // Only finalized trades count: a trade from a confirmed slot that was later dropped is removed
+  // instead of taking a share of the money (audit).
+  for (let i = 0; i < 12 && (await chain.finalizedSlot()) < claim.toSlot; i++) await sleep(5000);
+  const feeTrades = await d.prisma.trade.findMany({ where: { venue: "curve", id: range, platformFee: { gt: 0n } }, select: { id: true, sig: true, slot: true } });
+  const sigs = [...new Set(feeTrades.map((t) => t.sig))];
+  const status = new Map<string, string>();
+  for (let i = 0; i < sigs.length; i += 256) {
+    const chunk = sigs.slice(i, i + 256);
+    (await chain.signatureStatuses(chunk)).forEach((s, j) => status.set(chunk[j]!, s));
+  }
+  if ([...status.values()].some((s) => s === "pending")) throw new Error("some trades in the claim aren't finalized yet; retrying later");
+  const dropped = feeTrades.filter((t) => status.get(t.sig) === "missing" || status.get(t.sig) === "failed");
+  if (dropped.length) {
+    await d.prisma.trade.deleteMany({ where: { id: { in: dropped.map((t) => t.id) } } });
+    await d.alerts.send(`dropped-trades-${claim.id}`, "critical", `${dropped.length} indexed trade(s) never finalized and were removed before attributing claim ${claim.sig ?? claim.id}`);
+  }
+
+  const fees = await d.prisma.trade.groupBy({ by: ["coinId"], where: { venue: "curve", id: range }, _sum: { platformFee: true } });
   const byCoin = new Map(fees.map((f) => [f.coinId, f._sum.platformFee ?? 0n]).filter(([, v]) => (v as bigint) > 0n) as [string, bigint][]);
   const a = attributeClaim(claim.lamports, byCoin);
   const tolerance = claim.lamports / 100n > 10_000_000n ? claim.lamports / 100n : 10_000_000n;
@@ -142,7 +196,7 @@ async function stepAttribute(d: WorkerDeps, chain: PayoutChain, claimId: string,
   await d.prisma.$transaction(async (tx) => {
     for (const [coinId, lamports] of a.perCoin) {
       const s = splitPlatformFee(lamports, d.params.fees);
-      await tx.feeAllocation.create({ data: { coinId, vaultClaimId: claim.id, lamports, holdersLamports: s.holders, divvyLamports: s.divvy, dryRun } });
+      await tx.feeAllocation.create({ data: { coinId, vaultClaimId: claim.id, lamports, holdersLamports: s.holders, divvyLamports: s.divvy, dryRun: claim.dryRun } });
     }
     await tx.vaultClaim.update({ where: { id: claim.id }, data: { unattributedLamports: a.unattributed, attributedAt: new Date() } });
   }, TX_OPTS);
@@ -151,6 +205,19 @@ async function stepAttribute(d: WorkerDeps, chain: PayoutChain, claimId: string,
 /* ---------- B2. CPMM creator fees of graduated coins (live, opt-in) ---------- */
 
 async function stepCpmmCreatorFees(d: WorkerDeps, chain: PayoutChain) {
+  // Collections a crash left unrecorded (row made at signing, lamports still 0): ask the chain.
+  const stale = await d.prisma.feeClaim.findMany({ where: { kind: "cpmm_creator", lamports: 0n, ts: { lt: new Date(Date.now() - 5 * 60_000) } } });
+  for (const fc of stale) {
+    if (await d.prisma.feeAllocation.findFirst({ where: { feeClaimId: fc.id } })) continue;
+    const o = await chain.outcome(fc.sig, "wsol");
+    if (o.status === "landed" && o.delta > 0n) {
+      const s = splitPlatformFee(o.delta, d.params.fees);
+      await d.prisma.$transaction([
+        d.prisma.feeClaim.update({ where: { id: fc.id }, data: { lamports: o.delta } }),
+        d.prisma.feeAllocation.create({ data: { coinId: fc.coinId, feeClaimId: fc.id, lamports: o.delta, holdersLamports: s.holders, divvyLamports: s.divvy } }),
+      ]);
+    } else if (o.status !== "landed") await d.prisma.feeClaim.delete({ where: { id: fc.id } });
+  }
   const coins = await d.prisma.coin.findMany({ where: { status: "graduated", cpmmPool: { not: null } }, select: { id: true, cpmmPool: true } });
   for (const c of coins) {
     const pending = await chain.cpmmCreatorFees(c.cpmmPool!).catch(() => 0n);
@@ -172,7 +239,7 @@ async function stepCpmmCreatorFees(d: WorkerDeps, chain: PayoutChain) {
 
 /** Dust (asset units) the coin's last round left undistributed. */
 async function previousDust(d: WorkerDeps, coinId: string, hour: Date, dryRun: boolean): Promise<bigint> {
-  const prev = await d.prisma.payoutRound.findFirst({ where: { coinId, dryRun, hour: { lt: hour } }, orderBy: { hour: "desc" }, select: { dustCarried: true } });
+  const prev = await d.prisma.payoutRound.findFirst({ where: { coinId, dryRun, hour: { lt: hour }, step: "delivered" }, orderBy: { hour: "desc" }, select: { dustCarried: true } });
   return prev?.dustCarried ?? 0n;
 }
 
@@ -182,6 +249,9 @@ async function stepOpenRounds(d: WorkerDeps, hour: Date, dryRun: boolean, solUsd
     const holders = p._sum.holdersLamports ?? 0n;
     if (holders <= 0n) continue;
     if (await d.prisma.payoutRound.findUnique({ where: { coinId_hour_dryRun: { coinId: p.coinId, hour, dryRun } } })) continue;
+    // Rounds of one coin run in order (each carries the previous one's dust): while an earlier round is
+    // unfinished, this hour's money waits (audit: dust could otherwise be paid twice).
+    if (await d.prisma.payoutRound.findFirst({ where: { coinId: p.coinId, dryRun, hour: { lt: hour }, step: { not: "delivered" } }, select: { id: true } })) continue;
     const dust = await previousDust(d, p.coinId, hour, dryRun);
     if (shouldCarry(holders, solUsd, d.params.minRoundUsd)) {
       await d.prisma.payoutRound.create({
@@ -221,26 +291,49 @@ async function stepSwaps(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: 
 
   for (const [assetId, group] of byAsset) {
     const asset = group[0]!.coin.dividendAsset;
-    const lamportsIn = group.reduce((a, r) => a + r.solIn, 0n);
-    let batch = await d.prisma.swapBatch.upsert({
-      where: { assetId_hour_dryRun: { assetId, hour, dryRun } },
-      create: { assetId, hour, dryRun, lamportsIn },
-      update: {},
-    });
+    // A batch belongs to the rounds that funded it, fixed when it's created. A round that turns up
+    // later in the same hour is carried instead of sharing an output it didn't pay for (audit).
+    let batch =
+      (await d.prisma.swapBatch.findUnique({ where: { assetId_hour_dryRun: { assetId, hour, dryRun } } })) ??
+      (await d.prisma.$transaction(async (tx) => {
+        const b = await tx.swapBatch.create({ data: { assetId, hour, dryRun, lamportsIn: group.reduce((a, r) => a + r.solIn, 0n) } });
+        await tx.payoutRound.updateMany({ where: { id: { in: group.map((r) => r.id) }, step: "allocated", swapBatchId: null }, data: { swapBatchId: b.id } });
+        return b;
+      }, TX_OPTS));
+    const members = await d.prisma.payoutRound.findMany({ where: { swapBatchId: batch.id, step: "allocated" } });
+    for (const r of group) if (!members.some((m) => m.id === r.id)) await detachRound(d, r, "arrived after this hour's swap");
+    if (!members.length) continue;
+    const lamportsIn = batch.lamportsIn;
+
     const refuse = async (reason: string, severity: "warn" | "critical" = "warn") => {
       await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "skipped", error: reason } });
-      for (const r of group) await detachRound(d, r, reason);
+      for (const r of members) await detachRound(d, r, reason);
       await d.alerts.send(`swap-${asset.symbol}-${hour.toISOString()}`, severity, `${asset.symbol} swap for ${hour.toISOString()} not done: ${reason}. Holders' share carries to the next round.`);
     };
 
-    if (batch.status === "sent" && batch.sig) {
-      const o = await chain.outcome(batch.sig, { assetMint: asset.mint });
-      if (o.status === "landed") batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "confirmed", assetOut: o.delta } });
-      else if (o.status === "failed" || Date.now() - batch.updatedAt.getTime() > 5 * 60_000) batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "pending", sig: null } });
-      else continue; // still in flight
+    if (batch.status === "skipped") {
+      for (const r of members) await detachRound(d, r, batch.error ?? "swap skipped");
+      continue;
+    }
+    if (batch.status === "sent") {
+      if (batch.sig) {
+        // Decided from the chain, never from a send error: a "block height exceeded" can hide a swap
+        // that landed (audit). After 5 minutes the blockhash has long expired.
+        const o = await chain.outcome(batch.sig, { assetMint: asset.mint });
+        if (o.status === "landed") batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "confirmed", assetOut: o.delta } });
+        else if (o.status === "failed" || Date.now() - batch.updatedAt.getTime() > 5 * 60_000) batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "pending", sig: null } });
+        else continue;
+      } else if (Date.now() - batch.updatedAt.getTime() > 5 * 60_000) {
+        // Claimed by a run that died before signing.
+        batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "pending" } });
+      } else continue;
     }
 
     if (batch.status === "pending") {
+      // Claim the batch so two runs never swap it twice.
+      const claimed = await d.prisma.swapBatch.updateMany({ where: { id: batch.id, status: "pending" }, data: { status: "sent", sig: null } });
+      if (claimed.count !== 1) continue;
+      batch = await d.prisma.swapBatch.findUniqueOrThrow({ where: { id: batch.id } });
       const info = await chain.mintInfo(asset.mint);
       if (info.paused) {
         await refuse("the asset's token is paused by its issuer");
@@ -260,41 +353,57 @@ async function stepSwaps(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: 
         await refuse(`price impact ${q.priceImpactBps} bps is over the ${d.params.maxSwapImpactBps} bps cap`);
         continue;
       }
-      if (quoteLooksWrong({ lamportsIn, outAmount: q.outAmount, assetDecimals: asset.decimals, solUsd: prices.solUsd, assetUsd, maxImpactBps: d.params.maxSwapImpactBps })) {
+      const ref = { lamportsIn, assetDecimals: asset.decimals, solUsd: prices.solUsd, assetUsd, maxImpactBps: d.params.maxSwapImpactBps };
+      if (quoteLooksWrong({ ...ref, outAmount: q.outAmount })) {
         await refuse("the quote is off the reference price", "critical");
         continue;
       }
       if (dryRun) {
         batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "confirmed", assetOut: q.outAmount, minOut: q.minOut, priceImpactBps: q.priceImpactBps } });
       } else {
+        // Hourly spend cap on the fee claimer's swaps (HANDOFF §9).
+        const capKey = `divvy:swap-spend:${hour.toISOString()}`;
+        const spent = BigInt(await d.redis.incrby(capKey, Number(lamportsIn)));
+        await d.redis.expire(capKey, 7200);
+        if (spent > BigInt(d.env.SWAP_HOURLY_CAP_LAMPORTS)) {
+          await d.redis.decrby(capKey, Number(lamportsIn));
+          await refuse(`over the hourly swap cap of ${d.env.SWAP_HOURLY_CAP_LAMPORTS} lamports`, "critical");
+          continue;
+        }
         if ((await chain.feeClaimerLamports()) < lamportsIn + 20_000_000n) {
+          await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "pending" } });
           await d.alerts.send("fee-claimer-short", "critical", "Fee claimer holds less SOL than the holders' share it must swap");
           throw new Error("fee claimer balance below the swap amount");
         }
+        let signed = false;
         try {
-          const r = await chain.swap(asset.mint, lamportsIn, d.params.swapSlippageBps, async (sig) => {
-            batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "sent", sig, minOut: q.minOut, priceImpactBps: q.priceImpactBps } });
+          const r = await chain.swap(asset.mint, lamportsIn, d.params.swapSlippageBps, { minOutFloor: referenceFloor(ref), maxImpactBps: d.params.maxSwapImpactBps }, async (sig) => {
+            signed = true;
+            batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { sig, minOut: q.minOut, priceImpactBps: q.priceImpactBps } });
           });
           batch = await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "confirmed", sig: r.sig, assetOut: r.assetOut } });
+          if (r.assetOut < batch.minOut) await d.alerts.send(`swap-short-${batch.id}`, "critical", `${asset.symbol} swap ${r.sig} delivered ${r.assetOut}, below its minimum ${batch.minOut}`);
           swaps++;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          // Definitely not landed (expired or failed on chain): carry. Otherwise the next run checks.
-          if (/block height exceeded|failed on chain/i.test(msg)) await refuse(`swap failed (${msg.slice(0, 120)})`);
-          else d.log("payouts: swap outcome unknown, will check next run", { asset: asset.symbol, error: msg });
+          if (e instanceof SwapRejected) await refuse(`swap refused: ${msg.slice(0, 160)}`, "critical");
+          else if (!signed) await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "pending" } });
+          else if (/failed on chain/i.test(msg)) await refuse(`swap failed (${msg.slice(0, 120)})`);
+          // Otherwise the outcome is unknown: it stays "sent" and the next run asks the chain.
+          d.log("payouts: swap not confirmed", { asset: asset.symbol, error: msg });
           continue;
         }
       }
     }
 
     if (batch.status !== "confirmed") continue;
-    const shares = splitSwapOutput(batch.assetOut, new Map(group.map((r) => [r.id, r.solIn])));
+    const shares = splitSwapOutput(batch.assetOut, new Map(members.map((r) => [r.id, r.solIn])));
     const assetUsd = prices.byMint[asset.mint] ?? 0;
     await d.prisma.$transaction(
-      group.map((r) =>
+      members.map((r) =>
         d.prisma.payoutRound.update({
           where: { id: r.id },
-          data: { step: "swapped", swapBatchId: batch.id, assetOut: shares.get(r.id) ?? 0n, swapSig: batch.sig, priceUsd: assetUsd ? assetUsd.toFixed(12) : null },
+          data: { step: "swapped", assetOut: shares.get(r.id) ?? 0n, swapSig: batch.sig, priceUsd: assetUsd ? assetUsd.toFixed(12) : null },
         }),
       ),
     );
@@ -310,7 +419,7 @@ async function stepSnapshots(d: WorkerDeps, chain: PayoutChain, hour: Date, dryR
     const coin = r.coin;
     if (!coin.mint) continue;
     try {
-      const holders = await chain.holders(coin.mint);
+      const holders = await holdersForRound(d, chain, coin.id, coin.mint, hour);
       const rows = classifyHolders(holders, chain.excludedOwners({ mint: coin.mint, cpmmPool: coin.cpmmPool }), {
         priceSol: Number(coin.stats?.priceSol ?? 0),
         solUsd,
@@ -320,6 +429,9 @@ async function stepSnapshots(d: WorkerDeps, chain: PayoutChain, hour: Date, dryR
       const { items, dust } = entitlements(r.assetOut + r.dustCarried, rows);
       const holderCount = rows.filter((x) => x.excludedReason === null || x.excludedReason === "small").length;
       await d.prisma.$transaction(async (tx) => {
+        // Only one run may credit a round (audit): the step moves first, conditionally.
+        const moved = await tx.payoutRound.updateMany({ where: { id: r.id, step: "swapped" }, data: { step: "snapshotted", holdersPaid: items.length, dustCarried: dust } });
+        if (moved.count !== 1) return;
         await tx.holderBalance.createMany({ data: rows.map((x) => ({ coinId: coin.id, wallet: x.wallet, balance: x.balance, snapshotHour: hour, excludedReason: x.excludedReason })), skipDuplicates: true });
         await tx.payoutItem.createMany({ data: items.map((i) => ({ roundId: r.id, wallet: i.wallet, amountAsset: i.amount, status: "credited" as const })), skipDuplicates: true });
         if (!dryRun && items.length) {
@@ -331,13 +443,29 @@ async function stepSnapshots(d: WorkerDeps, chain: PayoutChain, hour: Date, dryR
             SELECT w, ${coin.dividendAssetId}, a::bigint, now() FROM unnest(${wallets}::text[], ${amounts}::text[]) AS t(w, a)
             ON CONFLICT (wallet, "assetId") DO UPDATE SET amount = "Credit".amount + EXCLUDED.amount, "updatedAt" = now()`;
         }
-        await tx.payoutRound.update({ where: { id: r.id }, data: { step: "snapshotted", holdersPaid: items.length, dustCarried: dust } });
         if (!dryRun) await tx.coinStats.updateMany({ where: { coinId: coin.id }, data: { holders: holderCount } });
       }, TX_OPTS);
     } catch (e) {
       d.log("payouts: snapshot failed, will retry", { coinId: coin.id, error: e instanceof Error ? e.message : String(e) });
     }
   }
+}
+
+/** Total supply of every Divvy coin (SDK curve defaults, docs/VERIFIED.md item 8). */
+const COIN_SUPPLY = 1_000_000_000_000_000n;
+
+/**
+ * Holders for a round: the snapshot now, capped per wallet by the random mid-hour snapshot when one
+ * was taken (presnapshot.ts), so buying just before the round and selling right after earns nothing.
+ * A paged snapshot that adds up to more than the supply was taken while balances moved: retry.
+ */
+export async function holdersForRound(d: WorkerDeps, chain: PayoutChain, coinId: string, mint: string, hour: Date) {
+  const now = await chain.holders(mint);
+  const total = now.reduce((a, h) => a + h.amount, 0n);
+  if (total > COIN_SUPPLY) throw new Error(`holder snapshot adds up to ${total}, more than the supply`);
+  const pre = await readPreSnapshot(d, hour, coinId);
+  if (!pre) return now;
+  return now.map((h) => ({ owner: h.owner, amount: h.amount < (pre.get(h.owner) ?? 0n) ? h.amount : (pre.get(h.owner) ?? 0n) }));
 }
 
 /* ---------- finish: SLA, receipts, stats ---------- */

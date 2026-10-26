@@ -76,11 +76,21 @@ describe("checkTicker", () => {
   it("enforces 2 to 10 characters after folding", () => {
     expect(checkTicker("A", tickerCtx)).toMatchObject({ status: "fail", code: "TICKER_LENGTH", message: "Use 2 to 10 letters or numbers" });
     expect(checkTicker("ABCDEFGHIJK", tickerCtx).code).toBe("TICKER_LENGTH");
-    expect(checkTicker("A-B", tickerCtx).status).toBe("ok");
+  });
+
+  it("refuses symbols instead of dropping them (audit: BONK! was checked as BONKI but minted as BONK)", () => {
+    for (const t of ["CHIPDOG!", "CH|PDOG", "$$CHIPDOG", "C@OW", "!!", "chip dog", "W@G$"]) {
+      const r = checkTicker(t, tickerCtx);
+      expect(r, t).toMatchObject({ status: "fail", code: "TICKER_CHARS", message: "Use letters and numbers only" });
+    }
+    // One leading $ is ticker notation, and look-alike letters still fold to the taken ticker.
+    expect(checkTicker("$CH1PD0G", tickerCtx).code).toBe("TICKER_TAKEN");
+    expect(checkTicker("СНІРDОG", tickerCtx).code).toBe("TICKER_TAKEN");
+    expect(checkTicker("A-B", tickerCtx).code).toBe("TICKER_CHARS");
   });
 
   it("refuses leetspeak and homoglyph copies with the owner named", () => {
-    for (const t of ["CH1PD0G", "chipdog", "СНІРDОG", "C H I P D O G", "$chipdog"]) {
+    for (const t of ["CH1PD0G", "chipdog", "СНІРDОG", "ＣＨＩＰＤＯＧ", "$chipdog"]) {
       const r = checkTicker(t, tickerCtx);
       expect(r).toMatchObject({ status: "fail", code: "TICKER_TAKEN", message: "Reads as $CHIPDOG, which belongs to Chip Dog" });
       expect(r.collidesWith).toEqual({ ticker: "CHIPDOG", name: "Chip Dog", mint: null });

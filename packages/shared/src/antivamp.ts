@@ -18,6 +18,7 @@ export type CheckStatus = "idle" | "ok" | "fail";
 export type CheckCode =
   | "TICKER_EMPTY"
   | "TICKER_LENGTH"
+  | "TICKER_CHARS"
   | "TICKER_TAKEN"
   | "TICKER_RESERVED"
   | "TICKER_OK"
@@ -195,6 +196,9 @@ const result = (
 
 export function checkTicker(input: string, ctx: TickerContext): CheckResult {
   if (!input.trim()) return result("idle", "TICKER_EMPTY", "Type a ticker");
+  // Only letters, digits (and look-alike letters, which fold). Symbols are refused rather than dropped:
+  // "BONK!" would otherwise be checked as BONKI but minted as BONK.
+  if (/[^A-Z0-9]/.test(mapChars(prepTicker(input), HOMOGLYPHS))) return result("fail", "TICKER_CHARS", "Use letters and numbers only");
   const norm = foldTicker(input);
   if (norm.length < TICKER_MIN || norm.length > TICKER_MAX)
     return result("fail", "TICKER_LENGTH", `Use ${TICKER_MIN} to ${TICKER_MAX} letters or numbers`);

@@ -71,6 +71,7 @@ export async function authRoutes(
 
   app.get<{ Querystring: { address?: string } }>("/api/auth/nonce", async (req, reply) => {
     const address = req.query.address ?? "";
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return sendError(reply, 400, "BAD_ADDRESS", "That isn't a Solana address");
     const pk = decodeB58(address);
     if (!pk || pk.length !== 32) return sendError(reply, 400, "BAD_ADDRESS", "That isn't a Solana address");
     const nonce = randomBytes(16).toString("hex");

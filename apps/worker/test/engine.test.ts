@@ -16,8 +16,9 @@ import { ata, programs, type MintInfo } from "@divvy/solana/live";
 import type { WorkerDeps } from "../src/deps";
 import { loadWorkerEnv } from "../src/env";
 import { buildClaim, reconcileClaims } from "../src/claims";
-import type { PayoutChain } from "../src/payouts/chain";
-import { runPayouts } from "../src/payouts/engine";
+import type { OnSigned, PayoutChain } from "../src/payouts/chain";
+import { holdersForRound, runPayouts, timing } from "../src/payouts/engine";
+import { settleTransfers } from "../src/payouts/deliver";
 
 const BASE_DB = process.env.DATABASE_URL;
 const REDIS = process.env.REDIS_URL;
@@ -78,10 +79,12 @@ function stubChain(claimed: bigint): PayoutChain {
       return { sig: "CLAIMSIG", lamports: claimed, slot: 100n };
     },
     outcome: async () => ({ status: "unknown" }),
-    indexedSlot: async () => 100n,
+    indexedSlot: async () => 101n,
+    finalizedSlot: async () => 10_000n,
+    signatureStatuses: async (sigs) => sigs.map(() => "finalized" as const),
     mintInfo: async (m) => ({ address: new PublicKey(m), paused: false, transferHookProgram: null }) as unknown as MintInfo,
     quote: async (m, l) => ({ outAmount: quoteOut(m, l), minOut: 0n, priceImpactBps: 50 }),
-    swap: async (m, l, _s, onSigned) => {
+    swap: async (m, l, _s, _guard, onSigned) => {
       await onSigned(`SWAP-${m.slice(0, 6)}`);
       return { sig: `SWAP-${m.slice(0, 6)}`, assetOut: quoteOut(m, l) };
     },
@@ -281,6 +284,109 @@ describe.skipIf(!run)("dividend engine", () => {
     await reconcileClaims(d);
     expect((await prisma.claim.findFirstOrThrow({ where: { wallet: W.erin } })).status).toBe("expired");
     expect((await prisma.credit.findUniqueOrThrow({ where: { wallet_assetId: { wallet: W.erin, assetId: spy.id } } })).amount).toBe(932_812n);
+  });
+
+  const addTrade = (fee: bigint, slot: bigint, sig: string) =>
+    prisma.trade.create({ data: { sig, ix: 0, coinId: coins.B, side: "buy", solAmount: fee * 166n, tokenAmount: 1n, wallet: W.dave, priceSol: "0.0000001", platformFee: fee, slot, ts: new Date() } });
+  /** What the indexer does when it reaches a claim transaction in the PlatformConfig stream. */
+  const indexClaim = async (sig: string) => {
+    const max = (await prisma.trade.aggregate({ _max: { id: true } }))._max.id!;
+    await prisma.vaultClaim.updateMany({ where: { sig }, data: { toTradeId: max } });
+  };
+  const allocs = async (sig: string) => {
+    const c = await prisma.vaultClaim.findFirstOrThrow({ where: { sig } });
+    return { claim: c, allocations: (await prisma.feeAllocation.findMany({ where: { vaultClaimId: c.id } })).map((a) => [a.coinId, a.lamports]) };
+  };
+  const at = (h: number) => new Date(HOUR.getTime() + h * 3_600_000);
+  const live = () => deps(loadParams({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
+
+  it("a trade later in the claim's own slot belongs to the next claim, not this one (audit)", async () => {
+    timing.pollMs = 1;
+    await addTrade(12_000_000n, 300n, "t1");
+    const claim2: PayoutChain = {
+      ...stubChain(12_000_000n),
+      indexedSlot: async () => 301n,
+      claimVault: async (onSigned: OnSigned) => {
+        await onSigned("CLAIM2");
+        await indexClaim("CLAIM2");
+        await addTrade(6_000_000n, 300n, "t2"); // same slot, after the claim: its fee is still in the vault
+        return { sig: "CLAIM2", lamports: 12_000_000n, slot: 300n };
+      },
+    };
+    await runPayouts(live(), claim2, at(2), false, () => new Date(at(2).getTime() + 300_000));
+    const a2 = await allocs("CLAIM2");
+    expect(a2.claim.unattributedLamports).toBe(0n);
+    expect(a2.allocations).toEqual([[coins.B, 12_000_000n]]);
+
+    const claim3: PayoutChain = {
+      ...stubChain(6_000_000n),
+      indexedSlot: async () => 302n,
+      claimVault: async (onSigned: OnSigned) => {
+        await onSigned("CLAIM3");
+        await indexClaim("CLAIM3");
+        return { sig: "CLAIM3", lamports: 6_000_000n, slot: 301n };
+      },
+    };
+    await runPayouts(live(), claim3, at(3), false, () => new Date(at(3).getTime() + 300_000));
+    const a3 = await allocs("CLAIM3");
+    expect(a3.claim.unattributedLamports).toBe(0n);
+    expect(a3.allocations).toEqual([[coins.B, 6_000_000n]]);
+  });
+
+  it("a claim the indexer hadn't reached is attributed before the next claim is made (audit)", async () => {
+    await addTrade(9_000_000n, 400n, "t3");
+    const behind: PayoutChain = {
+      ...stubChain(9_000_000n),
+      indexedSlot: async () => 350n,
+      claimVault: async (onSigned: OnSigned) => {
+        await onSigned("CLAIM4");
+        return { sig: "CLAIM4", lamports: 9_000_000n, slot: 400n };
+      },
+    };
+    await expect(runPayouts(live(), behind, at(4), false)).rejects.toThrow("indexer behind");
+    expect((await allocs("CLAIM4")).claim.attributedAt).toBeNull();
+
+    // Next hour the indexer is past the claim: the old claim is attributed first, then the new one
+    // starts where it ended, so no range overlaps and no claimed lamports are orphaned.
+    const caughtUp: PayoutChain = { ...stubChain(0n), indexedSlot: async () => 500n, claimVault: async () => null };
+    await runPayouts(live(), caughtUp, at(5), false, () => new Date(at(5).getTime() + 300_000));
+    const a4 = await allocs("CLAIM4");
+    expect(a4.claim.attributedAt).not.toBeNull();
+    expect(a4.allocations).toEqual([[coins.B, 9_000_000n]]);
+    const c5 = await prisma.vaultClaim.findUniqueOrThrow({ where: { hour_dryRun: { hour: at(5), dryRun: false } } });
+    expect(c5.fromTradeId).toBe(a4.claim.toTradeId);
+    expect(c5.toTradeId).toBe(c5.fromTradeId);
+  });
+
+  it("a round that turns up after its hour's swap is carried, not given a share it didn't fund (audit)", async () => {
+    const h = at(6);
+    const nvda = await prisma.dividendAsset.findUniqueOrThrow({ where: { symbol: "NVDAx" } });
+    const batch = await prisma.swapBatch.create({ data: { assetId: nvda.id, hour: h, dryRun: true, lamportsIn: 100_000_000n, status: "confirmed", assetOut: 8_000_000n } });
+    const funded = await prisma.payoutRound.create({ data: { coinId: coins.A, hour: h, dryRun: true, status: "ok", step: "allocated", solIn: 100_000_000n, swapBatchId: batch.id } });
+    const late = await prisma.payoutRound.create({ data: { coinId: coins.B, hour: h, dryRun: true, status: "ok", step: "allocated", solIn: 100_000_000n } });
+    await runPayouts(deps(loadParams({ PAYOUTS_DRY_RUN: "true" })), stubChain(0n), h, true, () => new Date(h.getTime() + 300_000), { resumeOnly: true });
+    expect(await prisma.payoutRound.findUniqueOrThrow({ where: { id: funded.id } })).toMatchObject({ assetOut: 8_000_000n });
+    expect(await prisma.payoutRound.findUniqueOrThrow({ where: { id: late.id } })).toMatchObject({ status: "carried", assetOut: 0n, carriedOutLamports: 100_000_000n });
+  });
+
+  it("two settlers expiring the same transfer restore the credit once (audit)", async () => {
+    const nvda = await prisma.dividendAsset.findUniqueOrThrow({ where: { symbol: "NVDAx" } });
+    const before = (await prisma.credit.findUniqueOrThrow({ where: { wallet_assetId: { wallet: W.dave, assetId: nvda.id } } })).amount;
+    await prisma.credit.update({ where: { wallet_assetId: { wallet: W.dave, assetId: nvda.id } }, data: { amount: { decrement: 1000n } } });
+    await prisma.payoutTransfer.create({ data: { sig: "RACE", wallet: W.dave, assetId: nvda.id, amount: 1000n, lastValidBlockHeight: 1n } });
+    const d = live();
+    await Promise.all([settleTransfers(d, "RACE", "expired"), settleTransfers(d, "RACE", "expired"), settleTransfers(d, "RACE", "expired")]);
+    expect((await prisma.credit.findUniqueOrThrow({ where: { wallet_assetId: { wallet: W.dave, assetId: nvda.id } } })).amount).toBe(before);
+  });
+
+  it("pays each wallet on the smaller of its mid-hour and round balances (audit: flash holders)", async () => {
+    const h = at(7);
+    const mint = (await prisma.coin.findUniqueOrThrow({ where: { id: coins.C } })).mint!;
+    const key = `divvy:presnap:${h.toISOString()}:${coins.C}`;
+    await redis.hset(key, { _: "0", [W.alice]: (500_000n * 1_000_000n).toString() }); // erin held nothing mid-hour
+    const rows = await holdersForRound(deps(loadParams({})), stubChain(0n), coins.C, mint, h);
+    await redis.del(key);
+    expect(Object.fromEntries(rows.map((r) => [r.owner, r.amount]))).toEqual({ [W.alice]: 500_000n * 1_000_000n, [W.erin]: 0n });
   });
 
   it("refuses to pay when the on-chain fee rates don't match the configured split", async () => {

@@ -30,6 +30,8 @@ const ParamsSchema = z.object({
   LAUNCH_COOLDOWN_SEC: z.coerce.number().int().nonnegative().default(120),
   /** Abuse guard for free launches: a linked X account, or a wallet with at least this many lamports. */
   LAUNCH_MIN_WALLET_LAMPORTS: z.coerce.bigint().default(50_000_000n),
+  /** ...and whose first transaction is at least this old (HANDOFF §6 "a minimum age"). */
+  LAUNCH_MIN_WALLET_AGE_DAYS: z.coerce.number().nonnegative().default(3),
   /** Hourly spend cap for the launcher hot wallet (rent + tips), in lamports. */
   LAUNCHER_HOURLY_CAP_LAMPORTS: z.coerce.bigint().default(3_000_000_000n),
   /** ISO 3166-1 alpha-2 codes; requests from these countries can't launch or claim (HANDOFF §10). */
@@ -51,6 +53,7 @@ export interface DivvyParams {
   launchesPerDayGlobal: number;
   launchCooldownSec: number;
   launchMinWalletLamports: bigint;
+  launchMinWalletAgeDays: number;
   launcherHourlyCapLamports: bigint;
   blockedCountries: Set<string>;
   adminWallets: Set<string>;
@@ -80,6 +83,7 @@ export function loadParams(src: Record<string, string | undefined> = process.env
     launchesPerDayGlobal: e.LAUNCHES_PER_DAY_GLOBAL,
     launchCooldownSec: e.LAUNCH_COOLDOWN_SEC,
     launchMinWalletLamports: e.LAUNCH_MIN_WALLET_LAMPORTS,
+    launchMinWalletAgeDays: e.LAUNCH_MIN_WALLET_AGE_DAYS,
     launcherHourlyCapLamports: e.LAUNCHER_HOURLY_CAP_LAMPORTS,
     blockedCountries: new Set(e.BLOCKED_COUNTRIES.map((c) => c.toUpperCase())),
     adminWallets: new Set(e.ADMIN_WALLETS),

@@ -42,12 +42,12 @@ export async function statusJob(d: WorkerDeps): Promise<void> {
   const cursor = await d.prisma.indexerCursor.findUnique({ where: { name: "platform" } });
   let indexerLagSec: number | null = null;
   if (cursor?.lastSignature) {
-    // Lag: how long the newest PlatformConfig transaction has been waiting to be indexed.
-    const [newest] = await d.conn.getSignaturesForAddress(d.sol.platformConfig, { limit: 1 }, "confirmed").catch(() => []);
-    if (newest && newest.signature !== cursor.lastSignature && newest.blockTime) {
-      indexerLagSec = Math.max(0, Math.round(Date.now() / 1000 - newest.blockTime));
-      if (indexerLagSec > 60) await d.alerts.send("indexer-lag", "critical", `Indexer is ${indexerLagSec}s behind`, 900);
-    } else indexerLagSec = 0;
+    // Lag: how long the oldest transaction the indexer hasn't processed has been waiting. (The newest
+    // one would look fresh on a busy platform even with the indexer stuck for hours; audit.)
+    const waiting = await d.conn.getSignaturesForAddress(d.sol.platformConfig, { until: cursor.lastSignature, limit: 1000 }, "confirmed").catch(() => null);
+    const oldest = waiting?.[waiting.length - 1];
+    indexerLagSec = oldest?.blockTime ? Math.max(0, Math.round(Date.now() / 1000 - oldest.blockTime)) : 0;
+    if (indexerLagSec > 60) await d.alerts.send("indexer-lag", "critical", `Indexer is ${indexerLagSec}s behind`, 900);
   }
   await writeStatus(d.redis, { at: Date.now(), indexerSlot: cursor ? Number(cursor.lastSlot) : null, indexerLagSec, wallets });
 }

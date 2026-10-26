@@ -68,6 +68,17 @@ describe("TradeEvent decoding", () => {
   });
 });
 
+describe("TradeEvent sanity on tiny trades (audit)", () => {
+  const pool = Keypair.generate().publicKey;
+  it("accepts a 9-lamport buy whose rounded-up fee is over 10% of it", () => {
+    const e = decodeTradeEvent(tradeEventBody({ pool, amountIn: 9n, amountOut: 1000n, realBaseAfter: 1000n, protocolFee: 0n, platformFee: 1n, creatorFee: 0n }));
+    expect(e.platformFee).toBe(1n);
+  });
+  it("still rejects fees larger than the trade", () => {
+    expect(() => decodeTradeEvent(tradeEventBody({ pool, amountIn: 9n, amountOut: 1000n, realBaseAfter: 1000n, protocolFee: 5n, platformFee: 6n, creatorFee: 0n }))).toThrow(EventLayoutError);
+  });
+});
+
 describe("parseLaunchLabTransaction", () => {
   it("finds the event CPI, the trader and the pool", () => {
     const trader = Keypair.generate().publicKey;
@@ -98,6 +109,17 @@ describe("parseLaunchLabTransaction", () => {
     expect(r.trades).toHaveLength(1);
     expect(r.trades[0]!.trader?.equals(trader)).toBe(true);
     expect(r.trades[0]!.event.poolState.equals(pool)).toBe(true);
+
+    // Another platform's pool: not decoded at all, so its events can't stop the indexer.
+    expect(parseLaunchLabTransaction(tx, P.launchLab, P.cpmm, () => false).trades).toHaveLength(0);
+    const garbage = Buffer.concat([EVENT_IX_TAG_LE, TRADE_EVENT_DISC, tradeEventBody({ pool, dir: 9 })]);
+    const other = { ...tx, meta: { ...tx.meta!, innerInstructions: [{ index: 0, instructions: [{ programIdIndex: 1, accounts: [1], data: bs58.encode(garbage) }] }] } } as VersionedTransactionResponse;
+    expect(() => parseLaunchLabTransaction(other, P.launchLab, P.cpmm)).toThrow(EventLayoutError);
+    expect(parseLaunchLabTransaction(other, P.launchLab, P.cpmm, (p) => p !== pool.toBase58()).trades).toHaveLength(0);
+
+    // A trade instruction that produced no TradeEvent means the program changed: stop, don't skip.
+    const silent = { ...tx, meta: { ...tx.meta!, innerInstructions: [] } } as VersionedTransactionResponse;
+    expect(() => parseLaunchLabTransaction(silent, P.launchLab, P.cpmm)).toThrow(EventLayoutError);
   });
 });
 

@@ -1,4 +1,5 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import { ZodError } from "zod";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
@@ -34,9 +35,23 @@ export async function buildApp({ env, store, kv, live }: BuildOptions): Promise<
     bodyLimit: 64 * 1024,
   });
 
+  // Every error leaves in the API's error contract; 5xx never echo internal messages (audit).
+  app.setErrorHandler((err: FastifyError, req, reply) => {
+    if (err instanceof ZodError) return sendError(reply, 400, "BAD_REQUEST", "That request isn't valid");
+    const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500;
+    if (status === 500) {
+      req.log.error(err);
+      return sendError(reply, 500, "INTERNAL", "Something went wrong on our side. Try again.");
+    }
+    if (status === 429) return sendError(reply, 429, "RATE_LIMITED", "Too many requests. Wait a minute and try again.");
+    if (status === 413) return sendError(reply, 413, "TOO_LARGE", "That request is too large");
+    return sendError(reply, status, "BAD_REQUEST", "That request isn't valid");
+  });
+
   await app.register(cookie);
   await app.register(multipart, { limits: { fileSize: IMAGE_MAX_BYTES, files: 1, fields: 0 } });
-  await app.register(websocket);
+  // /api/live only sends; clients have nothing to say. Small frames only (ws defaults to 100 MiB).
+  await app.register(websocket, { options: { maxPayload: 1024 } });
 
   // State-changing requests must come from the web app's origin. SameSite=Lax cookies already stop
   // most cross-site requests; this closes the rest (e.g. multipart form posts).
@@ -49,7 +64,8 @@ export async function buildApp({ env, store, kv, live }: BuildOptions): Promise<
 
   if (env.API_MODE === "live") {
     const d = live ?? createLiveDeps(env);
-    await app.register(rateLimit, { global: true, max: 300, timeWindow: "1 minute", redis: d.redis, nameSpace: "divvy-rl:" });
+    // If Redis is down, serve without rate limits rather than failing every request (Nginx still limits).
+    await app.register(rateLimit, { global: true, max: 300, timeWindow: "1 minute", redis: d.redis, nameSpace: "divvy-rl:", skipOnError: true });
     await registerLive(app, d);
     return app;
   }

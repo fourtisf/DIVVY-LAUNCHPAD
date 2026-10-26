@@ -78,6 +78,21 @@ export class MainnetDisabledError extends Error {
   }
 }
 
+/** Genesis hashes per cluster (anza-xyz/solana-sdk@abe5e77 cluster-type/src/lib.rs:42-52). */
+export const GENESIS_HASH: Record<Cluster, string> = {
+  "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  devnet: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+};
+
+/**
+ * The mainnet gate trusts SOLANA_CLUSTER, so make sure the RPC really is that cluster: a mainnet RPC
+ * labelled "devnet" would otherwise skip the gate (audit). Call once at startup.
+ */
+export async function assertClusterMatchesRpc(conn: Connection, cluster: Cluster): Promise<void> {
+  const hash = await conn.getGenesisHash();
+  if (hash !== GENESIS_HASH[cluster]) throw new Error(`SOLANA_CLUSTER is "${cluster}" but the RPC's genesis hash is ${hash}`);
+}
+
 /** Every code path that signs and sends calls this first. Devnet is always allowed. */
 export function assertCanSend(env: Pick<SolanaEnv, "cluster" | "mainnetEnabled">, purpose: string): void {
   if (env.cluster === "mainnet-beta" && !env.mainnetEnabled) throw new MainnetDisabledError(purpose);

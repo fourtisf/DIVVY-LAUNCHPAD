@@ -115,7 +115,7 @@ module.exports = {
       node_args: [`--env-file=${ENV_FILE}`, "--max-old-space-size=384"],
       max_memory_restart: "512M",
       // Room for a graceful drain once the payout engine handles SIGINT mid-round (Phase 4).
-      kill_timeout: 30000,
+      kill_timeout: 130000,
       env: { NODE_ENV: "production" },
       // The worker logs JSON lines with their own timestamps.
       ...logs("worker"),

@@ -10,7 +10,7 @@ This sets up a fresh Hostinger VPS to run Divvy with PM2 and Nginx (CLAUDE.md, "
 
 - Private keys never go in the repo, the database, logs or client bundles. On this server they live only in `/etc/divvy/keys/` (§8).
 - Nothing in this setup spends SOL. Funding the hot wallets needs the owner's explicit approval in chat (rule 3).
-- Set `API_MODE=live` only once Phase 2 has landed. Until then `divvy-api` refuses to start under PM2: mock mode refuses `NODE_ENV=production`, and live mode isn't built yet. That's deliberate. You can still do everything in this file now.
+- `divvy-api` runs with `API_MODE=live` (mock mode refuses `NODE_ENV=production`). The API and the worker both refuse to start until `DATABASE_URL`, `REDIS_URL`, `SOLANA_RPC_URL` and `DIVVY_PLATFORM_CONFIG` are set. Divvy's PlatformConfig is created once, with the owner's approval (`packages/solana/scripts/phase0/create-platform-config.ts`, see `docs/VERIFIED.md`). Sections 1 to 9 don't need it.
 
 ---
 
@@ -23,7 +23,7 @@ sudo apt-get update && sudo apt-get -y full-upgrade
 sudo apt-get install -y git curl ca-certificates gnupg jq unattended-upgrades
 sudo dpkg-reconfigure -plow unattended-upgrades          # security updates on
 
-# UTC everywhere: the payout cron is minute 0 UTC, and cron.d, the logs and backup names all assume it.
+# UTC everywhere: payout hours are UTC, and cron.d, the logs and backup names all assume it.
 sudo timedatectl set-timezone Etc/UTC
 timedatectl | grep -E 'Time zone|synchronized'            # Etc/UTC, System clock synchronized: yes
 ```
@@ -205,19 +205,23 @@ Start from `.env.example` in the repo, with these production values:
 | `WEB_ORIGIN` | `https://divvy.example` |
 | `API_INTERNAL_URL` | `http://127.0.0.1:4000` |
 | `NEXT_PUBLIC_SOLANA_RPC_URL` | Inlined into the browser bundle at **build** time, so it's public. Use a key restricted to your domain, or a browser-only RPC plan. Changing it needs a rebuild and a CSP update. |
-| `SOLANA_CLUSTER`, `SOLANA_RPC_URL`, `SOLANA_WS_URL`, `DIVVY_PLATFORM_CONFIG`, `JITO_BLOCK_ENGINE_URL`, `JUP_API_KEY` | `devnet` until the audit sign-off. A Helius RPC URL enables DAS holder snapshots. |
-| `DIVVY_MAINNET_ENABLED` | `false`. Set `true` only after `docs/MAINNET_CHECKLIST.md` is signed off. |
-| `STORAGE_DRIVER`, `STORAGE_DIR`, `PUBLIC_MEDIA_BASE`, `S3_*` | Where coin pictures and token metadata live. Metadata URIs are permanent: use durable storage. |
+| `SOLANA_CLUSTER`, `SOLANA_RPC_URL`, `SOLANA_WS_URL`, `DIVVY_PLATFORM_CONFIG`, `JITO_BLOCK_ENGINE_URL`, `JUP_API_KEY` | `devnet` until the audit sign-off. `SOLANA_RPC_URL` and `DIVVY_PLATFORM_CONFIG` are required. A Helius RPC URL enables DAS holder snapshots; with another provider they fall back to `getProgramAccounts`. `JITO_BLOCK_ENGINE_URL` is a bare host, because the worker adds `/api/v1/…` (empty means `https://mainnet.block-engine.jito.wtf`). |
+| `DIVVY_MAINNET_ENABLED` | `false`. Set `true` only after `docs/MAINNET_CHECKLIST.md` is complete and the owner has signed it off. While it's off, nothing is signed and sent on mainnet. |
+| `STORAGE_DRIVER`, `STORAGE_DIR`, `PUBLIC_MEDIA_BASE`, `S3_*` | Where coin pictures and token metadata live. Metadata URIs are permanent: use durable storage. The API writes the pictures and the worker writes the metadata, each from its own release folder, so with `local` set `STORAGE_DIR` to an absolute path outside `/srv/divvy/releases`, writable by divvy (a relative path would split the two apps' files and disappear with old releases), and `PUBLIC_MEDIA_BASE` to `https://divvy.example/api/media/files`. The database backups (§11) don't include it. |
+| `FEE_*` | Must give the rates on chain: `FEE_PROTOCOL_BPS` × 100 is LaunchLab's `trade_fee_rate`, (`FEE_HOLDERS_BPS` + `FEE_DIVVY_BPS`) × 100 the PlatformConfig's `fee_rate`, and `FEE_CREATOR_BPS` × 100 its `creator_fee_rate`. Every payout run stops while they differ. |
+| `PAYOUT_DELIVERY` | `push` or `claim`, the owner's decision (HANDOFF §3.4). The site's copy follows it. |
+| `LAUNCHER_HOURLY_CAP_LAMPORTS`, `JITO_TIP_LAMPORTS`, `HOT_WALLET_MIN_SOL` | The launcher's hourly spend cap, the Jito tip per create, and the low-balance alert threshold. The owner sets them; the defaults are in `.env.example`. |
+| `WORKER_ROLES` | Leave the default: the one worker runs every role. |
 | `X_CLIENT_ID`, `X_CLIENT_SECRET`, `X_REDIRECT_URI` | X OAuth app (redirect `https://divvy.example/api/auth/x/callback`). Empty hides "Link X". |
 | `ADMIN_WALLETS`, `BLOCKED_COUNTRIES` | Admin wallet addresses; ISO codes refused for launches and claims. |
 | `LAUNCHER_KEYPAIR_PATH`, `PAYOUT_VAULT_KEYPAIR_PATH`, `FEE_CLAIMER_KEYPAIR_PATH` | Paths under `/etc/divvy/keys/` (below). Paths only, never key material. |
-| `PAYOUTS_DRY_RUN` | `true`. Turning live payouts on needs the owner's approval. |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID` | Alerts from the worker (late rounds, low balances, indexer lag, Jito failures) and the backup script. |
+| `PAYOUTS_DRY_RUN` | `true`. Turning live payouts on needs the owner's approval (RUNBOOK "Switching dry-run to live"). |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID` | Alerts from the worker (RUNBOOK "Alerts") and the backup script. Without them, alerts only go to the worker log. |
 | `RCLONE_REMOTE` | Optional, read by the backup script (§11). |
 
 Don't set `NODE_ENV` here: PM2 sets it per app, and the build sets its own. Values aren't expanded or sourced, so write them literally.
 
-**Hot wallet keypairs** (HANDOFF §9: separate keys for the launcher, the payout vault and fee claims). Create them on the server, so the secret key never travels. The command uses `@solana/web3.js` from the deployed release, so it needs the first deploy (§10). It writes a standard keypair file (a JSON array of 64 bytes, the same format as `solana-keygen`) with mode 600, refuses to overwrite an existing file, and prints only the public key:
+**Hot wallet keypairs** (HANDOFF §9: separate keys for the launcher, the payout vault and fee claims). Create them on the server, so the secret key never travels. The command uses `@solana/web3.js` from the deployed release, so it needs the first release built (§10, RUNBOOK "Deploy" step 1). It writes a standard keypair file (a JSON array of 64 bytes, the same format as `solana-keygen`) with mode 600, refuses to overwrite an existing file, and prints only the public key:
 
 ```bash
 sudo -iu divvy
@@ -237,8 +241,9 @@ exit
 
 Then:
 
-- Set `LAUNCHER_KEYPAIR_PATH=/etc/divvy/keys/launcher.json`, `PAYOUT_VAULT_KEYPAIR_PATH=/etc/divvy/keys/payout-vault.json` and `FEE_CLAIMER_KEYPAIR_PATH=/etc/divvy/keys/fee-claimer.json` in `divvy.env`.
-- Give the owner the public keys from `pubkeys.txt`. Funding needs their approval (rule 3). Keep balances minimal; spend caps are enforced in the app.
+- Set `LAUNCHER_KEYPAIR_PATH=/etc/divvy/keys/launcher.json`, `PAYOUT_VAULT_KEYPAIR_PATH=/etc/divvy/keys/payout-vault.json` and `FEE_CLAIMER_KEYPAIR_PATH=/etc/divvy/keys/fee-claimer.json` in `divvy.env`. If the worker is already running, restart it so it loads them: `sudo -iu divvy pm2 restart divvy-worker --update-env`.
+- The PlatformConfig's `platform_fee_wallet` (`FEE_WALLET` in the phase-0 script) must be the fee claimer's public key. Every payout run, dry-run included, checks it and stops with "PlatformConfig.platform_fee_wallet is not the fee claimer key" otherwise. Dry-run also needs the payout vault key, to quote swaps into its token account; it never signs with either.
+- Give the owner the public keys from `pubkeys.txt`. Funding needs their approval (rule 3). Keep balances minimal: the launcher's hourly spend is capped (`LAUNCHER_HOURLY_CAP_LAMPORTS`), and the payout wallets only swap and send what the dividend engine has claimed and recorded.
 - Keep an **encrypted** offline copy of each key file (for example `age` or `gpg` to the owner's key) on media the owner holds. This matters most if a wallet becomes `platform_fee_wallet` or `platform_nft_wallet` in the PlatformConfig, because losing it would strand fees. The database backups don't contain `/etc/divvy`. Keep it that way.
 - Never paste key material into a terminal, a chat, a ticket or the env file.
 
@@ -260,7 +265,12 @@ exit
 
 ## 10. First deploy and PM2 at boot
 
-Follow [`docs/RUNBOOK.md`](../docs/RUNBOOK.md), "Deploy", steps 1 to 5 (release, install, build, smoke test, migrate, switch). Then start PM2 instead of reloading it:
+Follow [`docs/RUNBOOK.md`](../docs/RUNBOOK.md), "Deploy", steps 1 to 5 (release, install, build, smoke test, migrate, switch). Two things go in between step 1 and step 2:
+
+- **The keypairs (§8).** The command needs the packages step 1 installed. The worker starts without them, but launches and payouts fail until they're set.
+- **`SOLANA_RPC_URL` and `DIVVY_PLATFORM_CONFIG` in `divvy.env`.** The smoke test in step 2 starts the API and the worker, and neither starts without them.
+
+Then start PM2 instead of reloading it:
 
 ```bash
 sudo -iu divvy pm2 start /srv/divvy/current/deploy/ecosystem.config.cjs
@@ -270,7 +280,7 @@ systemctl status pm2-divvy --no-pager
 sudo reboot     # then: sudo -iu divvy pm2 ls  (everything back online?)
 ```
 
-Now install the Nginx site (§7, last block) and the keypairs (§8).
+Now install the Nginx site (§7, last block). Check that the worker came up in dry-run: `sudo grep '"msg":"worker started"' /var/log/divvy/worker.out.log | tail -1` shows `"payoutsDryRun":true` and the cluster you expect.
 
 **Log rotation.** PM2 keeps its log files open, so rotate them with `copytruncate`:
 
@@ -309,11 +319,15 @@ sudo -u divvy -H /bin/bash /srv/divvy/current/deploy/backup/pg-backup.sh    # ru
 
 Then do a restore drill (`deploy/backup/pg-restore.md`, steps 1 to 3) before calling the server ready.
 
-## 12. Monitoring until alerts land
+## 12. Monitoring
 
-The Telegram alerts in HANDOFF §8 are available once Phase 4 lands (payouts) and Phase 5 lands (the rest). Until then:
-
-- Point an external uptime checker at `https://divvy.example/api/health`, every minute.
+- **Telegram.** With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALERT_CHAT_ID` set (§8), the worker sends its alerts there (late or failed rounds, payouts stopped, low hot-wallet balances, Jito failures, indexer lag and the rest in the runbook's "Alerts"), and so does the backup script. Send one test message to check the bot and the chat (the token reaches curl on stdin, so it stays out of `ps`):
+  ```bash
+  printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$(sudo grep -E '^TELEGRAM_BOT_TOKEN=' /etc/divvy/divvy.env | tail -n 1 | cut -d= -f2-)" |
+    curl -fsS -m 10 -K - -o /dev/null --data-urlencode "chat_id=$(sudo grep -E '^TELEGRAM_ALERT_CHAT_ID=' /etc/divvy/divvy.env | tail -n 1 | cut -d= -f2-)" \
+      --data-urlencode "text=Divvy: test message from $(hostname)" && echo sent
+  ```
+- **Uptime.** Point an external uptime checker at `https://divvy.example/api/health`, every minute. It answers HTTP 200 with `"ok":false` when the database is unreachable (and HTTP 500 when Redis is down), so have the checker look for `"ok":true` in the body if it can.
 - Follow the "Routine checks" in the runbook.
 
 ## Checklist
@@ -321,7 +335,8 @@ The Telegram alerts in HANDOFF §8 are available once Phase 4 lands (payouts) an
 - [ ] `sudo ufw status` shows only 22, 80 and 443.
 - [ ] `ss -tlnp` shows 5432, 6379, 3000 and 4000 on 127.0.0.1 or ::1 only.
 - [ ] `/etc/divvy/divvy.env` and `/etc/divvy/keys/*.json` are `-rw------- divvy divvy`.
-- [ ] `PAYOUTS_DRY_RUN=true`, and `API_MODE` follows the current phase.
+- [ ] `API_MODE=live`, `PAYOUTS_DRY_RUN=true` and `DIVVY_MAINNET_ENABLED=false`, and the worker's `worker started` log line agrees.
+- [ ] The Telegram test message arrived (§12).
 - [ ] `sudo -iu divvy pm2 ls` shows all three apps online, and they come back after a reboot.
 - [ ] `curl -sI https://divvy.example` returns the security headers and a CSP with the real RPC origin.
 - [ ] `certbot renew --dry-run` passes.

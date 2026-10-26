@@ -9,6 +9,7 @@ export async function liveRoutes(app: FastifyInstance, { store }: { store: MockS
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(e));
     };
     store.listeners.add(send);
+    socket.on("message", () => socket.close(1008, "send-only stream"));
     // Keep idle proxies from closing the socket.
     const ping = setInterval(() => socket.readyState === socket.OPEN && socket.ping(), 25_000);
     socket.on("close", () => {

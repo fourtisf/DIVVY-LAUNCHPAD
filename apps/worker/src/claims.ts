@@ -8,11 +8,16 @@ import { ComputeBudgetProgram, PublicKey, TransactionMessage, VersionedTransacti
 import type { ClaimJob, ClaimJobResult } from "@divvy/shared";
 import { assertCanSend, getMintInfo, MainnetDisabledError, signatureOf, transferIxs } from "@divvy/solana/live";
 import type { WorkerDeps } from "./deps";
+import { EXPIRY_MARGIN, markItems } from "./payouts/deliver";
 
 const fail = (code: string, message: string): ClaimJobResult => ({ tx: null, amount: "0", error: { code, message } });
 
 export async function buildClaim(d: WorkerDeps, job: ClaimJob): Promise<ClaimJobResult> {
   if (d.params.delivery !== "claim") return fail("PUSH_DELIVERY", "Payouts are sent automatically; there's nothing to claim");
+  if (d.params.dryRun) return fail("CLAIMS_CLOSED", "Claims aren't open yet");
+  // A claim that failed on chain recently (frozen or memo-required account): wait before the vault
+  // pays for another attempt (audit).
+  if (await d.redis.exists(backoffKey(job.wallet, job.assetId))) return fail("CLAIM_BACKOFF", "Your last claim failed. Try again in an hour.");
   try {
     assertCanSend(d.sol, "payout.claim");
   } catch (e) {
@@ -26,6 +31,10 @@ export async function buildClaim(d: WorkerDeps, job: ClaimJob): Promise<ClaimJob
   if (open) return fail("CLAIM_PENDING", "You have a claim waiting. Sign it, or wait a minute and try again.");
   const credit = await d.prisma.credit.findUnique({ where: { wallet_assetId: { wallet: job.wallet, assetId: asset.id } } });
   if (!credit || credit.amount <= 0n) return fail("NOTHING_TO_CLAIM", "There's nothing to claim yet");
+  // The vault pays each claim's network fee, so tiny claims wait until they're worth it.
+  const usd = (await d.prices()).byMint[asset.mint] ?? 0;
+  const creditUsd = (Number(credit.amount) / 10 ** asset.decimals) * usd;
+  if (usd > 0 && creditUsd < d.params.autoPushMinUsd) return fail("CLAIM_TOO_SMALL", `You can claim once it's worth $${d.params.autoPushMinUsd}`);
 
   const info = await getMintInfo(d.conn, new PublicKey(asset.mint));
   if (info.paused) return fail("ASSET_PAUSED", `${asset.symbol} transfers are paused by its issuer. Try again later.`);
@@ -55,23 +64,23 @@ export async function buildClaim(d: WorkerDeps, job: ClaimJob): Promise<ClaimJob
   return { tx: Buffer.from(tx.serialize()).toString("base64"), amount: amount.toString() };
 }
 
-async function settleClaim(d: WorkerDeps, id: string, to: "confirmed" | "expired"): Promise<void> {
+const backoffKey = (wallet: string, assetId: string) => `divvy:claim-backoff:${wallet}:${assetId}`;
+
+/** Only a pending claim moves, and only the call that moved it restores the credit (audit). */
+async function settleClaim(d: WorkerDeps, id: string, to: "confirmed" | "expired", failedOnChain = false): Promise<void> {
   await d.prisma.$transaction(async (db) => {
     const c = await db.claim.findUnique({ where: { id } });
-    if (!c || c.status !== "pending") return;
-    await db.claim.update({ where: { id }, data: { status: to } });
+    if (!c) return;
+    const moved = await db.claim.updateMany({ where: { id, status: "pending" }, data: { status: to } });
+    if (moved.count !== 1) return;
     if (to === "expired") {
       await db.credit.upsert({
         where: { wallet_assetId: { wallet: c.wallet, assetId: c.assetId } },
         create: { wallet: c.wallet, assetId: c.assetId, amount: c.amount },
         update: { amount: { increment: c.amount } },
       });
-    } else {
-      await db.payoutItem.updateMany({
-        where: { wallet: c.wallet, status: "credited", createdAt: { lte: c.createdAt }, round: { dryRun: false, coin: { dividendAssetId: c.assetId } } },
-        data: { status: "claimed", sendSig: c.sig },
-      });
-    }
+      if (failedOnChain) await d.redis.set(backoffKey(c.wallet, c.assetId), "1", "EX", 3600);
+    } else await markItems(db, c.wallet, c.assetId, c.amount, "claimed", c.sig);
   });
 }
 
@@ -79,12 +88,14 @@ async function settleClaim(d: WorkerDeps, id: string, to: "confirmed" | "expired
 export async function reconcileClaims(d: WorkerDeps): Promise<void> {
   const pending = await d.prisma.claim.findMany({ where: { status: "pending" }, orderBy: { createdAt: "asc" }, take: 256 });
   if (!pending.length) return;
-  const statuses = (await d.conn.getSignatureStatuses(pending.map((p) => p.sig), { searchTransactionHistory: true })).value;
+  // Block height first, statuses second; and a margin, since the holder chooses when to submit (audit).
   const height = BigInt(await d.conn.getBlockHeight("confirmed"));
+  const statuses = (await d.conn.getSignatureStatuses(pending.map((p) => p.sig), { searchTransactionHistory: true })).value;
   for (let i = 0; i < pending.length; i++) {
     const st = statuses[i];
     const c = pending[i]!;
     if (st && !st.err && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) await settleClaim(d, c.id, "confirmed");
-    else if (st?.err || (!st && height > c.lastValidBlockHeight)) await settleClaim(d, c.id, "expired");
+    else if (st?.err) await settleClaim(d, c.id, "expired", true);
+    else if (!st && height > c.lastValidBlockHeight + EXPIRY_MARGIN) await settleClaim(d, c.id, "expired");
   }
 }

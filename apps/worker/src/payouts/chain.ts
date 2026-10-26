@@ -9,15 +9,17 @@
 import {
   ComputeBudgetProgram,
   PublicKey,
+  SystemProgram,
   TransactionMessage,
   VersionedTransaction,
   type TokenBalance,
   type TransactionInstruction,
   type VersionedTransactionResponse,
 } from "@solana/web3.js";
-import { createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction, NATIVE_MINT, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { AccountLayout, createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction, NATIVE_MINT, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { expectedOnChainRates } from "@divvy/shared";
 import {
+  assertCanSend,
   ata,
   claimPlatformVaultInstructions,
   collectCpmmCreatorFeeInstructions,
@@ -35,12 +37,19 @@ import {
   type MintInfo,
 } from "@divvy/solana/live";
 import type { WorkerDeps } from "../deps";
+import { checkSwapInstructions, SwapRejected } from "./swapguard";
 
 export const BURN_OWNERS = ["1nc1nerator11111111111111111111111111111111"];
 
 export type OnSigned = (sig: string) => Promise<void>;
 export type Outcome = { status: "landed"; delta: bigint; slot: bigint } | { status: "failed" } | { status: "unknown" };
 export type ExcludedRole = "curve" | "pool" | "launcher" | "divvy" | "burn";
+
+export interface SwapGuard {
+  /** Refuse if Jupiter's minimum output is below this (reference price minus the impact cap). */
+  minOutFloor: bigint;
+  maxImpactBps: number;
+}
 
 export interface SwapQuote {
   outAmount: bigint;
@@ -56,13 +65,19 @@ export interface PayoutChain {
   /** Sweeps the vault (fee claimer signs). Lamports are the vault's own balance change in the tx. */
   claimVault(onSigned: OnSigned): Promise<{ sig: string; lamports: bigint; slot: bigint } | null>;
   /** What happened to a signed transaction: the token balance change of `account` if it landed. */
-  outcome(sig: string, account: "vault" | { assetMint: string }): Promise<Outcome>;
+  outcome(sig: string, account: "vault" | "wsol" | { assetMint: string }): Promise<Outcome>;
   /** Slot the indexer has processed up to. */
   indexedSlot(): Promise<bigint>;
+  finalizedSlot(): Promise<bigint>;
+  /** Per signature: finalized, pending (not finalized yet), failed, or missing (not found). */
+  signatureStatuses(sigs: string[]): Promise<("finalized" | "pending" | "failed" | "missing")[]>;
   mintInfo(mint: string): Promise<MintInfo>;
   quote(assetMint: string, lamportsIn: bigint, slippageBps: number): Promise<SwapQuote>;
-  /** Swaps SOL from the fee claimer into the payout vault's ATA. Returns the asset units received. */
-  swap(assetMint: string, lamportsIn: bigint, slippageBps: number, onSigned: OnSigned): Promise<{ sig: string; assetOut: bigint }>;
+  /**
+   * Swaps SOL from the fee claimer into the payout vault's ATA, after checking the built transaction
+   * against `guard` and simulating it. Returns the asset units received.
+   */
+  swap(assetMint: string, lamportsIn: bigint, slippageBps: number, guard: SwapGuard, onSigned: OnSigned): Promise<{ sig: string; assetOut: bigint }>;
   holders(mint: string): Promise<{ owner: string; amount: bigint }[]>;
   excludedOwners(coin: { mint: string; cpmmPool: string | null }): Map<string, ExcludedRole>;
   /** SOL leg of CPMM creator fees waiting in a graduated coin's pool, when Divvy is the pool creator. */
@@ -128,8 +143,9 @@ export function liveChain(d: WorkerDeps): PayoutChain {
       return null;
     },
     async vaultBalance() {
-      const b = await d.conn.getTokenAccountBalance(vault, "confirmed").catch(() => null);
-      return BigInt(b?.value.amount ?? "0");
+      // An RPC error must not read as "empty" (audit): only a vault that doesn't exist yet is 0.
+      const info = await d.conn.getAccountInfo(vault, "confirmed");
+      return info ? AccountLayout.decode(info.data.subarray(0, 165)).amount : 0n;
     },
     async claimVault(onSigned) {
       if ((await this.vaultBalance()) === 0n) return null;
@@ -142,7 +158,7 @@ export function liveChain(d: WorkerDeps): PayoutChain {
       if (st.err) return { status: "failed" };
       if (st.confirmationStatus === "processed") return { status: "unknown" };
       const tx = await landed(sig, "outcome");
-      const acc = account === "vault" ? vault : (await payoutAta(account.assetMint)).address;
+      const acc = account === "vault" ? vault : account === "wsol" ? wsol() : (await payoutAta(account.assetMint)).address;
       const delta = tokenDelta(tx, acc);
       return { status: "landed", delta: account === "vault" ? -delta : delta, slot: BigInt(tx.slot) };
     },
@@ -150,20 +166,75 @@ export function liveChain(d: WorkerDeps): PayoutChain {
       const c = await d.prisma.indexerCursor.findUnique({ where: { name: "platform" } });
       return c?.lastSlot ?? 0n;
     },
+    async finalizedSlot() {
+      return BigInt(await d.conn.getSlot("finalized"));
+    },
+    async signatureStatuses(sigs) {
+      const r = await d.conn.getSignatureStatuses(sigs, { searchTransactionHistory: true });
+      return r.value.map((st) => (!st ? "missing" : st.err ? "failed" : st.confirmationStatus === "finalized" ? "finalized" : "pending"));
+    },
     mintInfo: (mint) => getMintInfo(d.conn, new PublicKey(mint)),
     async quote(assetMint, lamportsIn, slippageBps) {
       const { address } = await payoutAta(assetMint);
       const b = await d.jupiter.build({ inputMint: NATIVE_MINT.toBase58(), outputMint: assetMint, amount: lamportsIn, taker: feeClaimer().publicKey, slippageBps, destinationTokenAccount: address });
       return { outAmount: b.outAmount, minOut: b.minOut, priceImpactBps: b.priceImpactBps };
     },
-    async swap(assetMint, lamportsIn, slippageBps, onSigned) {
+    async swap(assetMint, lamportsIn, slippageBps, guard, onSigned) {
+      const payer = feeClaimer();
       const { info, address } = await payoutAta(assetMint);
-      const built = await d.jupiter.build({ inputMint: NATIVE_MINT.toBase58(), outputMint: assetMint, amount: lamportsIn, taker: feeClaimer().publicKey, slippageBps, destinationTokenAccount: address });
-      const createDest = createAssociatedTokenAccountIdempotentInstruction(feeClaimer().publicKey, address, payoutVault().publicKey, info.address, info.programId);
+      const useJito = d.sol.cluster === "mainnet-beta";
+      const built = await d.jupiter.build({
+        inputMint: NATIVE_MINT.toBase58(),
+        outputMint: assetMint,
+        amount: lamportsIn,
+        taker: payer.publicKey,
+        slippageBps,
+        destinationTokenAccount: address,
+        forJitoBundle: useJito,
+      });
+      // The transaction that gets signed is checked, not an earlier quote (audit).
+      if (built.inputMint !== NATIVE_MINT.toBase58() || built.outputMint !== assetMint) throw new SwapRejected("Jupiter built a swap for other mints");
+      if (built.inAmount !== lamportsIn) throw new SwapRejected(`Jupiter built a swap of ${built.inAmount} lamports, not ${lamportsIn}`);
+      if (built.priceImpactBps > guard.maxImpactBps) throw new SwapRejected(`price impact ${built.priceImpactBps} bps`);
+      if (built.minOut < guard.minOutFloor) throw new SwapRejected(`minimum output ${built.minOut} is below the reference floor ${guard.minOutFloor}`);
+      checkSwapInstructions(built.instructions, { payer: payer.publicKey, payerWsolAta: wsol(), ataOwners: [payer.publicKey, payoutVault().publicKey] });
+
+      const extra: TransactionInstruction[] = [createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, address, payoutVault().publicKey, info.address, info.programId)];
+      const tip = useJito ? await d.jito.randomTipAccount() : null;
+      if (tip) extra.push(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: tip, lamports: d.sol.jitoTipLamports }));
       const { blockhash, lastValidBlockHeight } = await d.conn.getLatestBlockhash("confirmed");
-      const vtx = swapTransaction(feeClaimer().publicKey, { ...built, instructions: [createDest, ...built.instructions] }, blockhash);
-      const tx = await send(vtx, lastValidBlockHeight, "payout.swap", null, onSigned);
-      return { sig: tx.transaction.signatures[0]!, assetOut: tokenDelta(tx, address) };
+      const vtx = swapTransaction(payer.publicKey, { ...built, instructions: [extra[0]!, ...built.instructions, ...extra.slice(1)] }, blockhash);
+
+      // Simulate: the payer may spend at most the swap amount plus fees, rent and tip, and the payout
+      // vault must receive at least Jupiter's minimum.
+      const before = await d.conn.getMultipleAccountsInfo([payer.publicKey, address], "confirmed");
+      const sim = await d.conn.simulateTransaction(vtx, { sigVerify: false, commitment: "confirmed", accounts: { encoding: "base64", addresses: [payer.publicKey.toBase58(), address.toBase58()] } });
+      if (sim.value.err) throw new SwapRejected(`simulation failed: ${JSON.stringify(sim.value.err)}`);
+      const [payerAfter, destAfter] = sim.value.accounts ?? [];
+      const spent = BigInt(before[0]?.lamports ?? 0) - BigInt(payerAfter?.lamports ?? 0);
+      const maxSpend = lamportsIn + 30_000_000n + BigInt(tip ? d.sol.jitoTipLamports : 0);
+      if (spent > maxSpend) throw new SwapRejected(`simulation spends ${spent} lamports, more than ${maxSpend}`);
+      const destBefore = before[1] ? AccountLayout.decode(before[1].data.subarray(0, 165)).amount : 0n;
+      const destAfterAmt = destAfter ? AccountLayout.decode(Buffer.from(destAfter.data[0] ?? "", "base64").subarray(0, 165)).amount : 0n;
+      if (destAfterAmt - destBefore < built.minOut) throw new SwapRejected(`simulation delivers ${destAfterAmt - destBefore}, less than the minimum ${built.minOut}`);
+
+      vtx.sign([payer]);
+      const sig = signatureOf(vtx);
+      await onSigned(sig);
+      if (useJito) {
+        // Public RPC sends can be sandwiched; a bundle can't be split (jito-docs lowlatencytxnsend.md).
+        assertCanSend(d.sol, "payout.swap");
+        await d.txlog({ purpose: "payout.swap", signer: "fee_claimer", signature: sig });
+        const bundleId = await d.jito.sendBundle([Buffer.from(vtx.serialize()).toString("base64")]);
+        await d.jito.waitForBundle(bundleId, 60_000);
+        // Whatever Jito says, the chain decides: an unknown outcome stays "sent" for the next run.
+        const tx = await landed(sig, "payout.swap");
+        if (tx.meta?.err) throw new Error(`payout.swap failed on chain: ${JSON.stringify(tx.meta.err)}`);
+        return { sig, assetOut: tokenDelta(tx, address) };
+      }
+      await sendAndConfirm(d.conn, d.sol, vtx, { purpose: "payout.swap", signer: "fee_claimer", lastValidBlockHeight }, d.txlog);
+      const tx = await landed(sig, "payout.swap");
+      return { sig, assetOut: tokenDelta(tx, address) };
     },
     holders: (mint) => snapshotHolders(d.conn, new PublicKey(mint), TOKEN_2022_PROGRAM_ID, { das: d.env.HOLDERS_VIA_DAS }),
     excludedOwners(coin) {

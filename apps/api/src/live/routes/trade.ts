@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import BN from "bn.js";
 import { z } from "zod";
-import { PublicKey, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import { PublicKey, TransactionMessage, VersionedTransaction, type AccountInfo } from "@solana/web3.js";
 import {
   ClaimBuildRequestSchema,
   ReportRequestSchema,
@@ -33,6 +33,25 @@ import { amount, coinByMint } from "../data";
 import { getViewer, refuseBlockedCountry, requireViewer } from "../viewer";
 
 const MAX_BUY_LAMPORTS = 1_000n * 1_000_000_000n;
+const U64_MAX = 18_446_744_073_709_551_615n;
+const publicKeyOrNull = (s: string) => {
+  try {
+    return new PublicKey(s);
+  } catch {
+    return null;
+  }
+};
+/** Pool accounts change with every trade, but a quote one second old is fine for a slippage-bounded build. */
+const poolCache = new Map<string, { at: number; v: Promise<AccountInfo<Buffer> | null> }>();
+function poolAccount(d: LiveDeps, pool: string): Promise<AccountInfo<Buffer> | null> {
+  const hit = poolCache.get(pool);
+  if (hit && Date.now() - hit.at < 1000) return hit.v;
+  if (poolCache.size > 5000) poolCache.clear();
+  const v = d.conn.getAccountInfo(new PublicKey(pool)).catch(() => null);
+  poolCache.set(pool, { at: Date.now(), v });
+  return v;
+}
+
 const b64 = (tx: VersionedTransaction) => Buffer.from(tx.serialize()).toString("base64");
 
 export async function liveTradeRoutes(app: FastifyInstance, { d }: { d: LiveDeps }) {
@@ -41,15 +60,16 @@ export async function liveTradeRoutes(app: FastifyInstance, { d }: { d: LiveDeps
     if (!body.success) return sendError(reply, 400, "BAD_REQUEST", "That trade request isn't valid");
     const { side, slippageBps } = body.data;
     const amountIn = BigInt(body.data.amountIn);
-    if (amountIn <= 0n || (side === "buy" && amountIn > MAX_BUY_LAMPORTS)) return sendError(reply, 422, "BAD_AMOUNT", "Enter an amount");
+    if (amountIn <= 0n || amountIn > U64_MAX || (side === "buy" && amountIn > MAX_BUY_LAMPORTS)) return sendError(reply, 422, "BAD_AMOUNT", "Enter an amount");
+    const owner = publicKeyOrNull(body.data.wallet);
+    if (!owner) return sendError(reply, 400, "BAD_WALLET", "That isn't a Solana address");
     const c = await coinByMint(d, body.data.mint);
     if (!c || !c.poolState) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
-    const owner = new PublicKey(body.data.wallet);
     const mint = new PublicKey(c.mint!);
     const keep = (x: bigint) => (x * BigInt(10_000 - slippageBps)) / 10_000n;
-    const { blockhash } = await d.conn.getLatestBlockhash("confirmed");
+    const blockhash = await d.blockhash();
 
-    const poolInfo = await d.conn.getAccountInfo(new PublicKey(c.poolState));
+    const poolInfo = await poolAccount(d, c.poolState);
     const pool = poolInfo ? decodePool(poolInfo.data) : null;
     const onCurve = c.status === "live" && pool && pool.status !== POOL_STATUS.trade;
 
@@ -122,7 +142,9 @@ export async function liveTradeRoutes(app: FastifyInstance, { d }: { d: LiveDeps
   app.get("/api/me/payouts", async (req, reply): Promise<MyPayouts | void> => {
     const v = await requireViewer(d, req, reply);
     if (!v) return;
-    const q = z.object({ cursor: z.string().max(40).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(req.query);
+    const parsed = z.object({ cursor: z.string().max(40).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).safeParse(req.query);
+    if (!parsed.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid page");
+    const q = { ...parsed.data, cursor: parsed.data.cursor && !Number.isNaN(Date.parse(parsed.data.cursor)) ? parsed.data.cursor : undefined };
     const rows = await d.prisma.payoutItem.findMany({
       where: { wallet: v.wallet, round: { dryRun: false }, ...(q.cursor ? { createdAt: { lt: new Date(q.cursor) } } : {}) },
       orderBy: { createdAt: "desc" },

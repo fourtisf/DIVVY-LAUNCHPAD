@@ -315,6 +315,7 @@ model Trade {
 
   @@unique([sig, ix])
   @@index([slot])
+  @@index([coinId, id])
   @@index([coinId, ts])
   @@index([wallet, ts])
 }
@@ -360,9 +361,14 @@ model VaultClaim {
   sig                  String?         @unique
   /// Lamports actually received from the vault.
   lamports             BigInt
-  /// Trades with fromSlot < slot <= toSlot were attributed by this claim.
+  /// Slot range of the claim (for reference). Attribution uses the trade-id range below.
   fromSlot             BigInt
   toSlot               BigInt
+  /// Trades with fromTradeId < Trade.id <= toTradeId are the ones this claim swept. toTradeId is set
+  /// by the indexer when it reaches the claim's own transaction, so trades later in the same slot
+  /// belong to the next claim (audit). Null until then.
+  fromTradeId          BigInt          @default(0)
+  toTradeId            BigInt?
   /// lamports minus the indexed platform fees in range. Non-zero means missed trades: alert.
   unattributedLamports BigInt          @default(0)
   /// Set once the claim's lamports were split into FeeAllocations. A row without it was signed (or

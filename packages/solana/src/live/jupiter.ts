@@ -39,7 +39,12 @@ export interface BuildResponse {
   error?: string;
 }
 
+/** Jupiter's swap program (jup-ag/docs@0066fde swap/v1/common-errors.mdx:23, ultra/response.mdx:263). */
+export const JUPITER_PROGRAM_ID = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+
 export interface BuiltSwap {
+  inputMint: string;
+  outputMint: string;
   instructions: TransactionInstruction[];
   lookupTables: AddressLookupTableAccount[];
   inAmount: bigint;
@@ -101,9 +106,12 @@ export class JupiterClient {
         }),
     );
     return {
+      inputMint: b.inputMint,
+      outputMint: b.outputMint,
       instructions: [
         ComputeBudgetProgram.setComputeUnitLimit({ units: p.cuLimit ?? 600_000 }),
-        ...b.computeBudgetInstructions.map(toIx),
+        // Our own CU limit is set above; a second SetComputeUnitLimit (tag 2) would fail the transaction.
+        ...b.computeBudgetInstructions.map(toIx).filter((ix) => ix.data[0] !== 2),
         ...b.setupInstructions.map(toIx),
         toIx(b.swapInstruction),
         ...(b.cleanupInstruction ? [toIx(b.cleanupInstruction)] : []),

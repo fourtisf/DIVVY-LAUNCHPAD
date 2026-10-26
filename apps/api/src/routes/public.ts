@@ -199,7 +199,9 @@ export async function publicRoutes(app: FastifyInstance, { store }: { store: Moc
   app.get<{ Params: { mint: string } }>("/api/coins/:mint/trades", async (req, reply): Promise<TradeList | void> => {
     const c = withCoin(req.params.mint);
     if (!c) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
-    const page = PageQuery.parse(req.query);
+    const pq = PageQuery.safeParse(req.query);
+    if (!pq.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid page");
+    const page = pq.data;
     const all = trades(c, Date.now());
     const cursor = page.cursor ?? 0;
     return {
@@ -250,7 +252,9 @@ export async function publicRoutes(app: FastifyInstance, { store }: { store: Moc
   app.get<{ Params: { mint: string } }>("/api/coins/:mint/payouts", async (req, reply): Promise<CoinPayoutList | void> => {
     const c = withCoin(req.params.mint);
     if (!c) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
-    const page = PageQuery.parse(req.query);
+    const pq = PageQuery.safeParse(req.query);
+    if (!pq.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid page");
+    const page = pq.data;
     const all = rounds(c, Date.now(), 24);
     const cursor = page.cursor ?? 0;
     return { items: all.slice(cursor, cursor + page.limit).map(toRound), nextCursor: cursor + page.limit < all.length ? String(cursor + page.limit) : null };

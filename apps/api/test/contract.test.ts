@@ -219,6 +219,23 @@ describe("auth (SIWS) and signed-in routes", () => {
     expect((await get("/api/claims")).status).toBe(401);
   });
 
+  it("refuses oversized sign-in fields before decoding them (audit: quadratic base58 decode)", async () => {
+    const address = bs58.encode(Buffer.alloc(32, 7));
+    const n = (await get(`/api/auth/nonce?address=${address}`)).body as { nonce: string };
+    const t = Date.now();
+    const r = await app.inject({ method: "POST", url: "/api/auth/verify", payload: { address, signature: "2".repeat(60_000), nonce: n.nonce } });
+    expect(r.statusCode).toBe(400);
+    expect(Date.now() - t).toBeLessThan(200);
+    expect((await get(`/api/auth/nonce?address=${"3".repeat(5000)}`)).status).toBe(400);
+  });
+
+  it("answers bad queries with the error contract, never internal error text", async () => {
+    const mint = ((await get("/api/coins?limit=1")).body as { items: { mint: string }[] }).items[0]!.mint;
+    const r = await get(`/api/coins/${mint}/trades?limit=abc`);
+    expect(r.status).toBe(400);
+    expectShape(ApiErrorSchema, r.body);
+  });
+
   it("POST /api/trade/build returns a quote in the real shape", async () => {
     const d = (await get("/api/coins/FROG")).body as { mint: string };
     const r = await app.inject({ method: "POST", url: "/api/trade/build", payload: { mint: d.mint, side: "buy", amountIn: "500000000", slippageBps: 100, wallet: "7Hq3Lx9Fa2Mv8RtYbW1Pd5QzJnK4cE6uSgDhA3x9Fa" } });

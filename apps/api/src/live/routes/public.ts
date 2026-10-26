@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { Prisma } from "@divvy/db";
 import {
   CandleTfSchema,
   CoinSortSchema,
@@ -20,6 +21,9 @@ import { graduationFdvLamports, LAUNCHLAB_DEFAULT_CURVE, WSOL_MINT } from "@divv
 import { sendError } from "../../errors";
 import type { LiveDeps } from "../deps";
 import { amount, boardRows, coinByMint, coinByTicker, HOUR, pendingHoldersLamports, toDetail, toReceipt, toRound, toSummary, topOfHour, type CoinRow } from "../data";
+
+/** Rounds that paid holders: live, delivered, on time or late (carried rounds paid nothing). */
+const PAID = { dryRun: false, step: "delivered", status: { in: ["ok", "late"] } } satisfies Prisma.PayoutRoundWhereInput;
 
 const PageQuery = z.object({ cursor: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(100).default(60) });
 const iso = (t: number | Date) => new Date(t).toISOString();
@@ -104,14 +108,14 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const now = Date.now();
     const [rows, last] = await Promise.all([
       boardRows(d),
-      d.prisma.payoutRound.findFirst({ where: { dryRun: false, status: "ok" }, orderBy: { hour: "desc" }, select: { hour: true } }),
+      d.prisma.payoutRound.findFirst({ where: { ...PAID, coin: { hidden: false } }, orderBy: { hour: "desc" }, select: { hour: true } }),
     ]);
     const round = last
-      ? await d.prisma.payoutRound.findMany({ where: { dryRun: false, status: "ok", hour: last.hour }, include: { coin: { include: { dividendAsset: true } } } })
+      ? await d.prisma.payoutRound.findMany({ where: { ...PAID, coin: { hidden: false }, hour: last.hour }, include: { coin: { include: { dividendAsset: true } } } })
       : [];
     const items = round.map(toReceipt).sort((a, b) => b.usd - a.usd);
     const recentRounds = await d.prisma.payoutRound.findMany({
-      where: { dryRun: false, status: "ok" },
+      where: { ...PAID, coin: { hidden: false } },
       orderBy: { hour: "desc" },
       take: 16,
       include: { coin: { include: { dividendAsset: true } } },
@@ -171,8 +175,10 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
   app.get<{ Params: { mint: string } }>("/api/coins/:mint/trades", async (req, reply) => {
     const c = await coinByMint(d, req.params.mint);
     if (!c) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
-    const page = PageQuery.parse(req.query);
-    const cursor = page.cursor && /^\d+$/.test(page.cursor) ? BigInt(page.cursor) : undefined;
+    const pq = PageQuery.safeParse(req.query);
+    if (!pq.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid page");
+    const page = pq.data;
+    const cursor = page.cursor && /^\d{1,18}$/.test(page.cursor) ? BigInt(page.cursor) : undefined;
     const rows = await d.prisma.trade.findMany({
       where: { coinId: c.id, ...(cursor ? { id: { lt: cursor } } : {}) },
       orderBy: { id: "desc" },
@@ -230,10 +236,12 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
   app.get<{ Params: { mint: string } }>("/api/coins/:mint/payouts", async (req, reply) => {
     const c = await coinByMint(d, req.params.mint);
     if (!c) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
-    const page = PageQuery.parse(req.query);
+    const pq = PageQuery.safeParse(req.query);
+    if (!pq.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid page");
+    const page = pq.data;
     const before = page.cursor && !Number.isNaN(Date.parse(page.cursor)) ? new Date(page.cursor) : undefined;
     const rows = await d.prisma.payoutRound.findMany({
-      where: { coinId: c.id, dryRun: false, status: { in: ["ok", "late"] }, ...(before ? { hour: { lt: before } } : {}) },
+      where: { ...PAID, coinId: c.id, ...(before ? { hour: { lt: before } } : {}) },
       orderBy: { hour: "desc" },
       take: page.limit + 1,
       include: { coin: { include: { dividendAsset: true } } },
@@ -246,19 +254,25 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const c = await coinByMint(d, req.params.mint);
     if (!c) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
     const now = Date.now();
-    const [rounds, pending, solUsd, current] = await Promise.all([
-      d.prisma.payoutRound.findMany({ where: { coinId: c.id, dryRun: false, hour: { gte: new Date(now - 24 * HOUR) } }, include: { coin: { include: { dividendAsset: true } } }, orderBy: { hour: "desc" } }),
+    const thisHour = topOfHour(now);
+    const roundAt = (hour: number) => d.prisma.payoutRound.findUnique({ where: { coinId_hour_dryRun: { coinId: c.id, hour: new Date(hour), dryRun: false } } });
+    const [rounds, pending, solUsd, current, previous] = await Promise.all([
+      d.prisma.payoutRound.findMany({ where: { ...PAID, coinId: c.id, hour: { gte: new Date(now - 24 * HOUR) } }, include: { coin: { include: { dividendAsset: true } } }, orderBy: { hour: "desc" } }),
       pendingHoldersLamports(d, c.id),
       d.prices().then((p) => p.solUsd),
-      d.prisma.payoutRound.findUnique({ where: { coinId_hour_dryRun: { coinId: c.id, hour: new Date(topOfHour(now)), dryRun: false } } }),
+      roundAt(thisHour),
+      roundAt(thisHour - HOUR),
     ]);
-    const lastOk = rounds.find((r) => r.status === "ok");
-    const late = !current && now - topOfHour(now) > d.params.lateAfterSec * 1000 && now - (c.launchedAt?.getTime() ?? now) > HOUR;
+    const lastPaid = rounds[0];
+    // Late = a round that missed its SLA (hour + 60 min + grace, HANDOFF §3.3), the worker's definition.
+    // A coin with nothing to pay has no round and isn't late.
+    const overdue = (r: typeof previous, hour: number) => !!r && (r.status === "late" || r.status === "failed" || (r.step !== "delivered" && now > hour + HOUR + d.params.lateAfterSec * 1000));
+    const late = overdue(previous, thisHour - HOUR) || overdue(current, thisHour);
     return {
-      paid24hUsd: rounds.filter((r) => r.status === "ok").map(toRound).reduce((a, r) => a + r.usd, 0),
+      paid24hUsd: rounds.map(toRound).reduce((a, r) => a + r.usd, 0),
       pendingUsd: (Number(pending) / 1e9) * solUsd,
-      lastPayoutAt: lastOk ? (lastOk.finishedAt ?? lastOk.hour).toISOString() : null,
-      status: late || current?.status === "late" || current?.status === "failed" ? "late" : current?.status === "carried" ? "carried" : "ok",
+      lastPayoutAt: lastPaid ? (lastPaid.finishedAt ?? lastPaid.hour).toISOString() : null,
+      status: late ? "late" : current?.status === "carried" ? "carried" : "ok",
       nextRoundAt: iso(topOfHour(now) + HOUR),
     };
   });
@@ -267,22 +281,25 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const q = z.object({ asset: z.string().max(16).optional(), cursor: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(100).default(60) }).safeParse(req.query);
     if (!q.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid payouts query");
     const now = Date.now();
-    const before = q.data.cursor && !Number.isNaN(Date.parse(q.data.cursor)) ? new Date(q.data.cursor) : undefined;
-    const assetWhere = q.data.asset && q.data.asset !== "all" ? { coin: { dividendAsset: { symbol: q.data.asset } } } : {};
+    // Cursor "<hour ISO>|<round id>": many coins share an hour, so the hour alone would skip rows.
+    const [cHour, cId] = (q.data.cursor ?? "").split("|");
+    const before = cHour && cId && !Number.isNaN(Date.parse(cHour)) ? { hour: new Date(cHour), id: cId } : null;
+    const assetWhere = q.data.asset && q.data.asset !== "all" ? { coin: { hidden: false, dividendAsset: { symbol: q.data.asset } } } : { coin: { hidden: false } };
     const [rows, agg, rows24, pending, solUsd, board] = await Promise.all([
       d.prisma.payoutRound.findMany({
-        where: { dryRun: false, status: { in: ["ok", "late"] }, ...assetWhere, ...(before ? { hour: { lt: before } } : {}) },
-        orderBy: [{ hour: "desc" }, { assetOut: "desc" }],
+        where: { ...PAID, ...assetWhere, ...(before ? { OR: [{ hour: { lt: before.hour } }, { hour: before.hour, id: { lt: before.id } }] } : {}) },
+        orderBy: [{ hour: "desc" }, { id: "desc" }],
         take: q.data.limit + 1,
         include: { coin: { include: { dividendAsset: true } } },
       }),
-      d.prisma.payoutRound.aggregate({ where: { dryRun: false, status: "ok" }, _count: true, _sum: { holdersPaid: true } }),
+      d.prisma.payoutRound.aggregate({ where: PAID, _count: true, _sum: { holdersPaid: true } }),
       d.prisma.payoutRound.count({ where: { dryRun: false, status: { in: ["late", "failed"] }, hour: { gte: new Date(topOfHour(now) - HOUR) } } }),
       pendingHoldersLamports(d),
       d.prices().then((p) => p.solUsd),
       boardRows(d),
     ]);
     const more = rows.length > q.data.limit;
+    const lastRow = rows[q.data.limit - 1];
     return {
       summary: {
         paidUsd: board.reduce((a, c) => a + (c.stats?.paidUsd ?? 0), 0),
@@ -293,7 +310,7 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
         lateCoins: rows24,
       },
       items: rows.slice(0, q.data.limit).map(toReceipt),
-      nextCursor: more ? rows[q.data.limit - 1]!.hour.toISOString() : null,
+      nextCursor: more && lastRow ? `${lastRow.hour.toISOString()}|${lastRow.id}` : null,
     };
   });
 

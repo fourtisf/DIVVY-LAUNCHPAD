@@ -75,6 +75,13 @@ export function quoteLooksWrong(p: { lamportsIn: bigint; outAmount: bigint; asse
   return got < expected * (1 - p.maxImpactBps / 10_000);
 }
 
+/** The least output a swap may accept: the reference price minus the impact cap, in asset base units. */
+export function referenceFloor(p: { lamportsIn: bigint; assetDecimals: number; solUsd: number; assetUsd: number; maxImpactBps: number }): bigint {
+  if (p.solUsd <= 0 || p.assetUsd <= 0) return BigInt(Number.MAX_SAFE_INTEGER);
+  const expected = ((Number(p.lamportsIn) / 1e9) * p.solUsd) / p.assetUsd;
+  return BigInt(Math.floor(expected * (1 - p.maxImpactBps / 10_000) * 10 ** p.assetDecimals));
+}
+
 /* ---------- 4. holders and entitlements ---------- */
 
 export type ExcludedReason = "curve" | "pool" | "launcher" | "divvy" | "burn" | "small";

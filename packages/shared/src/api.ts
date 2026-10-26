@@ -322,7 +322,12 @@ export type LaunchStatus = z.infer<typeof LaunchStatusSchema>;
 /* ---------- auth ---------- */
 
 export const NonceResponseSchema = z.object({ nonce: z.string(), message: z.string(), expiresAt: iso });
-export const VerifyRequestSchema = z.object({ address: base58, signature: z.string().min(1), nonce: z.string().min(1) });
+/** Bounded before any base58 decoding: decoding is quadratic, so an unbounded signature is a DoS (audit). */
+export const VerifyRequestSchema = z.object({
+  address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  signature: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{64,90}$/),
+  nonce: z.string().regex(/^[0-9a-f]{32}$/),
+});
 export const MeSchema = z.object({
   wallet: base58.nullable(),
   isAdmin: z.boolean(),

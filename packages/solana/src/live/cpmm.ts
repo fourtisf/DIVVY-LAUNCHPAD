@@ -113,6 +113,9 @@ export function cpmmPoolPda(programId: PublicKey, ammConfig: PublicKey, mintX: P
   return getCpmmPdaPoolId(programId, ammConfig, a!, b!).publicKey;
 }
 
+/** Solana cuts long log output with "Log truncated"; swaps logged after that point can't be read. */
+export const logsTruncated = (tx: VersionedTransactionResponse): boolean => !!tx.meta?.logMessages?.some((l) => l.startsWith("Log truncated"));
+
 /** Tradeable reserves: vault balances minus the fees parked in them (cp-swap PoolState::vault_amount_without_fee). */
 export async function cpmmReserves(conn: Connection, pool: CpmmPool): Promise<{ a: bigint; b: bigint }> {
   const [va, vb] = await conn.getMultipleAccountsInfo([pool.vaultA, pool.vaultB]);

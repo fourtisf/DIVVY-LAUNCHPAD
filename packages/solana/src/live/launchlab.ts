@@ -371,7 +371,10 @@ export function decodeTradeEvent(body: Buffer): TradeEvent {
     dir <= 1 && poolStatus <= 2 && exact <= 1 &&
     realBaseAfter <= totalBaseSell &&
     (ev.side === "buy" ? realBaseAfter >= realBaseBefore : realBaseAfter <= realBaseBefore) &&
-    fees * 10n <= gross; // fees are well under 10% of the quote leg
+    fees <= gross &&
+    // Fees are well under 10% of the quote leg, but each is rounded up, so a few-lamport trade can
+    // legitimately exceed that; the ratio is only meaningful from 1,000 lamports (audit).
+    (gross < 1000n || fees * 10n <= gross);
   if (!ok) throw new EventLayoutError("TradeEvent failed sanity checks; the on-chain layout may have changed");
   return ev;
 }
@@ -392,30 +395,51 @@ export interface ParsedLaunchLabTx {
 
 const startsWith = (data: Buffer, prefix: Buffer) => data.length >= prefix.length && data.subarray(0, prefix.length).equals(prefix);
 
-/** Pulls TradeEvents (emitted via event CPI, so they're inner instructions), creates and migrations from a transaction. */
-export function parseLaunchLabTransaction(tx: VersionedTransactionResponse, launchLab: PublicKey, cpmm: PublicKey): ParsedLaunchLabTx {
+/**
+ * Pulls TradeEvents (emitted via event CPI, so they're inner instructions), creates and migrations
+ * from a transaction. Only events for pools `isRelevantPool` accepts are decoded, so another
+ * platform's trades can't stop Divvy's indexer. Every LaunchLab trade instruction must have produced
+ * a TradeEvent; if not, the program changed and EventLayoutError is raised instead of losing fees.
+ */
+export function parseLaunchLabTransaction(
+  tx: VersionedTransactionResponse,
+  launchLab: PublicKey,
+  cpmm: PublicKey,
+  isRelevantPool: (pool: string) => boolean = () => true,
+): ParsedLaunchLabTx {
   const out: ParsedLaunchLabTx = { trades: [], poolCreates: [], cpmmPools: [] };
   if (!tx.meta || tx.meta.err) return out;
   const keys: MessageAccountKeys = tx.transaction.message.getAccountKeys({ accountKeysFromLookups: tx.meta.loadedAddresses });
   const outer = tx.transaction.message.compiledInstructions;
   let seq = 0;
+  let tradeIxs = 0;
+  let tradeEvents = 0;
   const isTradeIx = (programIdIndex: number, data: Buffer) => keys.get(programIdIndex)?.equals(launchLab) && TRADE_IX_DISCS.some((d) => startsWith(data, d));
+  for (const o of outer) if (isTradeIx(o.programIdIndex, Buffer.from(o.data))) tradeIxs++;
 
   for (const group of tx.meta.innerInstructions ?? []) {
     const parent = outer[group.index];
-    let trader: PublicKey | null = null;
-    if (parent && isTradeIx(parent.programIdIndex, Buffer.from(parent.data))) trader = keys.get(parent.accountKeyIndexes[0]!) ?? null;
+    let outerTrader: PublicKey | null = null;
+    if (parent && isTradeIx(parent.programIdIndex, Buffer.from(parent.data))) outerTrader = keys.get(parent.accountKeyIndexes[0]!) ?? null;
+    let trader = outerTrader;
     for (const inner of group.instructions) {
       const data = Buffer.from(bs58.decode(inner.data));
       const prog = keys.get(inner.programIdIndex);
       if (!prog) continue;
       if (prog.equals(launchLab) && isTradeIx(inner.programIdIndex, data)) {
+        tradeIxs++;
         trader = keys.get(inner.accounts[0]!) ?? null;
         continue;
       }
       if (prog.equals(launchLab) && startsWith(data, EVENT_IX_TAG_LE)) {
         const body = data.subarray(8);
-        if (startsWith(body, TRADE_EVENT_DISC)) out.trades.push({ ix: seq, event: decodeTradeEvent(body.subarray(8)), trader });
+        if (startsWith(body, TRADE_EVENT_DISC)) {
+          tradeEvents++;
+          const pool = body.length >= 40 ? new PublicKey(body.subarray(8, 40)).toBase58() : "";
+          if (isRelevantPool(pool)) out.trades.push({ ix: seq, event: decodeTradeEvent(body.subarray(8)), trader });
+          // The next event in this group belongs to the next trade instruction, not this trader.
+          trader = outerTrader;
+        }
         // PoolCreateEvent: discriminator (8), pool_state (32), creator (32), ...
         else if (startsWith(body, POOL_CREATE_EVENT_DISC)) out.poolCreates.push({ ix: seq, poolState: new PublicKey(body.subarray(8, 40)), creator: new PublicKey(body.subarray(40, 72)) });
       } else if (prog.equals(cpmm) && startsWith(data, CPMM_INIT_WITH_PERMISSION_DISC)) {
@@ -425,6 +449,7 @@ export function parseLaunchLabTransaction(tx: VersionedTransactionResponse, laun
       seq++;
     }
   }
+  if (tradeIxs !== tradeEvents) throw new EventLayoutError(`${tradeIxs} LaunchLab trade instruction(s) but ${tradeEvents} TradeEvent(s); the program may have changed`);
   return out;
 }
 

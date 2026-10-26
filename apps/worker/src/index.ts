@@ -8,6 +8,7 @@ import { Cron } from "croner";
 import { Queue, Worker } from "bullmq";
 import { bullConnection } from "@divvy/server";
 import { QUEUES, type ClaimJob, type ClaimJobResult, type LaunchJob } from "@divvy/shared";
+import { assertClusterMatchesRpc } from "@divvy/solana/live";
 import { buildClaim, reconcileClaims } from "./claims";
 import { createWorkerDeps, jsonLog } from "./deps";
 import { loadWorkerEnv } from "./env";
@@ -18,21 +19,34 @@ import { pricesJob, reservedTickersJob, statusJob } from "./ops";
 import { liveChain } from "./payouts/chain";
 import { reconcileTransfers } from "./payouts/deliver";
 import { runPayouts, topOfHour } from "./payouts/engine";
+import { preSnapshotJob } from "./payouts/presnapshot";
 import { refreshMarketStats } from "./stats";
 
 const env = loadWorkerEnv();
 const d = createWorkerDeps(env);
+// The mainnet gate trusts SOLANA_CLUSTER; make sure the RPC agrees before anything starts.
+await assertClusterMatchesRpc(d.conn, d.sol.cluster);
 const roles = env.WORKER_ROLES;
 const stops: (() => unknown)[] = [];
 const crons: Cron[] = [];
 
+/** Jobs in flight, so a shutdown can let them finish (a payout run mid-send shouldn't be cut). */
+const running = new Set<Promise<unknown>>();
+let stopping = false;
+
 const guarded = (name: string, ttlMs: number, fn: () => Promise<unknown>) => async () => {
-  try {
-    const r = await withLock(d.redis, name, ttlMs, async () => (await fn(), true));
-    if (r === null) jsonLog(`${name}: another worker holds the lock, skipping`);
-  } catch (e) {
-    jsonLog(`${name}: failed`, { error: e instanceof Error ? e.message : String(e) });
-  }
+  if (stopping) return;
+  const job = (async () => {
+    try {
+      const r = await withLock(d.redis, name, ttlMs, async () => (await fn(), true));
+      if (r === null) jsonLog(`${name}: another worker holds the lock, skipping`);
+    } catch (e) {
+      jsonLog(`${name}: failed`, { error: e instanceof Error ? e.message : String(e) });
+    }
+  })();
+  running.add(job);
+  await job;
+  running.delete(job);
 };
 const every = (pattern: string, name: string, ttlMs: number, fn: () => Promise<unknown>) =>
   crons.push(new Cron(pattern, { timezone: "UTC", protect: true }, guarded(name, ttlMs, fn)));
@@ -70,14 +84,22 @@ if (roles.has("payouts")) {
   // Minute 0 starts the hour's run; every 10 minutes resumes anything unfinished (each step is idempotent).
   every("*/10 * * * *", "payouts", 15 * 60_000, async () => {
     const hour = topOfHour();
-    const prev = new Date(hour.getTime() - 3_600_000);
-    if (await d.prisma.payoutRound.count({ where: { hour: prev, dryRun: d.params.dryRun, step: { not: "delivered" } } })) {
-      jsonLog("payouts: resuming the previous hour", { hour: prev });
-      await runPayouts(d, chain, prev, d.params.dryRun);
+    // Earlier hours with unfinished rounds (up to a day back) are finished first, without new rounds.
+    const stuck = await d.prisma.payoutRound.findMany({
+      where: { dryRun: d.params.dryRun, step: { not: "delivered" }, hour: { lt: hour, gte: new Date(hour.getTime() - 24 * 3_600_000) } },
+      distinct: ["hour"],
+      orderBy: { hour: "asc" },
+      select: { hour: true },
+    });
+    for (const s of stuck) {
+      jsonLog("payouts: resuming an earlier hour", { hour: s.hour });
+      await runPayouts(d, chain, s.hour, d.params.dryRun, undefined, { resumeOnly: true }).catch((e) => jsonLog("payouts: resume failed", { hour: s.hour, error: e instanceof Error ? e.message : String(e) }));
     }
     const summary = await runPayouts(d, chain, hour, d.params.dryRun);
     jsonLog("payouts: run", { ...summary });
   });
+  // The random mid-hour holder snapshot (payouts/presnapshot.ts).
+  every("* * * * *", "presnapshot", 30 * 60_000, () => preSnapshotJob(d, chain));
   every("* * * * *", "transfers-reconcile", 55_000, () => reconcileTransfers(d));
 }
 
@@ -95,7 +117,11 @@ jsonLog("worker started", {
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, async () => {
+    if (stopping) return;
+    stopping = true;
     crons.forEach((c) => c.stop());
+    // Let running jobs finish (PM2 kill_timeout must be longer than this).
+    await Promise.race([Promise.allSettled([...running]), new Promise((r) => setTimeout(r, 120_000))]);
     await Promise.allSettled(stops.map((s) => s()));
     await d.close();
     process.exit(0);

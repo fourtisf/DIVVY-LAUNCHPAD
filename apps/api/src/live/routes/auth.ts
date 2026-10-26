@@ -7,7 +7,7 @@ import type { Kv } from "../../kv";
 import { siwsMessage, verifyEd25519 } from "../../routes/auth";
 import type { LiveDeps } from "../deps";
 import { amount } from "../data";
-import { country, endSession, getViewer, requireViewer, startSession } from "../viewer";
+import { endSession, getViewer, isBlockedCountry, requireViewer, startSession } from "../viewer";
 
 const NONCE_TTL_SEC = 300;
 const b64url = (b: Buffer) => b.toString("base64url");
@@ -25,6 +25,7 @@ export async function liveAuthRoutes(app: FastifyInstance, { d, kv }: { d: LiveD
 
   app.get<{ Querystring: { address?: string } }>("/api/auth/nonce", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (req, reply) => {
     const address = req.query.address ?? "";
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return sendError(reply, 400, "BAD_ADDRESS", "That isn't a Solana address");
     const pk = decodeB58(address);
     if (!pk || pk.length !== 32) return sendError(reply, 400, "BAD_ADDRESS", "That isn't a Solana address");
     const nonce = randomBytes(16).toString("hex");
@@ -55,8 +56,7 @@ export async function liveAuthRoutes(app: FastifyInstance, { d, kv }: { d: LiveD
 
   app.get("/api/me", async (req): Promise<Me> => {
     const v = await getViewer(d, req);
-    const c = country(d, req);
-    const blocked = !!c && d.params.blockedCountries.has(c);
+    const blocked = isBlockedCountry(d, req);
     if (!v) return { wallet: null, isAdmin: false, blocked, x: null, launchesToday: 0, launchesLeftToday: d.params.launchesPerWalletPerDay, claimable: [] };
     const dayStart = new Date(new Date().setUTCHours(0, 0, 0, 0));
     const [launchesToday, credits, prices] = await Promise.all([

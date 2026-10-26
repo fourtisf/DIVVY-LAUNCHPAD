@@ -35,6 +35,9 @@ const EnvSchema = z.object({
   CPMM_CREATOR_FEES: bool.default(false),
   /** Priority fee for Divvy's own transactions (claims, swaps, pushes), micro-lamports per CU. */
   CU_PRICE_MICRO_LAMPORTS: z.coerce.number().int().nonnegative().default(20_000),
+  /** Hourly caps on what the hot wallets may move (HANDOFF §9): fee-claimer swaps, payout-vault sends. */
+  SWAP_HOURLY_CAP_LAMPORTS: z.coerce.number().int().positive().default(100_000_000_000),
+  PUSH_HOURLY_CAP_USD: z.coerce.number().positive().default(25_000),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;

@@ -37,6 +37,7 @@ const conn = {
   },
   confirmTransaction: async () => ({ value: { err: null } }),
   getSignaturesForAddress: async () => [],
+  getSignatureStatuses: async (sigs: string[]) => ({ value: sigs.map(() => ({ confirmationStatus: "confirmed", err: null })) }),
 } as unknown as Connection;
 
 const tipAccount = Keypair.generate().publicKey;
@@ -145,6 +146,15 @@ describe.skipIf(!run)("launch pipeline", () => {
     expect(await prisma.signedTx.findMany({ select: { purpose: true, signer: true, bundleId: true } })).toEqual([{ purpose: "launch.create", signer: "launcher", bundleId: "bundle-1" }]);
   });
 
+  it("a bundle that hasn't landed leaves the launch to the reconciler instead of failing it (audit)", async () => {
+    const { coin, launch } = await pendingLaunch("SLOW");
+    const slowJito = { ...jito, waitForBundle: async () => ({ bundle_id: "b", status: "Invalid", landed_slot: null }) } as unknown as WorkerDeps["jito"];
+    await processLaunch({ ...deps({ cluster: "mainnet-beta", mainnetEnabled: true }), jito: slowJito }, launch.id);
+    expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("bundling");
+    // The identity stays reserved: the create could still land until its blockhash expires.
+    expect((await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } })).tickerNorm).toBe(foldTicker("SLOW"));
+  });
+
   it("mainnet gate: with DIVVY_MAINNET_ENABLED off nothing is signed and the identity is released", async () => {
     const { launch } = await pendingLaunch("GATE");
     await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: false }), launch.id);
@@ -162,7 +172,7 @@ describe.skipIf(!run)("launch pipeline", () => {
     const { coin, launch } = await pendingLaunch("FREE");
     await failLaunch(deps({}), launch.id, "LAUNCH_FAILED", "nope");
     const c = await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } });
-    expect(c).toMatchObject({ status: "failed", ticker: "FREE", creatorXUserId: null, mint: null });
+    expect(c).toMatchObject({ status: "failed", ticker: "FREE", creatorXUserId: null });
     expect(c.tickerNorm).not.toBe(foldTicker("FREE"));
   });
 

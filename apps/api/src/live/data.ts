@@ -93,13 +93,29 @@ export const toReceipt = (r: RoundRow): Receipt => ({ ...toRound(r), coin: { min
 /* ---------- board cache ---------- */
 
 let board: { at: number; rows: CoinRow[] } | null = null;
+let loading: Promise<CoinRow[]> | null = null;
 
-/** All visible coins with stats, refreshed at most every 5 s (sorting and filtering happen in memory). */
+/**
+ * All visible coins with stats, refreshed at most every 5 s (sorting and filtering happen in memory).
+ * One query refreshes the cache however many requests arrive meanwhile, and they get the previous
+ * rows instead of waiting (load test: 1,000 coins at 200 req/s).
+ */
 export async function boardRows(d: LiveDeps): Promise<CoinRow[]> {
   if (board && Date.now() - board.at < 5000) return board.rows;
-  const rows = await d.prisma.coin.findMany({ where: visibleWhere, include: coinInclude });
-  board = { at: Date.now(), rows };
-  return rows;
+  loading ??= d.prisma.coin
+    .findMany({ where: visibleWhere, include: coinInclude })
+    .then((rows) => {
+      board = { at: Date.now(), rows };
+      return rows;
+    })
+    .finally(() => {
+      loading = null;
+    });
+  if (board) {
+    loading.catch(() => {}); // a failed refresh keeps serving the previous rows
+    return board.rows;
+  }
+  return loading;
 }
 
 export const invalidateBoard = () => {
@@ -176,14 +192,15 @@ export { ident as identityOf };
 /* ---------- money waiting for the next round ---------- */
 
 /**
- * Lamports in the holders' bucket that no round has spent yet: allocations carried forward plus
- * platform fees indexed since the last vault claim (not yet claimed), split like a claim would be.
+ * Lamports in the holders' bucket that no round has spent yet: allocations carried forward, plus the
+ * platform fees of every trade after the last attributed vault claim (still in the vault, or claimed
+ * but not yet attributed), split like a claim would be.
  */
 export async function pendingHoldersLamports(d: LiveDeps, coinId?: string): Promise<bigint> {
-  const lastClaim = await d.prisma.vaultClaim.findFirst({ where: { dryRun: false }, orderBy: { toSlot: "desc" }, select: { toSlot: true } });
+  const last = await d.prisma.vaultClaim.findFirst({ where: { dryRun: false, attributedAt: { not: null }, toTradeId: { not: null } }, orderBy: { toTradeId: "desc" }, select: { toTradeId: true } });
   const [carried, accrued] = await Promise.all([
     d.prisma.feeAllocation.aggregate({ where: { roundId: null, dryRun: false, ...(coinId ? { coinId } : {}) }, _sum: { holdersLamports: true } }),
-    d.prisma.trade.aggregate({ where: { venue: "curve", slot: { gt: lastClaim?.toSlot ?? 0n }, ...(coinId ? { coinId } : {}) }, _sum: { platformFee: true } }),
+    d.prisma.trade.aggregate({ where: { venue: "curve", id: { gt: last?.toTradeId ?? 0n }, ...(coinId ? { coinId } : {}) }, _sum: { platformFee: true } }),
   ]);
   const f = d.params.fees;
   const accruedHolders = splitByWeights(accrued._sum.platformFee ?? 0n, { holders: f.holdersBps, divvy: f.divvyBps }, "divvy").holders;
