@@ -186,3 +186,9 @@ node brand/concepts/src/boards.cjs brand/concepts brand/concepts/boards
 ```
 
 Once the owner picks one, it replaces the mark, favicons, app icons and share image above, and the site header and `Coin3D` face are updated to match.
+
+## uspad.fun (name proposed by the owner, 2026-10-26)
+
+The owner proposed renaming the product to **uspad.fun**: "us" for "kita" (we) and for US stocks, "pad" for launchpad, `.fun` as memecoin launchpads do. [`brand/uspad/`](../brand/uspad/) holds the identity: the Koin belah mark with a custom-drawn "uspad" and "uspad.fun" wordmark (same geometric system as the concept wordmark, paths only, no font needed). The ".fun" is muted and its dot is a foil coin. `board.png` shows it all, with a tagline suggestion: "Memecoins that pay us. In US stocks."
+
+The site, copy and docs still say Divvy until the owner confirms the name. Keep the US geofence (xStocks can't be offered to US persons), and include the name in the legal review. Regenerate with `python3 -I brand/uspad/src/uspad.py brand/uspad && node brand/uspad/src/board.cjs brand/uspad`.
