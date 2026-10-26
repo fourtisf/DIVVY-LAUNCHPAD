@@ -57,7 +57,7 @@ The details are in `docs/AUDIT.md`, "Open owner decisions".
       - the Terms of use text (`/terms` shows a draft notice until `NEXT_PUBLIC_TERMS_FINAL=true`).
 - [ ] **Copy the owner should look at.** The wording below was kept from the prototype (CLAUDE.md rule 8). The exact strings are in `docs/AUDIT.md`, owner decision 9.
       - The coin page says fees "sit in this coin's own on-chain vault".
-      - How-it-works step 4 says "straight into this coin's own vault", including the holders/Divvy split and Raydium's share.
+      - ~~How-it-works step 4 says "straight into this coin's own vault"~~. Rewritten on 2026-10-26 at the owner's request: the creator's share goes to their own vault, holders' and uspad's to the shared vault, attributed per coin. The page now also covers Raydium's fee, graduation, the locked LP and the fee after graduation.
       - How-it-works step 5 and the payouts page say "the vault buys" the stock.
       - Step 5 doesn't mention that a wallet must also hold at a secret mid-hour moment (MONEY-11), or that Divvy's own wallets and the burn address are left out.
       - On chain, platform fees for all coins share one vault, and each coin's share is exact because it's computed from its own trades (docs/VERIFIED.md item 6).
