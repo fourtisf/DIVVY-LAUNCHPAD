@@ -108,7 +108,17 @@ write_env() { # file owner (content on stdin)
 env_get() { grep -E "^$2=" "$1" | tail -n 1 | cut -d= -f2-; }
 set_env() { sed -i -E "/^$2=/d" "$1"; printf '%s=%s\n' "$2" "$3" >> "$1"; } # file key value
 # As divvy-backup, so its log stays writable for the nightly cron job.
-run_backup() { sudo -u divvy-backup -H bash -c '/usr/local/bin/divvy-pg-backup >> /var/log/divvy/backup/backup.log 2>&1'; }
+# A failure shows its reason here; it used to go only to the log.
+run_backup() {
+  local log=/var/log/divvy/backup/backup.log
+  # A log left owned by root (a backup started by hand as root) would stop every later backup.
+  install -d -o divvy-backup -g adm -m 750 /var/log/divvy/backup
+  [ -f "$log" ] && chown divvy-backup:adm "$log"
+  if sudo -u divvy-backup -H bash -c "/usr/local/bin/divvy-pg-backup >> $log 2>&1"; then return 0; fi
+  tail -n 5 "$log" | sed 's/^/   /'
+  note "disk: $(df -h /var/backups/divvy | awk 'NR == 2 { print $4 " free of " $2 }')"
+  return 1
+}
 
 platform_pda() { # admin pubkey → PlatformConfig PDA, from the SDK (seed ["platform_config", admin])
   (cd "$CUR/packages/solana" && node -e '
@@ -516,7 +526,7 @@ update() {
   smoke "$REL"
   if ! diff -q <(ls -1 "$CUR/packages/db/prisma/migrations") <(ls -1 "$REL/packages/db/prisma/migrations") > /dev/null; then
     say "Ada migrasi baru: backup dulu"
-    run_backup
+    run_backup || die "backup database gagal (alasan di atas). Tidak ada yang diubah: situs lama tetap jalan."
     point_current "$REL"
     migrate
   else
