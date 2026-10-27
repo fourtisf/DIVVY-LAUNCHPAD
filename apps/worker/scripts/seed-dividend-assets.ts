@@ -12,7 +12,7 @@
  *
  * Usage (as divvy-worker, which can read worker.env):
  *   RPC_URL=... JUP_API_KEY=... pnpm --filter @divvy/solana exec tsx scripts/phase0/fetch-xstocks.ts --json > /tmp/xstocks.json
- *   node --env-file=/etc/divvy/worker.env ./node_modules/.bin/tsx scripts/seed-dividend-assets.ts /tmp/xstocks.json [--write]
+ *   node --env-file=/etc/divvy/worker.env --import tsx scripts/seed-dividend-assets.ts /tmp/xstocks.json [--write]
  */
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@divvy/db";

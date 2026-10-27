@@ -2,6 +2,20 @@
 
 The owner decided on 2026-10-26 to go **straight to mainnet, without the devnet rehearsal**, with **push** delivery, the **CPMM creator fee to uspad** after graduation, and Next.js 15 (docs/AUDIT.md, "Open owner decisions"). This file is the order of work for this server. The commands themselves live in [`../setup-vps.md`](../setup-vps.md) (one-time setup) and [`../../docs/RUNBOOK.md`](../../docs/RUNBOOK.md) (deploys, payouts, incidents); below, only what is specific to uspad.fun.
 
+**The short way: [`go-live.sh`](go-live.sh).** It runs phases 1 to 3 with these values, as root, and is safe to run again. The API keys go once into `/root/uspad-secrets.env` (`HELIUS_API_KEY=…`, `JUP_API_KEY=…`, chmod 600); nothing asks for them after that.
+
+```bash
+sudo -iu divvy git -C /srv/divvy/app pull && install -m 700 /srv/divvy/app/deploy/mainnet/go-live.sh /root/go-live.sh
+/root/go-live.sh prepare                 # no SOL; the demo keeps running
+/root/go-live.sh platform-config         # dry run; then, with the owner's OK and 0.02 SOL on the admin:
+I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-config --send
+/root/go-live.sh switch                  # demo off, live on, launches paused, payouts in dry-run
+/root/go-live.sh update                  # every later deploy
+/root/go-live.sh status
+```
+
+The rest of this file is what the script does and why.
+
 **Gates.** A phase marked 💰 spends SOL: it starts only after the owner says so in chat, for that step (CLAUDE.md rule 3). Scripts that send need `--send` and `I_HAVE_OWNER_APPROVAL=yes`. Private keys are made on the server and never pasted anywhere (rule 4).
 
 Where the server is now: Ubuntu, root login, the password-free preview (`uspad-api`, `uspad-web`) running as `divvy` from `/srv/divvy/app` on ports 4000 and 3000, Nginx with a Let's Encrypt certificate for `uspad.fun`, and the firewall on 22, 80 and 443.
@@ -85,8 +99,8 @@ sudo env RPC_URL="$RPC_URL" PLATFORM_ADMIN_KEYPAIR=/root/uspad-keys/platform-adm
    ```bash
    cd /srv/divvy/current
    sudo -u divvy-worker env RPC_URL="$RPC_URL" JUP_API_KEY=… pnpm --filter @divvy/solana exec tsx scripts/phase0/fetch-xstocks.ts --json > /tmp/xstocks.json
-   cd apps/worker && sudo -u divvy-worker node --env-file=/etc/divvy/worker.env ./node_modules/.bin/tsx scripts/seed-dividend-assets.ts /tmp/xstocks.json          # dry run
-   sudo -u divvy-worker node --env-file=/etc/divvy/worker.env ./node_modules/.bin/tsx scripts/seed-dividend-assets.ts /tmp/xstocks.json --write
+   cd apps/worker && sudo -u divvy-worker node --env-file=/etc/divvy/worker.env --import tsx scripts/seed-dividend-assets.ts /tmp/xstocks.json          # dry run
+   sudo -u divvy-worker node --env-file=/etc/divvy/worker.env --import tsx scripts/seed-dividend-assets.ts /tmp/xstocks.json --write
    ```
 3. Stop the preview (`sudo -iu divvy pm2 delete all && sudo -iu divvy pm2 save`, and disable its `pm2-divvy` service), start the three live apps (setup-vps.md §10), install the Nginx site (§7). **Pause launches** right away (RUNBOOK "Pausing launches", admin pause) until phase 4.
 4. Check: the site shows no demo banner, `/api/health` says `"mode":"live"`, the worker log says `"cluster":"mainnet-beta","mainnetEnabled":false,"payoutsDryRun":true`.
