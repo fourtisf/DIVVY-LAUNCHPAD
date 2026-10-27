@@ -4,6 +4,7 @@ import type { Prisma } from "@divvy/db";
 import {
   CandleTfSchema,
   CoinSortSchema,
+  foldTicker,
   IMAGE_MAX_BYTES,
   IMAGE_TYPES,
   TICKER_MAX,
@@ -152,7 +153,8 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
       const x = toReceipt(r);
       return { type: "payout_round", at: x.hour, mint: x.coin.mint, ticker: x.coin.ticker, imageUrl: x.coin.imageUrl, assetSymbol: x.assetSymbol, amount: x.amount, usd: x.usd, wallets: x.wallets };
     });
-    for (const c of rows.filter((c) => c.launchedAt && now - c.launchedAt.getTime() < HOUR).slice(0, 10))
+    const launched = rows.filter((c) => c.launchedAt && now - c.launchedAt.getTime() < HOUR).sort((a, b) => b.launchedAt!.getTime() - a.launchedAt!.getTime());
+    for (const c of launched.slice(0, 10))
       activity.push({ type: "launch", at: iso(c.launchedAt!), mint: c.mint!, ticker: c.ticker, name: c.name, imageUrl: c.imageUrl });
     for (const c of rows.filter((c) => c.graduatedAt).sort((a, b) => b.graduatedAt!.getTime() - a.graduatedAt!.getTime()).slice(0, 3))
       activity.push({ type: "graduate", at: iso(c.graduatedAt!), mint: c.mint!, ticker: c.ticker, imageUrl: c.imageUrl });
@@ -177,13 +179,25 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
 
   app.get("/api/coins", async (req, reply): Promise<CoinList | void> => {
     const q = z
-      .object({ sort: CoinSortSchema.default("trending"), pays: z.string().max(16).optional(), q: z.string().max(64).optional(), cursor: z.coerce.number().int().min(0).optional(), limit: z.coerce.number().int().min(1).max(100).default(60) })
+      .object({
+        sort: CoinSortSchema.default("trending"),
+        pays: z.string().max(16).optional(),
+        q: z.string().max(64).optional(),
+        // Every coin whose ticker reads the same (foldTicker), for the coin page's ticker chooser.
+        ticker: z.string().max(64).optional(),
+        cursor: z.coerce.number().int().min(0).optional(),
+        limit: z.coerce.number().int().min(1).max(100).default(60),
+      })
       .safeParse(req.query);
     if (!q.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid coin query");
     const [rows, prices] = await Promise.all([boardRows(d), d.prices()]);
     const needle = q.data.q?.trim().toLowerCase();
     let list = rows;
     if (needle) list = list.filter((c) => [c.name, c.ticker, c.dividendAsset.symbol, c.dividendAsset.name].some((s) => s.toLowerCase().includes(needle)));
+    if (q.data.ticker) {
+      const norm = foldTicker(q.data.ticker);
+      list = list.filter((c) => c.tickerNorm === norm);
+    }
     if (q.data.pays && q.data.pays !== "all") list = list.filter((c) => c.dividendAsset.symbol === q.data.pays);
     const sorted = sortRows(list, q.data.sort, Date.now());
     const cursor = q.data.cursor ?? 0;
@@ -252,15 +266,20 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const rec = new Map(received.map((r) => [r.wallet, r._sum.amountAsset ?? 0n]));
     const LABEL: Record<string, string> = { curve: "Bonding curve", pool: "Raydium pool", launcher: "Launcher wallet", divvy: "Divvy", burn: "Burned" };
     return {
-      items: top.map((h) => ({
-        wallet: h.wallet,
-        label: h.excludedReason ? LABEL[h.excludedReason] ?? null : null,
-        pct: (Number(h.balance) / 1e15) * 100,
-        balance: amount(h.balance, 6),
-        received: h.excludedReason ? null : amount(rec.get(h.wallet) ?? 0n, c.dividendAsset.decimals),
-        excluded: !!h.excludedReason,
-        excludedReason: (h.excludedReason as "curve" | "pool" | "launcher" | "divvy" | "burn" | null) ?? null,
-      })),
+      items: top.map((h) => {
+        // "small" is a holder whose stake was under the minimum that hour: still a holder, not an
+        // excluded wallet (and not in the response's enum, audit).
+        const why = h.excludedReason === "small" ? null : h.excludedReason;
+        return {
+          wallet: h.wallet,
+          label: why ? LABEL[why] ?? null : null,
+          pct: (Number(h.balance) / 1e15) * 100,
+          balance: amount(h.balance, 6),
+          received: why ? null : amount(rec.get(h.wallet) ?? 0n, c.dividendAsset.decimals),
+          excluded: !!why,
+          excludedReason: (why as "curve" | "pool" | "launcher" | "divvy" | "burn" | null) ?? null,
+        };
+      }),
     };
   });
 
@@ -308,6 +327,26 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
     };
   });
 
+  // The payouts page's totals scan every round and every trade since the last claim, so one result is
+  // shared by all requests for 10 s instead of being recomputed on each (audit).
+  const loadTotals = (now: number) =>
+    Promise.all([
+      d.prisma.payoutRound.aggregate({ where: { ...PAID, coin: { hidden: false } }, _count: true, _sum: { holdersPaid: true } }),
+      d.prisma.payoutRound.count({ where: { dryRun: false, status: { in: ["late", "failed"] }, hour: { gte: new Date(topOfHour(now) - HOUR) } } }),
+      pendingHoldersLamports(d),
+    ]);
+  let totals: { at: number; value: ReturnType<typeof loadTotals> } | null = null;
+  const payoutTotals = (now: number) => {
+    if (!totals || now - totals.at > 10_000) {
+      const value = loadTotals(now);
+      totals = { at: now, value };
+      value.catch(() => {
+        if (totals?.value === value) totals = null; // a failure isn't kept
+      });
+    }
+    return totals.value;
+  };
+
   app.get("/api/payouts", async (req, reply): Promise<PayoutList | void> => {
     const q = z.object({ asset: z.string().max(16).optional(), cursor: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(100).default(60) }).safeParse(req.query);
     if (!q.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid payouts query");
@@ -316,16 +355,14 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const [cHour, cId] = (q.data.cursor ?? "").split("|");
     const before = cHour && cId && !Number.isNaN(Date.parse(cHour)) ? { hour: new Date(cHour), id: cId } : null;
     const assetWhere = q.data.asset && q.data.asset !== "all" ? { coin: { hidden: false, dividendAsset: { symbol: q.data.asset } } } : { coin: { hidden: false } };
-    const [rows, agg, rows24, pending, solUsd, board] = await Promise.all([
+    const [rows, [agg, rows24, pending], solUsd, board] = await Promise.all([
       d.prisma.payoutRound.findMany({
         where: { ...PAID, ...assetWhere, ...(before ? { OR: [{ hour: { lt: before.hour } }, { hour: before.hour, id: { lt: before.id } }] } : {}) },
         orderBy: [{ hour: "desc" }, { id: "desc" }],
         take: q.data.limit + 1,
         include: { coin: { include: { dividendAsset: true } } },
       }),
-      d.prisma.payoutRound.aggregate({ where: { ...PAID, coin: { hidden: false } }, _count: true, _sum: { holdersPaid: true } }),
-      d.prisma.payoutRound.count({ where: { dryRun: false, status: { in: ["late", "failed"] }, hour: { gte: new Date(topOfHour(now) - HOUR) } } }),
-      pendingHoldersLamports(d),
+      payoutTotals(now),
       d.prices().then((p) => p.solUsd),
       boardRows(d),
     ]);

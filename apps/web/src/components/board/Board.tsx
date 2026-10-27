@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { num, usd, usdFull, type CoinList, type CoinSort, type CoinSummary, type Stats } from "@divvy/shared";
 import { coinsKey } from "@/lib/keys";
@@ -28,8 +28,16 @@ const SORTS: [CoinSort, string][] = [
   ["graduate", "About to graduate"],
 ];
 
-export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders: CoinSummary[]; initialCoins: CoinList }) {
+export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats: Stats; leaders: CoinSummary[]; initialCoins: CoinList; now: number }) {
   const config = useConfig();
+  // Cards' ages ("New", the sparkline) start from the server's clock, so hydration matches the HTML, then
+  // follow the browser's (audit: a coin crossing 10 or 20 minutes in between broke hydration).
+  const [now, setNow] = useState(renderedAt);
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
   const assets = useAssets();
   const q = useSearchParams().get("q") ?? "";
   const [sort, setSort] = useState<CoinSort>("trending");
@@ -163,7 +171,7 @@ export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders:
         </div>
         <div className="grid" id="grid">
           {list.length ? (
-            list.map((c) => <CoinCard key={c.mint} c={toCard(c)} />)
+            list.map((c) => <CoinCard key={c.mint} c={toCard(c, now)} />)
           ) : data ? (
             <div className="empty">
               No coin matches “{q}”. Try a ticker or a stock like NVDAx, or <Link className="link" href="/create">create it yourself</Link>.

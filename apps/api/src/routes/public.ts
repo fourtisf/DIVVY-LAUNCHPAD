@@ -5,6 +5,7 @@ import {
   mulberry32,
   CandleTfSchema,
   CoinSortSchema,
+  foldTicker,
   IMAGE_MAX_BYTES,
   IMAGE_TYPES,
   TICKER_MAX,
@@ -104,6 +105,7 @@ const CoinsQuery = z.object({
   sort: CoinSortSchema.default("trending"),
   pays: z.string().optional(),
   q: z.string().max(64).optional(),
+  ticker: z.string().max(64).optional(),
   cursor: z.coerce.number().int().min(0).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(60),
 });
@@ -182,6 +184,7 @@ export async function publicRoutes(app: FastifyInstance, { store }: { store: Moc
     const needle = q.data.q?.trim().toLowerCase();
     let list = store.coins;
     if (needle) list = list.filter((c) => [c.name, c.ticker, c.pays, ASSET[c.pays]!.name].some((s) => s.toLowerCase().includes(needle)));
+    if (q.data.ticker) list = list.filter((c) => foldTicker(c.ticker) === foldTicker(q.data.ticker!));
     if (pays && pays !== "all") list = list.filter((c) => c.pays === pays);
     const sorted = sortCoins(list, sort, now);
     const page = sorted.slice(cursor, cursor + limit);

@@ -26,7 +26,8 @@ export function assertKey(key: string): void {
 const TYPES: Record<string, string> = { webp: "image/webp", json: "application/json", png: "image/png" };
 
 export function localStorage(dir: string, publicBase: string): Storage {
-  const root = normalize(dir);
+  // resolve() drops a trailing slash, which normalize() keeps (".../uploads/" + sep never matched, audit).
+  const root = resolve(dir);
   const path = (key: string) => {
     assertKey(key);
     const p = normalize(join(root, key));

@@ -66,6 +66,7 @@ Follow setup-vps.md with these changes:
 | `SOLANA_CLUSTER` | `mainnet-beta` (api.env, worker.env) |
 | `SOLANA_RPC_URL` | the Helius mainnet URL with its key (api.env, worker.env) |
 | `NEXT_PUBLIC_SOLANA_CLUSTER` / `NEXT_PUBLIC_SOLANA_RPC_URL` | `mainnet-beta` / a **second** Helius key, restricted to `uspad.fun` in Helius' dashboard (build.env; it ends up in the browser) |
+| `RPC_RELAY_URL` | optional, api.env: where `/api/rpc` (go-live.sh's default browser RPC) forwards the browser's calls. A second Helius key here keeps a flood on the relay from using up the indexer's and payouts' credits; empty uses `SOLANA_RPC_URL` |
 | `DIVVY_PLATFORM_CONFIG` | printed by phase 2's dry run ("PlatformConfig PDA to be created") |
 | `DIVVY_MAINNET_ENABLED` | `false` until phase 4 |
 | `PAYOUTS_DRY_RUN` | `true` until phase 5 |

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/session";
 import { useToast } from "../Toasts";
@@ -20,6 +20,21 @@ export function ReportButton({ mint, ticker }: { mint: string; ticker: string })
   const [reason, setReason] = useState<(typeof REASONS)[number][0]>("copy");
   const [details, setDetails] = useState("");
   const [busy, setBusy] = useState(false);
+  const first = useRef<HTMLInputElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+
+  // Escape closes it, focus moves into it while it's open and back to "Report" after.
+  useEffect(() => {
+    if (!open) return;
+    const button = opener.current;
+    first.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      button?.focus();
+    };
+  }, [open]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -39,7 +54,7 @@ export function ReportButton({ mint, ticker }: { mint: string; ticker: string })
 
   return (
     <>
-      <button className="tag report" type="button" onClick={() => setOpen(true)}>Report</button>
+      <button ref={opener} className="tag report" type="button" onClick={() => setOpen(true)}>Report</button>
       {open && (
         <div className="modal-bg on" role="dialog" aria-modal="true" aria-labelledby="reportTitle" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
           <form className="modal report-modal" onSubmit={submit}>
@@ -47,9 +62,9 @@ export function ReportButton({ mint, ticker }: { mint: string; ticker: string })
               <h2 id="reportTitle">Report ${ticker}</h2>
               <p>Tell us what&apos;s wrong. Reports go to uspad&apos;s moderators.</p>
               <div className="report-reasons" role="radiogroup" aria-label="Reason">
-                {REASONS.map(([k, label]) => (
+                {REASONS.map(([k, label], i) => (
                   <label key={k} className="report-reason">
-                    <input type="radio" name="reason" value={k} checked={reason === k} onChange={() => setReason(k)} />
+                    <input ref={i === 0 ? first : undefined} type="radio" name="reason" value={k} checked={reason === k} onChange={() => setReason(k)} />
                     {label}
                   </label>
                 ))}

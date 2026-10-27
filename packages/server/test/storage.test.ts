@@ -12,6 +12,11 @@ describe("local storage", () => {
     expect((await s.read!("img/ab/abcdef.webp"))?.contentType).toBe("image/webp");
     expect(await s.read!("img/nope.webp")).toBeNull();
   });
+  it("works with a trailing slash on the folder", async () => {
+    const s = localStorage(mkdtempSync(join(tmpdir(), "divvy-media-")) + "/", "https://m.example");
+    await s.put("img/ab/abcdef.webp", Buffer.from("x"), "image/webp");
+    expect((await s.read!("img/ab/abcdef.webp"))?.body.toString()).toBe("x");
+  });
   it("refuses path traversal and odd keys", async () => {
     const s = localStorage(mkdtempSync(join(tmpdir(), "divvy-media-")), "https://m.example");
     await expect(s.put("../etc/passwd", Buffer.from(""), "x")).rejects.toThrow();

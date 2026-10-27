@@ -63,7 +63,8 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
   const { data: candles } = useSWR<CandleList>(`/api/coins/${m}/candles` + qs({ tf, unit, limit: 300 }), { refreshInterval: LIVE_MS, keepPreviousData: false });
 
   const [tab, setTab] = useState<"payouts" | "holders" | "trades">("payouts");
-  const { data: payouts } = useSWR<List<PayoutRound>>(`/api/coins/${m}/payouts?limit=10`, { fallbackData: initialPayouts });
+  // Refreshed like the meter, so a new round shows here as soon as the meter says it was paid (audit).
+  const { data: payouts } = useSWR<List<PayoutRound>>(`/api/coins/${m}/payouts?limit=10`, { fallbackData: initialPayouts, refreshInterval: 30_000 });
   // Hours that paid holders, as dots under the candles.
   const payoutHours = useMemo(
     () => (payouts?.items ?? []).filter((p) => p.status === "ok" || p.status === "late").map((p) => Math.floor(new Date(p.hour).getTime() / 1000)),
@@ -199,8 +200,9 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
                   <table className="t">
                     <thead><tr><th>When</th><th>Side</th><th className="r">${coin.ticker}</th><th className="r">SOL</th><th className="r">Wallet</th></tr></thead>
                     <tbody>
-                      {trades.items.map((t) => (
-                        <tr key={t.sig}>
+                      {/* One transaction can hold several trades of a coin: keyed by signature and which one it is. */}
+                      {trades.items.map((t, i, all) => (
+                        <tr key={`${t.sig}:${all.slice(0, i).filter((x) => x.sig === t.sig).length}`}>
                           <td>{ago(t.ts)}</td>
                           <td className={"side-" + t.side}>{t.side}</td>
                           <td className="r">{num(t.token.ui)}</td>

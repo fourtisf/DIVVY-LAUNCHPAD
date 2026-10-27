@@ -24,6 +24,8 @@ const EnvSchema = z.object({
   HOLDERS_VIA_DAS: bool.default(true),
   /** Polling interval for new signatures on the PlatformConfig (the WebSocket wakes it sooner). */
   INDEXER_POLL_MS: z.coerce.number().int().min(500).default(4000),
+  /** getTransaction calls the indexer keeps in flight on one stream (applied in order either way). */
+  INDEXER_FETCH_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(4),
   /** Push delivery: create a holder's xStock ATA only once what we owe them is worth at least this. */
   PUSH_NEW_ATA_MIN_USD: z.coerce.number().positive().default(5),
   /** Transfers per push transaction (each may also create an ATA). */

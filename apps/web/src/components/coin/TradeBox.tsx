@@ -9,7 +9,8 @@ import { bpsLabel, num, sol, type CoinDetail, type TradeBuildResponse } from "@d
 import { api } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { errorText } from "@/lib/session";
-import { signAndSend } from "@/lib/tx";
+import { poolFees } from "@/lib/poolfees";
+import { explorerTx, SentUnconfirmed, signAndSend } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { useToast } from "../Toasts";
 
@@ -36,9 +37,11 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   // What a trade in progress is waiting for, on the button: the wallet's approval, then the network.
   const [stage, setStage] = useState<"wallet" | "confirming">("wallet");
   const [slippageBps, setSlippageBps] = useState(100);
+  // A trade that was sent but whose confirmation never came: no new trade until it's checked (audit).
+  const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
   const wallet = publicKey?.toBase58() ?? null;
-  const solUsd = config.quote.priceUsd;
-  const price = coin.priceUsd;
+  // In SOL, as the coin is priced: the layout's SOL price is only as fresh as the first page load (audit).
+  const price = coin.priceSol;
   const graduated = coin.status === "graduated";
 
   // Balances only when an RPC is configured; the public endpoint is too rate-limited to poll.
@@ -57,13 +60,32 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
     };
   }, [publicKey, connection, coin.mint, balTick]);
 
+  // The confirmation may still turn up: look for it now and then, and clear the hold once it's settled.
+  useEffect(() => {
+    if (!unconfirmed) return;
+    const t = setInterval(async () => {
+      const st = (await connection.getSignatureStatuses([unconfirmed], { searchTransactionHistory: true }).catch(() => null))?.value[0];
+      if (st?.err || st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") {
+        setUnconfirmed(null);
+        setBalTick((n) => n + 1);
+        toast(st.err ? "Your last trade failed on chain. Only the network fee was spent." : "Your last trade went through.");
+      }
+    }, 5_000);
+    return () => clearInterval(t);
+  }, [unconfirmed, connection, toast]);
+
   const v = parseAmount(amt);
   const f = config.fees;
-  const keep = 1 - f.tradeFeeBps / 10_000;
-  const recv =
-    side === "buy" ? num(((v * solUsd * keep) / price) * (1 - Math.min(0.25, v / 40))) + " $" + coin.ticker : sol((v * price * keep) / solUsd);
+  // A graduated coin trades in its Raydium pool, which has its own fee (lib/poolfees.ts).
+  const pool = poolFees(f.afterGraduation);
+  const feeBps = graduated ? pool.total : f.tradeFeeBps;
+  const holdersBps = graduated ? pool.holders : f.holdersBps;
+  const keep = 1 - feeBps / 10_000;
+  // Local estimates only (the API quotes the real amount); none without a price.
+  const estimate = !(price > 0) ? null : side === "buy" ? ((v * keep) / price) * (1 - Math.min(0.25, v / 40)) : v * price * keep;
+  const recv = estimate === null ? "–" : side === "buy" ? num(estimate) + " $" + coin.ticker : sol(estimate);
   const balLabel = wallet ? (side === "buy" ? (bal.sol != null ? `Balance ${bal.sol.toFixed(3)} SOL` : "") : bal.tokens != null ? `Balance ${num(bal.tokens)} $${coin.ticker}` : "") : "";
-  const feeLabel = `${+(f.tradeFeeBps / 100).toFixed(2)}%, ${f.holdersBps * 2 === f.tradeFeeBps ? "half of it" : `${bpsLabel(f.holdersBps)} of it`} to holders`;
+  const feeLabel = `${+(feeBps / 100).toFixed(2)}%, ${holdersBps * 2 === feeBps ? "half of it" : `${bpsLabel(holdersBps)} of it`} to holders`;
 
   const pick = (s: "buy" | "sell") => {
     setSide(s);
@@ -85,8 +107,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       // you chose, and a quote far below the estimate shown here is put to you first.
       if (r.minOut.ui < r.expectedOut.ui * (1 - slippageBps / 10_000) * 0.999) return toast("The quote didn't match your slippage setting. Nothing was sent.");
       const unit = side === "buy" ? `$${coin.ticker}` : "SOL";
-      const shownEstimate = side === "buy" ? ((v * solUsd * 0.99) / price) * (1 - Math.min(0.25, v / 40)) : (v * price * 0.99) / solUsd;
-      if (r.expectedOut.ui < shownEstimate * 0.85 && !window.confirm(`You'd get about ${num(r.expectedOut.ui)} ${unit} (at least ${num(r.minOut.ui)}), less than shown. Continue?`)) return;
+      if (estimate !== null && r.expectedOut.ui < estimate * 0.85 && !window.confirm(`You'd get about ${num(r.expectedOut.ui)} ${unit} (at least ${num(r.minOut.ui)}), less than shown. Continue?`)) return;
       if (r.priceImpactBps > 1500 && !window.confirm(`This trade moves the price by about ${(r.priceImpactBps / 100).toFixed(1)}%. Continue?`)) return;
       await signAndSend(walletCtx, connection, r.tx, { network: config.network, kind: "trade", coinMint: coin.mint }, () => setStage("confirming"));
       toast(side === "buy" ? `Bought ${num(r.expectedOut.ui)} $${coin.ticker}` : `Sold for ${sol(r.expectedOut.ui)}`);
@@ -99,6 +120,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
         }, ms);
       }
     } catch (e) {
+      if (e instanceof SentUnconfirmed) setUnconfirmed(e.signature);
       // Errors after sending come back with their own wording; this one is only for before.
       console.error("trade", e);
       const m = errorText(e, "The trade didn't go through. Nothing was sent.");
@@ -166,7 +188,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
         style={{ width: "100%", marginTop: 14 }}
         id="tradeBtn"
         type="button"
-        disabled={(!!wallet && !(v > 0)) || busy}
+        disabled={(!!wallet && (!(v > 0) || !!unconfirmed)) || busy}
         onClick={trade}
       >
         {!wallet
@@ -179,6 +201,13 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
               ? `Buy $${coin.ticker}`
               : `Sell $${coin.ticker}`}
       </button>
+      {unconfirmed && (
+        <p className="note" role="status">
+          Your last trade was sent but isn&apos;t confirmed yet.{" "}
+          <a className="link" href={explorerTx(unconfirmed, config.network)} target="_blank" rel="noreferrer">Check it on Solscan</a> before you trade again.{" "}
+          <button type="button" className="link" onClick={() => setUnconfirmed(null)}>I checked it</button>
+        </p>
+      )}
       {graduated ? (
         <p className="note">Graduated. Trades go to the Raydium pool.</p>
       ) : (

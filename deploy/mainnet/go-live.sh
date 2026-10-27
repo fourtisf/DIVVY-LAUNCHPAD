@@ -110,7 +110,10 @@ write_env() { # file owner (content on stdin)
   install -o "$2" -g "$2" -m 600 /dev/null "$1"
   cat > "$1"
 }
-env_get() { grep -E "^$2=" "$1" | tail -n 1 | cut -d= -f2-; }
+# Empty, never an error, when the key or the file is missing: under `set -e -o pipefail` a failed grep
+# here used to stop `update` half way without a word (audit).
+env_get() { { grep -E "^$2=" "$1" 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-; }
+redact() { sed -E 's/api-key=[^&" ]*/api-key=…/g'; }
 set_env() { sed -i -E "/^$2=/d" "$1"; printf '%s=%s\n' "$2" "$3" >> "$1"; } # file key value
 # As divvy-backup, so its log stays writable for the nightly cron job.
 # A failure shows its reason here; it used to go only to the log.
@@ -126,15 +129,18 @@ run_backup() {
   return 1
 }
 
+# The release's node_modules come from `pnpm install` as divvy: root never runs that code. These read
+# only public data, as divvy-api (which runs the API from the same release anyway; audit).
+asapi() { sudo -u divvy-api -H env RPC_URL="${RPC:-}" "$@"; }
 platform_pda() { # admin pubkey → PlatformConfig PDA, from the SDK (seed ["platform_config", admin])
-  (cd "$CUR/packages/solana" && node -e '
+  (cd "$CUR/packages/solana" && asapi node -e '
     const { getPdaPlatformId, LAUNCHPAD_PROGRAM } = require("@raydium-io/raydium-sdk-v2");
     const { PublicKey } = require("@solana/web3.js");
     console.log(getPdaPlatformId(LAUNCHPAD_PROGRAM, new PublicKey(process.argv[1])).publicKey.toBase58());' "$1" 2>/dev/null)
 }
 
 balance_of() { # address → lamports on mainnet, or "?"
-  (cd "$CUR/packages/solana" && RPC_URL="$RPC" node -e '
+  (cd "$CUR/packages/solana" && asapi node -e '
     const { Connection, PublicKey } = require("@solana/web3.js");
     new Connection(process.env.RPC_URL, "confirmed").getBalance(new PublicKey(process.argv[1]))
       .then((l) => console.log(l), () => console.log("?"));' "$1" 2>/dev/null) || echo "?"
@@ -143,7 +149,8 @@ balance_of() { # address → lamports on mainnet, or "?"
 # uspad runs the launcher, fee-claimer and payout-vault roles on one operations wallet (owner
 # decision 2026-10-27), kept in fee-claimer.json because it is also the PlatformConfig's fee and
 # Fee Key wallet. Earlier runs made separate launcher and payout-vault keys: point worker.env at the
-# operations wallet and delete those keys, but only if they hold nothing on chain.
+# operations wallet and move those keys out of the apps' reach, into /root/uspad-keys/retired. They are
+# never deleted: a zero SOL balance doesn't prove a key holds no tokens or rights (audit).
 merge_wallets() {
   local f addr bal
   [ -f $ENV_DIR/worker.env ] && sed -i -E "s#^(LAUNCHER|PAYOUT_VAULT)_KEYPAIR_PATH=.*#\1_KEYPAIR_PATH=$KEYS/fee-claimer.json#" $ENV_DIR/worker.env
@@ -151,13 +158,16 @@ merge_wallets() {
     [ -f "$f" ] || continue
     addr=$(pubkey "$f")
     bal=$([ -L "$CUR" ] && balance_of "$addr" || echo "?")
-    if [ "$bal" = 0 ]; then rm -f "$f"; note "wallet lama $addr kosong, dihapus"
+    if [ "$bal" = 0 ]; then
+      install -d -m 700 /root/uspad-keys/retired
+      mv "$f" "/root/uspad-keys/retired/$(basename "$f" .json)-$addr.json"
+      note "wallet lama $addr tanpa SOL, dipindah ke /root/uspad-keys/retired"
     else note "PERHATIAN: wallet lama $addr berisi $bal lamports (atau tidak bisa dicek); $f disimpan"; fi
   done
 }
 
 account_exists() { # address → "yes"/"no" on mainnet
-  (cd "$CUR/packages/solana" && RPC_URL="$RPC" node -e '
+  (cd "$CUR/packages/solana" && asapi node -e '
     const { Connection, PublicKey } = require("@solana/web3.js");
     new Connection(process.env.RPC_URL, "confirmed").getAccountInfo(new PublicKey(process.argv[1]))
       .then((a) => console.log(a ? "yes" : "no"), (e) => { console.error(String(e).replace(/api-key=[^&\s"]+/g, "api-key=…")); process.exit(1); });' "$1" 2>/dev/null)
@@ -197,28 +207,44 @@ latest_release() {
   migrate
 }
 
-migrate() {
+migrate() { # [release]: the current one by default
   say "Migrasi database"
-  (cd "$CUR/packages/db" && sudo -u divvy-api -H node --env-file=$ENV_DIR/api.env ./node_modules/prisma/build/index.js migrate deploy)
+  (cd "${1:-$CUR}/packages/db" && sudo -u divvy-api -H node --env-file=$ENV_DIR/api.env ./node_modules/prisma/build/index.js migrate deploy)
+}
+
+# A release's migrations that the database hasn't applied: asked of the database itself, so a migration
+# that failed or was interrupted is retried by the next `update` (audit).
+pending_migrations() { # release
+  local applied
+  applied=$(sudo -u postgres psql -X -d divvy -Atc 'SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL' 2>/dev/null || true)
+  ls -1 "$1/packages/db/prisma/migrations" | grep -E '^[0-9]' | grep -vxF -f <(printf '%s\n' "$applied") || true
 }
 
 smoke() { # release: boots it next to the running site on spare ports (RUNBOOK "Deploy", step 2)
   say "Uji coba build di port cadangan"
+  # Logs in a private folder (not world-readable /tmp files), shown with API keys masked (audit).
+  local t
+  t=$(mktemp -d)
   (cd "$1/apps/api" && sudo -u divvy-api -H env NODE_ENV=production API_PORT=4001 timeout 40 \
-    node --env-file=$ENV_DIR/api.env dist/server.js > /tmp/smoke-api.log 2>&1 &)
+    node --env-file=$ENV_DIR/api.env dist/server.js > "$t/api.log" 2>&1 &)
   (cd "$1/apps/web" && sudo -u divvy-web -H env NODE_ENV=production API_INTERNAL_URL=http://127.0.0.1:4001 timeout 35 \
-    node --env-file=$ENV_DIR/web.env node_modules/next/dist/bin/next start -p 3001 -H 127.0.0.1 > /tmp/smoke-web.log 2>&1 &)
+    node --env-file=$ENV_DIR/web.env node_modules/next/dist/bin/next start -p 3001 -H 127.0.0.1 > "$t/web.log" 2>&1 &)
   sleep 14
-  curl -fsS http://127.0.0.1:4001/api/health | grep -q '"mode":"live"' || { tail -n 30 /tmp/smoke-api.log; die "API baru tidak sehat (log di atas). Situs lama tetap jalan."; }
-  [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/)" = 200 ] || { tail -n 30 /tmp/smoke-web.log; die "Web baru tidak sehat (log di atas). Situs lama tetap jalan."; }
+  # Healthy means the database and Redis answer too, not just that it runs in live mode (audit).
+  curl -fsS http://127.0.0.1:4001/api/health | jq -e '.ok and .mode == "live"' > /dev/null || { tail -n 30 "$t/api.log" | redact; die "API baru tidak sehat (log di atas). Situs lama tetap jalan."; }
+  [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/)" = 200 ] || { tail -n 30 "$t/web.log" | redact; die "Web baru tidak sehat (log di atas). Situs lama tetap jalan."; }
   (cd "$1/apps/worker" && sudo -u divvy-worker -H env NODE_ENV=production WORKER_ROLES=none timeout 15 \
-    node --env-file=$ENV_DIR/worker.env dist/index.js > /tmp/smoke-worker.log 2>&1) || true
-  grep -q '"msg":"worker started"' /tmp/smoke-worker.log || { tail -n 30 /tmp/smoke-worker.log; die "Worker baru tidak mau start (log di atas)."; }
+    node --env-file=$ENV_DIR/worker.env dist/index.js > "$t/worker.log" 2>&1) || true
+  grep -q '"msg":"worker started"' "$t/worker.log" || { tail -n 30 "$t/worker.log" | redact; die "Worker baru tidak mau start (log di atas)."; }
+  rm -rf "$t"
   note "API, web dan worker baru sehat"
 }
 
 # --------------------------------------------------------------------------------------------------
 prepare() {
+  # The live site moves only through `update`: prepare would switch releases and migrate without a
+  # backup, and its apt-get could restart Postgres (audit).
+  [ -f "$LIVE_MARK" ] && die "uspad.fun sudah live: 'prepare' hanya untuk pemasangan pertama. Untuk kode baru pakai 'go-live.sh update'."
   load_secrets
   say "Sistem: zona waktu UTC, swap, paket"
   if has_systemd; then timedatectl set-timezone Etc/UTC; fi
@@ -374,14 +400,18 @@ EOF
 
   say "Saham dividen (dari pengecekan on-chain, tidak pernah diketik tangan)"
   export RPC_URL="$RPC" JUP_API_KEY
-  (cd "$CUR/packages/solana" && sudo -u divvy -H --preserve-env=RPC_URL,JUP_API_KEY ./node_modules/.bin/tsx scripts/phase0/fetch-xstocks.ts --json) > /tmp/uspad-xstocks.json 2> /tmp/uspad-xstocks.err || true
+  # A private folder: a file another local user created first can't feed the seed (audit).
+  local xs
+  xs=$(mktemp -d)
+  (cd "$CUR/packages/solana" && sudo -u divvy-worker -H --preserve-env=RPC_URL,JUP_API_KEY ./node_modules/.bin/tsx scripts/phase0/fetch-xstocks.ts --json) > "$xs/xstocks.json" 2> "$xs/xstocks.err" || true
   unset RPC_URL
-  chmod 644 /tmp/uspad-xstocks.json
-  if jq -e 'length > 0' /tmp/uspad-xstocks.json > /dev/null 2>&1; then
-    (cd "$CUR/apps/worker" && sudo -u divvy-worker -H node --env-file=$ENV_DIR/worker.env --import tsx scripts/seed-dividend-assets.ts /tmp/uspad-xstocks.json --write)
+  chmod 755 "$xs" && chmod 644 "$xs/xstocks.json"
+  if jq -e 'length > 0' "$xs/xstocks.json" > /dev/null 2>&1; then
+    (cd "$CUR/apps/worker" && sudo -u divvy-worker -H node --env-file=$ENV_DIR/worker.env --import tsx scripts/seed-dividend-assets.ts "$xs/xstocks.json" --write)
   else
-    note "fetch-xstocks gagal, saham belum dimasukkan:"; sed 's/api-key=[^&" ]*/api-key=…/g' /tmp/uspad-xstocks.err | tail -n 5
+    note "fetch-xstocks gagal, saham belum dimasukkan:"; redact < "$xs/xstocks.err" | tail -n 5
   fi
+  rm -rf "$xs"
 
   say "Selesai (tanpa SOL). Situs demo masih jalan."
   cat <<EOF
@@ -419,6 +449,7 @@ platform_config() {
 
 # --------------------------------------------------------------------------------------------------
 switch() {
+  [ -f "$LIVE_MARK" ] && die "uspad.fun sudah live sejak $(cat "$LIVE_MARK" 2>/dev/null || echo '?'): 'switch' akan me-restart semua dan menjeda launch. Untuk kode baru pakai 'go-live.sh update'."
   load_secrets
   [ -L "$CUR" ] || die "jalankan 'go-live.sh prepare' dulu"
   local pda
@@ -547,14 +578,16 @@ update() {
   set_env $ENV_DIR/build.env NEXT_PUBLIC_SOLANA_RPC_URL "$BROWSER_RPC"
   build_release
   smoke "$REL"
-  if ! diff -q <(ls -1 "$CUR/packages/db/prisma/migrations") <(ls -1 "$REL/packages/db/prisma/migrations") > /dev/null; then
+  # Migrations first, then the switch (RUNBOOK "Deploy" step 3): a failed migration leaves the old
+  # release running and is tried again by the next `update` (audit).
+  if [ -n "$(pending_migrations "$REL")" ]; then
     say "Ada migrasi baru: backup dulu"
     run_backup || die "backup database gagal (alasan di atas). Tidak ada yang diubah: situs lama tetap jalan."
-    point_current "$REL"
-    migrate
-  else
-    point_current "$REL"
+    migrate "$REL"
   fi
+  point_current "$REL"
+  # Right away, so a fixed script reaches /root even if a later step stops.
+  self_update
   say "Reload aplikasi"
   nginx_launch_limit
   # The worker puts the launch fee in the creator's create since 2026-10-27: give it the API's value.
@@ -568,7 +601,7 @@ update() {
   (cd /srv/divvy/releases && ls -1dt -- */ | tail -n +6 | while read -r d; do
     [ "$(readlink -f "$d")" = "$(readlink -f $CUR)" ] || rm -rf -- "/srv/divvy/releases/${d%/}"
   done)
-  self_update
+  for u in divvy-web divvy-api divvy-worker; do pm2as "$u" save > /dev/null 2>&1 || true; done
   sleep 8
   status
 }
@@ -587,9 +620,11 @@ self_update() {
 # Not in the middle of a payout run (RUNBOOK "Deploy").
 restart_worker() {
   local i
-  for i in $(seq 1 60); do
+  # Up to 20 minutes: a payout run that long is stuck, and the worker finishes its job on SIGTERM.
+  for i in $(seq 1 240); do
     [ "$(REDISCLI_AUTH="$(env_get "$GEN" REDIS_PASS)" redis-cli -h 127.0.0.1 EXISTS divvy:lock:payouts)" = 0 ] && break
     [ "$i" = 1 ] && note "menunggu putaran dividen selesai..."
+    [ $((i % 12)) = 0 ] && note "masih menunggu ($((i / 12)) menit)..."
     sleep 5
   done
   pm2as divvy-worker restart "$ECO" --only divvy-worker --update-env > /dev/null
@@ -751,16 +786,21 @@ fee_rate() {
     ./node_modules/.bin/tsx scripts/phase0/set-fee-rate.ts "${send[@]}" 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g' | tee "$log"
   slot=$(sed -n 's/^FEE_RATE_SLOT=//p' "$log"); rm -f "$log"
   [ ${#send[@]} = 0 ] && return 0
-  if [ "$divvy" = "$want" ]; then note "api.env dan worker.env sudah memakai pembagian baru"; return 0; fi
-  # Already on chain from a run that stopped before this point: from now on is a safe bound (the trades
-  # in between get the old split, which only gives holders more).
-  [ -n "$slot" ] || slot=$(curl -fsS "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getSlot"}' | jq -r .result)
-  [[ $slot =~ ^[0-9]+$ ]] || die "slot perubahan tidak terbaca; payout berhenti sampai env diisi (FEE_SPLIT_BEFORE)"
-  for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do
-    set_env "$f" FEE_SPLIT_BEFORE "$slot:$holders:$divvy"
-    set_env "$f" FEE_DIVVY_BPS "$want"
-    set_env "$f" FEE_TRADE_BPS "$((protocol + holders + creator + want))"
-  done
+  if [ "$divvy" = "$want" ]; then
+    # A run interrupted after writing the env (Ctrl-C while waiting for the payout lock): reload anyway (audit).
+    note "api.env dan worker.env sudah memakai pembagian baru"
+  else
+    # Already on chain from a run that stopped before this point: from now on is a safe bound (the
+    # trades in between get the old split, which only gives holders more). The RPC URL (with its key)
+    # goes to curl on stdin, never on the command line (audit).
+    [ -n "$slot" ] || slot=$(printf 'url = "%s"\n' "$RPC" | curl -fsS -K - -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getSlot"}' | jq -r .result)
+    [[ $slot =~ ^[0-9]+$ ]] || die "slot perubahan tidak terbaca; payout berhenti sampai env diisi (FEE_SPLIT_BEFORE)"
+    for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do
+      set_env "$f" FEE_SPLIT_BEFORE "$slot:$holders:$divvy"
+      set_env "$f" FEE_DIVVY_BPS "$want"
+      set_env "$f" FEE_TRADE_BPS "$((protocol + holders + creator + want))"
+    done
+  fi
   pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
   restart_worker
   sleep 3
@@ -777,11 +817,11 @@ payouts() {
   case "${1:-}" in
     check)
       say "Worker"
-      grep '"msg":"worker started"' $log | tail -n 1 | jq -c '{t, mainnetEnabled, payoutsDryRun, delivery}'
+      { grep '"msg":"worker started"' $log || true; } | tail -n 1 | jq -c '{t, mainnetEnabled, payoutsDryRun, delivery}'
       say "Putaran terakhir (setiap 10 menit)"
-      grep -E '"msg":"payouts: (run|failed)"' $log | tail -n 4 | jq -c '{t, hour, dryRun, claimedLamports, rounds, error}'
+      { grep -E '"msg":"payouts: (run|failed)"' $log || true; } | tail -n 4 | jq -c '{t, hour, dryRun, claimedLamports, rounds, error}'
       say "Vault fee platform (dry-run: klaim simulasi vs saldo asli)"
-      grep '"msg":"payouts: dry-run vault claim"' $log | tail -n 3 | jq -c '{hour, indexed, vaultBalance}'
+      { grep '"msg":"payouts: dry-run vault claim"' $log || true; } | tail -n 3 | jq -c '{hour, indexed, vaultBalance}'
       say "Round per koin, 3 jam terakhir"
       dbq -c "SELECT to_char(r.hour, 'MM-DD HH24:MI') AS hour, c.ticker, r.\"dryRun\" AS dry, r.status, r.step,
                      round(r.\"solIn\" / 1e9, 6) AS sol_in, round(r.\"carriedOutLamports\" / 1e9, 6) AS carried_sol,
@@ -886,7 +926,7 @@ status() {
     local args=()
     args+=("platform-admin=$(pubkey "$ADMIN_KEY")")
     args+=("operasional=$(pubkey $KEYS/fee-claimer.json)")
-    (cd "$CUR/packages/solana" && RPC_URL="$RPC" node -e '
+    (cd "$CUR/packages/solana" && asapi node -e '
       const { Connection, PublicKey } = require("@solana/web3.js");
       const c = new Connection(process.env.RPC_URL, "confirmed");
       (async () => { for (const a of process.argv.slice(1)) { const [r, k] = a.split("=");
@@ -894,6 +934,12 @@ status() {
         console.log(`   ${r.padEnd(15)} ${k}  ${l === null ? "?" : (l / 1e9).toFixed(4) + " SOL"}`); } })();' "${args[@]}" 2>/dev/null)
   fi
 }
+
+# One run at a time: two would share the smoke ports and edit the env files together (audit).
+if [ -n "${1:-}" ]; then
+  exec 9> /run/uspad-go-live.lock
+  flock -n 9 || die "go-live.sh sudah berjalan di terminal lain; tunggu sampai selesai"
+fi
 
 case "${1:-}" in
   prepare) prepare ;;

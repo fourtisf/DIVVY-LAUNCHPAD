@@ -23,6 +23,11 @@ const EnvSchema = z.object({
    * operations wallet that pays the create, before each launch. 0 keeps launching free.
    */
   LAUNCH_FEE_LAMPORTS: z.coerce.bigint().nonnegative().default(0n),
+  /**
+   * Where /api/rpc forwards the browser's calls. Defaults to SOLANA_RPC_URL; a second Helius key here
+   * keeps abuse of the relay from eating the indexer's and payouts' RPC credits (audit).
+   */
+  RPC_RELAY_URL: z.string().url().optional(),
   LAUNCH_FEE_WALLET: z
     .string()
     .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)

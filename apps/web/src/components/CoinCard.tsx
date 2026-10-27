@@ -51,7 +51,7 @@ export function CoinCard({ c, asDiv = false }: { c: CardCoin; asDiv?: boolean })
           <div className="mcap">{usd(c.mcap)}</div>
         </div>
         <div className="mid-r">
-          {c.ageMin < 10 ? null : <Spark data={c.spark} up={c.ch >= 0} id={c.ticker} />}
+          {c.ageMin < 10 ? null : <Spark data={c.spark} up={c.ch >= 0} id={c.mint ?? c.ticker} />}
           <span className={"chg " + (c.ch >= 0 ? "up" : "down")}>{pct(c.ch)}</span>
         </div>
       </div>

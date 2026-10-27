@@ -403,4 +403,35 @@ describe.skipIf(!run)("launch pipeline", () => {
     ]);
     expect(touched.has(coin.id)).toBe(true);
   });
+
+  it("walks a stream oldest first, a slice per call, fetching ahead without applying out of order", async () => {
+    // Five signatures, newest first as the RPC returns them; s3 failed on chain (never fetched).
+    const page = ["s5", "s4", "s3", "s2", "s1"].map((signature, i) => ({ signature, slot: 50 - i, err: signature === "s3" ? { x: 1 } : null }));
+    const fetchedSigs: string[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const stream = {
+      ...conn,
+      getSignaturesForAddress: async (_a: unknown, o: { until?: string }) => (o.until ? page.slice(0, page.findIndex((p) => p.signature === o.until)) : page),
+      getTransaction: async (sig: string) => {
+        fetchedSigs.push(sig);
+        maxInFlight = Math.max(maxInFlight, ++inFlight);
+        await new Promise((r) => setTimeout(r, sig === "s1" ? 30 : 5)); // the oldest answers last
+        inFlight--;
+        return { slot: 1 } as unknown as VersionedTransactionResponse;
+      },
+    } as unknown as Connection;
+    const d = { ...deps({}), conn: stream };
+    const indexer = new Indexer(d);
+    const applied: string[] = [];
+    const name = `test-${Date.now()}`;
+    await indexer.follow(name, Keypair.generate().publicKey, async (sig) => void applied.push(sig), 3);
+    expect(applied).toEqual(["s1", "s2"]); // s3 counted towards the slice but had nothing to apply
+    expect((await prisma.indexerCursor.findUniqueOrThrow({ where: { name } })).lastSignature).toBe("s3");
+    expect(maxInFlight).toBeGreaterThan(1);
+    await indexer.follow(name, Keypair.generate().publicKey, async (sig) => void applied.push(sig), 3);
+    expect(applied).toEqual(["s1", "s2", "s4", "s5"]);
+    expect(fetchedSigs.sort()).toEqual(["s1", "s2", "s4", "s5"]);
+    await prisma.indexerCursor.delete({ where: { name } });
+  });
 });

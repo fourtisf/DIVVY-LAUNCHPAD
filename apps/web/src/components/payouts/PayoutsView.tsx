@@ -16,8 +16,9 @@ export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: Pa
   const copy = deliveryCopy(useConfig());
   const [filter, setFilter] = useState("all");
   const key = "/api/payouts" + qs({ asset: filter === "all" ? null : filter, limit: 60 });
-  const { data = initial } = useSWR<PayoutList>(key, { fallbackData: filter === "all" ? initial : undefined });
-  const s = data.summary;
+  // A stock filter shows its own receipts or says it's loading: never the unfiltered list under its chip (audit).
+  const { data, error } = useSWR<PayoutList>(key, { fallbackData: filter === "all" ? initial : undefined, keepPreviousData: false });
+  const s = (data ?? initial).summary;
   return (
     <>
       <h1 className="page-h">Payouts</h1>
@@ -63,7 +64,12 @@ export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: Pa
           <table className="t">
             <thead><tr><th>Coin</th><th>When</th><th className="r">Paid</th><th className="r">Value</th><th className="r">Wallets</th><th className="r">Tx</th></tr></thead>
             <tbody id="rcpt">
-              {data.items.map((p) => (
+              {!data && (
+                <tr>
+                  <td colSpan={6} className="faint">{error ? "Couldn't load these receipts. Try again in a moment." : "Loading…"}</td>
+                </tr>
+              )}
+              {data?.items.map((p) => (
                 <tr key={p.id}>
                   <td>
                     <Link href={coinHref(p.coin)} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>

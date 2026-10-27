@@ -371,9 +371,13 @@ describe.skipIf(!run)("live mode", () => {
   });
 
   it("relays the browser's RPC calls to the server's RPC, and only the methods the site uses", async () => {
-    const call = (method: string, params: unknown[] = []) => post("/api/rpc", { jsonrpc: "2.0", id: 1, method, params });
+    const site = { origin: "http://localhost:3000" };
+    const call = (method: string, params: unknown[] = []) => post("/api/rpc", { jsonrpc: "2.0", id: 1, method, params }, site);
     expect((await call("getProgramAccounts")).statusCode).toBe(403);
-    expect((await post("/api/rpc", [{ jsonrpc: "2.0", id: 1, method: "getBalance" }])).statusCode).toBe(400);
+    expect((await post("/api/rpc", [{ jsonrpc: "2.0", id: 1, method: "getBalance" }], site)).statusCode).toBe(400);
+    // Only from the site's pages, and a wallet's token accounts only by mint.
+    expect((await post("/api/rpc", { jsonrpc: "2.0", id: 1, method: "getBalance", params: [admin.address] })).statusCode).toBe(403);
+    expect((await call("getTokenAccountsByOwner", [admin.address, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }])).statusCode).toBe(403);
     const seen: { url: string; body: { method: string } }[] = [];
     vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
       seen.push({ url: String(url), body: JSON.parse(init.body) });
@@ -384,6 +388,9 @@ describe.skipIf(!run)("live mode", () => {
       expect(r.statusCode).toBe(200);
       expect(r.json()).toMatchObject({ result: { value: 5 } });
       expect(seen).toEqual([{ url: "https://rpc.invalid", body: { jsonrpc: "2.0", id: 1, method: "getBalance", params: [admin.address] } }]);
+      // An answer too large to be one of the site's calls isn't relayed.
+      vi.stubGlobal("fetch", async () => new Response("x".repeat(300 * 1024)));
+      expect((await call("getBalance", [admin.address])).statusCode).toBe(502);
     } finally {
       vi.unstubAllGlobals();
     }

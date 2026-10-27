@@ -26,8 +26,11 @@ export function MeView() {
   const { me, ensureSignedIn, signOut, refresh } = useSession();
   const addr = wallet.publicKey?.toBase58() ?? null;
   const signedIn = !!addr && me?.wallet === addr;
-  const { data: payouts, mutate: reloadPayouts } = useSWR<MyPayouts>(signedIn ? "/api/me/payouts?limit=50" : null);
-  const { data: creator, mutate: reloadCreator } = useSWR<CreatorInfo>(signedIn ? "/api/me/creator" : null);
+  // Cached per wallet, and never showing the last key's data while loading: after a wallet switch, the
+  // previous wallet's payouts and claimable fees must not show for a moment (audit).
+  const mine = { keepPreviousData: false };
+  const { data: payouts, mutate: reloadPayouts } = useSWR(signedIn ? ["/api/me/payouts?limit=50", addr] : null, ([path]) => api<MyPayouts>(path), mine);
+  const { data: creator, mutate: reloadCreator } = useSWR(signedIn ? ["/api/me/creator", addr] : null, ([path]) => api<CreatorInfo>(path), mine);
   const [busy, setBusy] = useState<string | null>(null);
   const claimModel = config.payouts.delivery === "claim";
 

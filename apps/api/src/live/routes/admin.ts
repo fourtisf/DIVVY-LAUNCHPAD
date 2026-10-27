@@ -16,7 +16,7 @@ export async function liveAdminRoutes(app: FastifyInstance, { d }: { d: LiveDeps
     const [settings, status, pendingLaunches, openReports, lateRounds] = await Promise.all([
       getLaunchSettings(d.prisma),
       readStatus(d.redis),
-      d.prisma.launch.count({ where: { step: { in: ["checking", "bundling", "landed"] } } }),
+      d.prisma.launch.count({ where: { step: { in: ["checking", "signing", "bundling", "landed"] } } }),
       d.prisma.report.count({ where: { status: "open" } }),
       d.prisma.payoutRound.count({ where: { dryRun: d.params.dryRun, status: { in: ["late", "failed"] }, hour: { gte: new Date(topOfHour(Date.now()) - 24 * HOUR) } } }),
     ]);

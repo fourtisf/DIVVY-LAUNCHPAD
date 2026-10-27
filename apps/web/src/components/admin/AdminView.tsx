@@ -18,7 +18,7 @@ export function AdminView() {
   const { publicKey } = useWallet();
   const { me, ensureSignedIn } = useSession();
   const isAdmin = !!me?.isAdmin && me.wallet === publicKey?.toBase58();
-  const { data: o, mutate: reloadO } = useSWR<AdminOverview>(isAdmin ? "/api/admin/overview" : null, { refreshInterval: 30_000 });
+  const { data: o, error: oError, mutate: reloadO } = useSWR<AdminOverview>(isAdmin ? "/api/admin/overview" : null, { refreshInterval: 30_000 });
   const { data: reports, mutate: reloadR } = useSWR<AdminReportList>(isAdmin ? "/api/admin/reports" : null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -56,7 +56,7 @@ export function AdminView() {
     <>
       <h1 className="page-h">Admin</h1>
       <p className="page-lede">
-        {o ? `${o.mainnetEnabled ? "Mainnet sends are on" : "Mainnet sends are off"}. Payouts are ${o.dryRun ? "in dry-run" : "live"}.` : "Loading…"}
+        {o ? `${o.mainnetEnabled ? "Mainnet sends are on" : "Mainnet sends are off"}. Payouts are ${o.dryRun ? "in dry-run" : "live"}.` : oError ? "Couldn't load the overview. It retries every 30 seconds." : "Loading…"}
       </p>
       {o && (
         <div className="tiles">
@@ -69,7 +69,10 @@ export function AdminView() {
 
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-h"><h3>Launches</h3></div>
-        {o?.launchesOpen ? (
+        {/* No switch until the real state is known (audit: it showed "paused" while loading). */}
+        {!o ? (
+          <p className="note">{oError ? "The launch switch shows once the overview loads." : "Loading…"}</p>
+        ) : o.launchesOpen ? (
           <form
             className="admin-row"
             onSubmit={(e) => {
@@ -82,7 +85,7 @@ export function AdminView() {
           </form>
         ) : (
           <div className="admin-row">
-            <p className="note" style={{ margin: 0 }}>Paused: {o?.launchesPausedReason ?? "no reason given"}</p>
+            <p className="note" style={{ margin: 0 }}>Paused: {o.launchesPausedReason ?? "no reason given"}</p>
             <button className="btn btn-g" type="button" disabled={busy} onClick={() => void act(() => post("/api/admin/settings", { launchesOpen: true, reason: null }), "Launches open")}>
               Open launches
             </button>

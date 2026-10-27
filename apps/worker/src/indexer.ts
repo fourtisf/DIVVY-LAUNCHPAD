@@ -20,6 +20,8 @@ import { refreshMarketStats } from "./stats";
 const TF_DB: Record<Tf, string> = { "1m": "1m", "5m": "5m", "1h": "1h", "1d": "1d" };
 /** getTransaction returning null this many times in a row for one signature raises an alert. */
 const NULL_TX_ALERT_AFTER = 15;
+/** Transactions one graduated pool's stream works through per pass, so the platform stream isn't kept waiting. */
+const CPMM_SLICE = 200;
 
 interface CoinRef {
   id: string;
@@ -38,7 +40,8 @@ export class Indexer {
   private busy = false;
   private again = false;
   private halted = new Set<string>();
-  private nullTx = { sig: "", count: 0 };
+  /** Per stream, so two stuck streams can't keep resetting each other's count (audit). */
+  private nullTx = new Map<string, { sig: string; count: number }>();
 
   constructor(private readonly d: WorkerDeps) {}
 
@@ -69,10 +72,20 @@ export class Indexer {
         this.again = false;
         const touched = new Set<string>();
         await this.refreshSets();
-        await this.safely("platform", () => this.follow("platform", this.d.sol.platformConfig, (sig, tx) => this.onPlatformTx(sig, tx, touched)));
+        let platformAt = 0;
+        const platform = () => {
+          platformAt = Date.now();
+          return this.safely("platform", () => this.follow("platform", this.d.sol.platformConfig, (sig, tx) => this.onPlatformTx(sig, tx, touched)));
+        };
+        await platform();
         const graduated = await this.d.prisma.coin.findMany({ where: { status: "graduated", cpmmPool: { not: null } }, select: { id: true, cpmmPool: true } });
-        // One pool's RPC error doesn't starve the others.
-        for (const g of graduated) await this.safely(`cpmm:${g.cpmmPool}`, () => this.follow(`cpmm:${g.cpmmPool}`, new PublicKey(g.cpmmPool!), (sig, tx) => this.onCpmmTx(sig, tx, g.id, touched)));
+        // One pool's RPC error doesn't starve the others. Each pool's backlog is worked through a slice at
+        // a time and the platform stream (fees and vault claims) comes round again between pools, so busy
+        // pools can't keep it waiting (audit).
+        for (const g of graduated) {
+          await this.safely(`cpmm:${g.cpmmPool}`, () => this.follow(`cpmm:${g.cpmmPool}`, new PublicKey(g.cpmmPool!), (sig, tx) => this.onCpmmTx(sig, tx, g.id, touched), CPMM_SLICE));
+          if (Date.now() - platformAt >= this.d.env.INDEXER_POLL_MS) await platform();
+        }
         if (touched.size) await refreshMarketStats(this.d, [...touched]);
       } while (this.again);
     } catch (e) {
@@ -99,8 +112,12 @@ export class Indexer {
     this.claimSigs = new Set(claims.map((c) => c.sig!));
   }
 
-  /** Walks new signatures for `address` oldest-first, advancing the cursor after each transaction. */
-  async follow(name: string, address: PublicKey, handle: (sig: string, tx: VersionedTransactionResponse) => Promise<void>): Promise<void> {
+  /**
+   * Walks new signatures for `address` oldest-first, advancing the cursor after each transaction, at most
+   * `max` per call (the rest next time). Transactions are fetched a few at a time in parallel and applied
+   * in order (audit: one fetch at a time let cheap spam touching the PlatformConfig outrun the indexer).
+   */
+  async follow(name: string, address: PublicKey, handle: (sig: string, tx: VersionedTransactionResponse) => Promise<void>, max = Infinity): Promise<void> {
     if (this.halted.has(name)) return;
     const cur = await this.d.prisma.indexerCursor.findUnique({ where: { name } });
     const sigs: { signature: string; slot: number; err: unknown }[] = [];
@@ -111,13 +128,25 @@ export class Indexer {
       if (page.length < 1000) break;
       before = page[page.length - 1]!.signature;
     }
-    for (const s of sigs.reverse()) {
+    const todo = sigs.reverse().slice(0, max);
+    const fetched = new Map<string, Promise<VersionedTransactionResponse | null>>();
+    const fetchAhead = (from: number) => {
+      for (const t of todo.slice(from, from + this.d.env.INDEXER_FETCH_CONCURRENCY)) {
+        if (!t.err && !fetched.has(t.signature)) {
+          const p = getTransactionAnyVersion(this.d.conn, t.signature);
+          p.catch(() => {}); // awaited below, in order
+          fetched.set(t.signature, p);
+        }
+      }
+    };
+    for (const [i, s] of todo.entries()) {
+      fetchAhead(i);
       if (!s.err) {
         // Any transaction version: a newer one web3.js can't read is fetched raw (rawtx.ts). One whose
         // shape we don't know stops this stream, like a layout change, instead of being skipped.
         let tx: VersionedTransactionResponse | null;
         try {
-          tx = await getTransactionAnyVersion(this.d.conn, s.signature);
+          tx = await fetched.get(s.signature)!;
         } catch (e) {
           if (e instanceof TxShapeError) {
             this.halted.add(name);
@@ -127,8 +156,10 @@ export class Indexer {
         }
         if (!tx) {
           // Not served yet: try again next tick without moving the cursor, but say so if it persists.
-          this.nullTx = this.nullTx.sig === s.signature ? { sig: s.signature, count: this.nullTx.count + 1 } : { sig: s.signature, count: 1 };
-          if (this.nullTx.count === NULL_TX_ALERT_AFTER) await this.d.alerts.send(`indexer-null-tx-${s.signature}`, "critical", `Indexer (${name}) is stuck: the RPC keeps returning no transaction for ${s.signature}`, 3600);
+          const prev = this.nullTx.get(name);
+          const stuck = prev?.sig === s.signature ? { sig: s.signature, count: prev.count + 1 } : { sig: s.signature, count: 1 };
+          this.nullTx.set(name, stuck);
+          if (stuck.count === NULL_TX_ALERT_AFTER) await this.d.alerts.send(`indexer-null-tx-${s.signature}`, "critical", `Indexer (${name}) is stuck: the RPC keeps returning no transaction for ${s.signature}`, 3600);
           return;
         }
         try {

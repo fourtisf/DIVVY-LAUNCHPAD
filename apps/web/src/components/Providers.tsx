@@ -20,10 +20,11 @@ import { ToastProvider } from "./Toasts";
  */
 export function Providers({ config, children }: { config: Config; children: ReactNode }) {
   // A path is uspad's own RPC relay (/api/rpc, apps/api/src/live/routes/rpc.ts); web3.js needs it absolute.
-  // On the server nothing is sent, so any origin will do there.
+  // On the server nothing is sent, so any origin will do there. Wallets work out the network from the
+  // endpoint's text (a URL without "devnet" in it is mainnet), so on devnet the relay's URL says so (audit).
   const rpc = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
   const endpoint = rpc?.startsWith("/")
-    ? `${typeof window === "undefined" ? "http://localhost" : window.location.origin}${rpc}`
+    ? `${typeof window === "undefined" ? "http://localhost" : window.location.origin}${rpc}${config.network === "devnet" ? "?cluster=devnet" : ""}`
     : rpc || clusterApiUrl(config.network === "devnet" ? "devnet" : "mainnet-beta");
   const wallets = useMemo(() => [new PhantomWalletAdapter(), new SolflareWalletAdapter()], []);
   return (

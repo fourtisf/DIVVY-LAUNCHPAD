@@ -11,5 +11,5 @@ export default async function BoardPage({ searchParams }: { searchParams: Promis
     serverApi<CoinList>("/api/coins?sort=payers&limit=3"),
     serverApi<CoinList>(coinsKey({ sort: "trending", pays: "all", q })),
   ]);
-  return <Board stats={stats} leaders={leaders.items} initialCoins={coins} />;
+  return <Board stats={stats} leaders={leaders.items} initialCoins={coins} now={Date.now()} />;
 }

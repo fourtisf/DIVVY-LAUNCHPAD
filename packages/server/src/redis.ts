@@ -13,7 +13,9 @@ export async function publishLive(redis: Redis, e: LiveEvent): Promise<void> {
 /** Subscribes on a dedicated connection; returns an unsubscribe function. */
 export function subscribeLive(url: string, onEvent: (e: LiveEvent) => void): () => Promise<void> {
   const sub = new Redis(url);
-  void sub.subscribe(KEYS.liveChannel);
+  // (Re)subscribed each time the connection is ready: a Redis that's down at start-up neither rejects
+  // unhandled (which ends the process) nor leaves the live feed silent once it's back (audit).
+  sub.on("ready", () => void sub.subscribe(KEYS.liveChannel).catch(() => {}));
   sub.on("message", (_ch, msg) => {
     try {
       onEvent(JSON.parse(msg) as LiveEvent);

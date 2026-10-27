@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { foldTicker, type CoinDetail, type CoinList, type Meter, type PayoutRound } from "@divvy/shared";
+import type { CoinDetail, CoinList, Meter, PayoutRound } from "@divvy/shared";
 import { toCard } from "@/lib/cards";
 import { serverApi, serverApiOrNull } from "@/lib/server-api";
 import { CoinCard } from "@/components/CoinCard";
@@ -12,9 +12,10 @@ export default async function CoinPage({ params }: { params: Promise<{ ticker: s
   const ticker = decodeURIComponent((await params).ticker);
   // Coins can share a ticker (owner decision 2026-10-27) and links use the mint. A ticker link (an old
   // tab, a typed or shared URL) that matches several coins lists them, instead of guessing which one.
-  if (!MINT.test(ticker)) {
-    const found = await serverApiOrNull<CoinList>(`/api/coins?q=${encodeURIComponent(ticker)}&limit=100`);
-    const same = (found?.items ?? []).filter((c) => foldTicker(c.ticker) === foldTicker(ticker));
+  // The API lists every coin whose ticker reads the same, lookalikes included (D0GE for DOGE).
+  if (!MINT.test(ticker) && ticker.length <= 64) {
+    const found = await serverApiOrNull<CoinList>(`/api/coins?ticker=${encodeURIComponent(ticker)}&limit=100`);
+    const same = found?.items ?? [];
     if (same.length > 1)
       return (
         <>
@@ -29,7 +30,8 @@ export default async function CoinPage({ params }: { params: Promise<{ ticker: s
         </>
       );
   }
-  const coin = await serverApiOrNull<CoinDetail>(`/api/coins/${encodeURIComponent(ticker)}`);
+  // Longer than any ticker or mint: the API would refuse it, so it's simply not a coin here.
+  const coin = ticker.length > 64 ? null : await serverApiOrNull<CoinDetail>(`/api/coins/${encodeURIComponent(ticker)}`);
   if (!coin)
     return (
       <>

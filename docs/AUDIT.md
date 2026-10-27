@@ -10,7 +10,7 @@ This file records five internal reviews of the Divvy monorepo, all written on 20
 - an on-chain money-path review of the launch pipeline, the dividend engine, swaps, delivery and claims;
 - notes from the agent that rewrote `docs/RUNBOOK.md`.
 
-It also records a `pnpm audit --prod` run and the issues found while re-checking and fixing.
+It also records a `pnpm audit --prod` run and the issues found while re-checking and fixing. A third round of reviews, on 2026-10-27 after the creator-signed create and the 1.25% fee, is recorded under "Third review (2026-10-27)".
 
 **This is not a third-party audit.** A third-party audit of the money paths is still required before mainnet. Its scope and the sign-off are in `docs/MAINNET_CHECKLIST.md`.
 
@@ -195,6 +195,59 @@ NEW-1 to NEW-4 were found while re-checking the reviews. NEW-5 was found while f
 | NEW-3 | Low | Concurrent launches could starve the database connection pool. | fixed | The checks inside the lock now run on the advisory-lock transaction's own connection (`launchChecks` with `prisma: tx` in `apps/api/src/live/routes/create.ts`). No test. |
 | NEW-4 | Low | The production storage guard checked the app's folder, not the release. | fixed | `assertProductionStorage` also refuses a `STORAGE_DIR` inside the workspace root, meaning the nearest folder holding `pnpm-workspace.yaml`. It checks both the path the app was started from and its realpath (`packages/server/src/storage.ts`). Test: `packages/server/test/storage.test.ts` (`../../data/media` is refused). |
 | NEW-5 | Medium | A vault claim whose transaction failed on chain got a trade marker from the indexer. It was then attributed with 0 lamports over real trades, scaling every coin to 0, and those trades fell outside the next claim's range. | fixed | `Indexer.follow` (`apps/worker/src/indexer.ts`) no longer marks a claim whose signature has `err`. `recoverClaim` then sees the failure and gives the claim an empty range, so its trades roll into the next claim. No test. |
+
+## Third review (2026-10-27)
+
+Five AI review agents read the code again after the creator-signed create, the creator-paid launch fee and the 1.25% fee: the launch pipeline and launch fee, the dividend engine, the indexer and API, the web app, and `deploy/mainnet/go-live.sh`. Every finding below was re-checked against the code before it was fixed. The fixes are in commit `ac31ed8` (T-1 to T-12) and the commit that adds this section (T-13 to T-42). Tests: worker 64, API 29, shared 43, solana 37, server 5, web unit 16, all passing; typecheck and lint clean.
+
+| ID | Severity | Finding | Status | Where and how |
+|---|---|---|---|---|
+| T-1 | High | A bare transfer to a coin's mint address (the creator sees it early) made the launch look landed: a fake live coin with no pool and no fee. | fixed | `mintCreated()` (`apps/worker/src/launch.ts`) needs a Token-2022 mint-sized account. Test: `pipeline.test.ts`. |
+| T-2 | High | A coin's create transaction could be submitted again as a launch-fee payment and credited a second time. | fixed | `feePaymentProblem` (`apps/api/src/live/launchfee.ts`) refuses a transaction that calls LaunchLab. Test: `live.test.ts`. |
+| T-3 | High | A vault claim that landed but errored before its amount was saved was attributed as 0 over real trades. | fixed | `recoverClaim` (`payouts/engine.ts`) reads the amount back from the chain. Test: `engine.test.ts`, which fails without the fix. |
+| T-4 | Medium | A refusal from the creator's wallet after a bundle was already sent marked the launch failed while the create could still land. | fixed | `handOff()` moves it to `bundling` with the sent height, so the reconciler settles it. Test: `pipeline.test.ts` (`sign-then-refuse`). |
+| T-5 | Medium | A creator's signature posted after the create's blockhash expired was still sent. | fixed | `getBlockHeight() > lastValidBlockHeight` in `launch.ts`. |
+| T-6 | Medium | Racing updates of a launch's step could overwrite each other. | fixed | Conditional `updateMany` on the signing and bundling steps. |
+| T-7 | Medium | Jito sends from several launches could exceed the block engine's rate limit. | fixed | `turn()` in `packages/solana/src/live/jito.ts` spaces them 1.1 s apart; `JITO_TIP_LAMPORTS` is capped at 0.001 SOL. |
+| T-8 | Medium | A transaction built by the API could carry an unbounded priority fee and the browser would sign it. | fixed | `MAX_PRIORITY_LAMPORTS` in `apps/web/src/lib/txcheck.ts`. Test: `txcheck.test.ts`. |
+| T-9 | Medium | One user could hold several launches in flight. | fixed | 429 `LAUNCH_IN_PROGRESS` for non-admins (`routes/create.ts`). Test: `live.test.ts`. |
+| T-10 | Medium | The launch modal treated any wallet error as a refusal and reported it; a lost POST of the signed create was not retried. | fixed | `rejected()` and three retries in `LaunchModal.tsx`. |
+| T-11 | Medium | A swap size limit too small for any round stopped a stock for days; a missing price shrank it; a short fee claimer stopped every payout step. | fixed | `growSwapLimit` doubles in that case; a missing price refuses without shrinking; a short claimer skips only that stock's swap. Test: `engine.test.ts`. |
+| T-12 | Medium | The swap simulation didn't watch the vault's stock accounts; credits with no new dividend for a week were never sent; same-slot trades of a fee change took the new split. | fixed | `chain.ts` refuses any drop in the stock accounts; `deliver.ts` sends week-old credits below the thresholds when they cover their delivery; `slot <= FEE_SPLIT_BEFORE` counts as before; `0:0` is refused and `PUSH_BATCH_SIZE` is at most 9. |
+| T-13 | High | `go-live.sh update` stopped silently half way (after switching `current`) when api.env had no launch-fee keys: `env_get` failed under `set -e`. | fixed | `env_get` never fails (`{ grep … \|\| true; }`); `redact` keeps keys out of its output. |
+| T-14 | High | `go-live.sh update` could skip a migration for good: it compared migration folders, not the database, and switched `current` before migrating. | fixed | Backup and `migrate "$REL"` run before `point_current`; `pending_migrations` reads `_prisma_migrations`; `self_update` runs right after the switch. |
+| T-15 | High | `prepare` and `switch` weren't safe to re-run on the live site (no backup, restarts, launches paused for everyone). | fixed | Both refuse once `$LIVE_MARK` exists. |
+| T-16 | Medium | The smoke test promoted an API whose database or Redis was down. | fixed | `jq -e '.ok and .mode == "live"'`. |
+| T-17 | Medium | `restart_worker` restarted mid payout run after 5 minutes. | fixed | Waits up to 20 minutes for the payout lock. |
+| T-18 | Medium | `payouts check` usually printed nothing (grep pipelines under `set -e`). | fixed | `{ grep … \|\| true; }`. |
+| T-19 | Medium | A re-run of `fee-rate --send` after an interrupted first run skipped the reload, leaving the worker on the old split. | fixed | A re-run with the env already updated still reloads. The RPC URL goes to curl on stdin (`-K -`), not its command line. |
+| T-20 | Medium | Root ran node code from the release that the `divvy` build user can change. | partly fixed | `asapi` runs those helpers as divvy-api; the xStocks fetch runs as divvy-worker in an mktemp dir. `self_update` remains (see residual risks). |
+| T-21 | Low | Wallet keys were deleted when merging; two runs could interleave. | fixed | Old keys move to `/root/uspad-keys/retired`; a `flock` on `/run/uspad-go-live.lock` serialises runs. |
+| T-22 | Medium | The browser RPC relay forwarded calls without an Origin, any `getTokenAccountsByOwner` filter, and answers of any size. | fixed | `apps/api/src/live/routes/rpc.ts` needs the site's Origin, a `mint` filter and caps answers at 256 KB. `RPC_RELAY_URL` can point it at a second RPC key. Test: `live.test.ts`. |
+| T-23 | Medium | The indexer fetched one transaction at a time, and busy graduated pools kept the platform stream (fees and claims) waiting. | fixed | `follow()` fetches `INDEXER_FETCH_CONCURRENCY` ahead and applies in order; pools are worked a slice (200) at a time and the platform stream runs again between pools. Test: `pipeline.test.ts` "walks a stream oldest first…". |
+| T-24 | Low | The "RPC returns no transaction" counter was shared by all streams, so two stuck streams reset each other. | fixed | Per stream (`nullTx` map). |
+| T-25 | Medium | A failed Redis subscribe at start-up rejected unhandled (ending the API) and the live feed never resubscribed. | fixed | `subscribeLive` subscribes on every `ready` (`packages/server/src/redis.ts`). |
+| T-26 | Low | `/api/payouts` recomputed totals over every round and trade on each request. | fixed | Shared for 10 s (`public.ts`). |
+| T-27 | Low | A holder under the payout minimum ("small") broke the holders response's enum. | fixed | Shown as a holder, not excluded. |
+| T-28 | Low | The activity strip took 10 launches before sorting them. | fixed | Sorted first. |
+| T-29 | Medium | A `STORAGE_DIR` with a trailing slash refused every upload. | fixed | `resolve()` in `localStorage`. Test: `storage.test.ts`. |
+| T-30 | Low | The admin's "launches in progress" missed launches waiting for the creator's signature. | fixed | Counts `signing`. |
+| T-31 | Medium | A ticker link could miss lookalike tickers (D0GE for DOGE) or coins outside the first 100 search results, and open the wrong coin. | fixed | `/api/coins?ticker=` lists every coin whose ticker folds the same; the coin page uses it. |
+| T-32 | Medium | Trade estimates mixed a fresh coin price with the SOL price from the first page load, and the "less than shown" check used a fixed 1% fee. | fixed | `TradeBox.tsx` works in `coin.priceSol` and checks against the estimate it shows. |
+| T-33 | Medium | A trade sent but not confirmed showed no signature and the box was ready for a second trade at once. | fixed | The box shows a Solscan link, waits for the status and stays disabled until it settles or the user says they checked. |
+| T-34 | Medium | On devnet, wallets inferred mainnet from the relay URL (`/api/rpc`). | fixed | The relay URL carries `?cluster=devnet` on devnet (`Providers.tsx`). |
+| T-35 | Low | Graduated coins showed the curve's fee. | fixed | `lib/poolfees.ts`, shared with the How page. |
+| T-36 | Low | Board cards could break hydration when a coin crossed 10 or 20 minutes between render and hydration. | fixed | `Board` starts from the server's clock. |
+| T-37 | Low | Sparklines shared SVG ids when tickers repeat. | fixed | Ids by mint. |
+| T-38 | Low | The admin launch switch showed "paused" while loading or after an error. | fixed | No switch until the state is known. |
+| T-39 | Low | After a wallet switch, `/me` showed the previous wallet's data for a moment. | fixed | Keys include the wallet; no previous data while loading. |
+| T-40 | Low | A /payouts stock filter showed unfiltered receipts while loading. | fixed | It says it's loading, or that it failed. |
+| T-41 | Low | A ticker URL over 64 characters showed an error page; the coin page's payouts never refreshed; trade rows keyed by signature alone. | fixed | Not-found instead; 30 s refresh; keyed by signature and position. |
+| T-42 | Low | A zero price showed "InfinityB"; the report dialog ignored Escape. | fixed | No estimate without a price; Escape closes the dialog and focus moves in and back. |
+
+Residual risks:
+- `go-live.sh update` installs the release's own copy of the script over `/root/go-live.sh` (`self_update`). Root therefore trusts whatever the divvy user built. That is the same trust root already gives the release it runs, but it's worth knowing.
+- The relay's Origin check stops browsers on other sites, not scripts that set the header. The rate limit (300 a minute per IP) and a separate `RPC_RELAY_URL` key are what bound the cost.
 
 ## Needs on-chain verification
 

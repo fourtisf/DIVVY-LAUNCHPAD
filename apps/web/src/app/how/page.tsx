@@ -2,6 +2,7 @@ import Link from "next/link";
 import { bpsLabel, usd, type Config } from "@divvy/shared";
 import { sharedApi } from "@/lib/server-api";
 import { deliveryCopy } from "@/lib/copy";
+import { POOL_CREATOR_FEE_BPS, POOL_CREATOR_RAYDIUM_SHARE, POOL_FEE_BPS, POOL_RAYDIUM_SHARE, poolFees } from "@/lib/poolfees";
 
 const pctLabel = (bps: number) => `${+(bps / 100).toFixed(2)}%`;
 const tokens = (v: number) => (v >= 1e9 ? `${+(v / 1e9).toFixed(2)}B` : `${+(v / 1e6).toFixed(1)}M`);
@@ -9,35 +10,16 @@ const usdShort = (v: number) => (v >= 1e6 ? `$${+(v / 1e6).toFixed(1)}M` : v >= 
 /** Dollars per $1,000 traded for a fee in basis points. */
 const per1k = (bps: number) => `$${(bps / 10).toFixed(2)}`;
 
-// The Raydium CPMM pool a coin graduates into (docs/ECONOMICS.md "Sources"): a 0.25% trade fee, of
-// which Raydium keeps 12% + 4% and the locked liquidity earns the rest, plus a 0.05% creator fee of
-// which Raydium keeps 5% (AmmConfig index 0 on mainnet, 2026-10-27: creator_fee_share_rate 50000;
-// docs/VERIFIED.md item 26).
-const POOL_FEE_BPS = 25;
-const POOL_RAYDIUM_SHARE = 0.16;
-const POOL_CREATOR_FEE_BPS = 5;
-const POOL_CREATOR_RAYDIUM_SHARE = 0.05;
-
 export default async function HowPage() {
   const c = await sharedApi<Config>("/api/config");
   const f = c.fees;
   const g = c.graduation;
   const raiseSol = +g.quoteFundRaising.ui.toFixed(1);
 
-  // After graduation the locked liquidity's fees and the pool's creator fee are split by
-  // fees.afterGraduation (50 : 15 : 10, the curve's split before uspad's share went up).
-  const lpBps = POOL_FEE_BPS * (1 - POOL_RAYDIUM_SHARE);
-  const potBps = lpBps + POOL_CREATOR_FEE_BPS * (1 - POOL_CREATOR_RAYDIUM_SHARE);
   const w = f.afterGraduation;
   const shared = w.holders + w.creator + w.divvy;
   const share = (v: number) => `${Math.round((v / shared) * 100)}%`;
-  const after = {
-    total: POOL_FEE_BPS + POOL_CREATOR_FEE_BPS,
-    holders: (potBps * w.holders) / shared,
-    creator: (potBps * w.creator) / shared,
-    divvy: (potBps * w.divvy) / shared,
-    raydium: POOL_FEE_BPS * POOL_RAYDIUM_SHARE + POOL_CREATOR_FEE_BPS * POOL_CREATOR_RAYDIUM_SHARE,
-  };
+  const after = poolFees(w);
 
   return (
     <>
