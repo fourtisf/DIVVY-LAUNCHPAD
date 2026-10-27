@@ -19,6 +19,7 @@ import { buildClaim, reconcileClaims } from "../src/claims";
 import type { OnSigned, PayoutChain } from "../src/payouts/chain";
 import { holdersForRound, runPayouts, timing } from "../src/payouts/engine";
 import { deliverCredits, settleTransfers } from "../src/payouts/deliver";
+import { refreshHolderCounts } from "../src/payouts/holdercount";
 
 const BASE_DB = process.env.DATABASE_URL;
 const REDIS = process.env.REDIS_URL;
@@ -573,5 +574,14 @@ describe.skipIf(!run)("dividend engine", () => {
     expect((await dave()).amount).toBe(0n);
     await settleTransfers(d, pending.sig, "expired");
     expect((await dave()).amount).toBe(5_000_000n);
+  });
+
+  it("counts each coin's holders from the chain for the board, without the curve, in dry-run too", async () => {
+    await prisma.coinStats.updateMany({ data: { holders: 0 } });
+    const later = new Date(HOUR.getTime() + 30 * 86_400_000);
+    expect(await refreshHolderCounts(deps(loadParams({ PAYOUTS_DRY_RUN: "true" })), stubChain(0n), later)).toBeGreaterThanOrEqual(4);
+    const holders = Object.fromEntries((await prisma.coinStats.findMany({ include: { coin: true } })).map((s) => [s.coin.ticker, s.holders]));
+    // AAA: alice, bob and carol (small holders count too), not the curve vault. DDD has none.
+    expect(holders).toMatchObject({ AAA: 3, BBB: 1, CCC: 2, DDD: 0 });
   });
 });

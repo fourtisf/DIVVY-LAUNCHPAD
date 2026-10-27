@@ -19,6 +19,7 @@ import { pricesJob, reservedTickersJob, statusJob } from "./ops";
 import { liveChain } from "./payouts/chain";
 import { reconcileTransfers } from "./payouts/deliver";
 import { runPayouts, topOfHour } from "./payouts/engine";
+import { refreshHolderCounts } from "./payouts/holdercount";
 import { preSnapshotJob } from "./payouts/presnapshot";
 import { refreshMarketStats } from "./stats";
 
@@ -105,6 +106,7 @@ if (roles.has("payouts")) {
   // The random mid-hour holder snapshot (payouts/presnapshot.ts).
   every("* * * * *", "presnapshot", 30 * 60_000, () => preSnapshotJob(d, chain));
   every("* * * * *", "transfers-reconcile", 55_000, () => reconcileTransfers(d));
+  every("*/5 * * * *", "holder-counts", 4 * 60_000, () => refreshHolderCounts(d, chain));
 }
 
 if (roles.has("prices")) every("* * * * *", "prices", 55_000, () => pricesJob(d));
