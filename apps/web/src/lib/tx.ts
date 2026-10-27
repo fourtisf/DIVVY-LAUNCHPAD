@@ -26,7 +26,6 @@ export async function signAndSend(
   if (!wallet.publicKey) throw new Error("Connect a wallet first");
   const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
   checkTransaction(tx, wallet.publicKey, check.network, check.kind, check.coinMint ? new PublicKey(check.coinMint) : undefined);
-  const blockhash = tx.message.recentBlockhash;
   // An upper bound for the API's blockhash (it was fetched moments ago), so confirmation waits long enough.
   const { lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   let sig: string;
@@ -38,16 +37,19 @@ export async function signAndSend(
     sig = await wallet.sendTransaction(tx, connection, { maxRetries: 3 });
   }
   // From here on the transaction is out: never tell the user "nothing was spent".
+  // Confirmation by polling, not a websocket subscription: the browser's RPC is uspad's HTTP relay.
   try {
-    const r = await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-    if (r.value.err) throw new Error("The transaction failed on chain. Only the network fee was spent.");
-    return sig;
+    for (let i = 0; ; i++) {
+      const st = (await connection.getSignatureStatuses([sig])).value[0];
+      if (st?.err) throw new Error("The transaction failed on chain. Only the network fee was spent.");
+      if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") return sig;
+      if (i % 5 === 4 && (await connection.getBlockHeight("confirmed")) > lastValidBlockHeight) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
   } catch (e) {
     if (e instanceof Error && e.message.startsWith("The transaction failed on chain")) throw e;
-    const st = (await connection.getSignatureStatuses([sig]).catch(() => null))?.value[0];
-    if (st && !st.err && st.confirmationStatus !== "processed") return sig;
-    throw new SentUnconfirmed(sig);
   }
+  throw new SentUnconfirmed(sig);
 }
 
 export const explorerTx = (sig: string, network: "mainnet-beta" | "devnet") => `https://solscan.io/tx/${sig}${network === "devnet" ? "?cluster=devnet" : ""}`;

@@ -84,6 +84,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       toast(side === "buy" ? `Bought ${num(r.expectedOut.ui)} $${coin.ticker}` : `Sold for ${sol(r.expectedOut.ui)}`);
     } catch (e) {
       // Errors after sending come back with their own wording; this one is only for before.
+      console.error("trade", e);
       const m = errorText(e, "The trade didn't go through. Nothing was sent.");
       if (m) toast(m);
     } finally {

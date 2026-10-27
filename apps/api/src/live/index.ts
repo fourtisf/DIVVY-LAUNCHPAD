@@ -6,6 +6,7 @@ import { liveAuthRoutes } from "./routes/auth";
 import { liveCreateRoutes } from "./routes/create";
 import { liveWsRoutes } from "./routes/live";
 import { livePublicRoutes } from "./routes/public";
+import { liveRpcRoutes } from "./routes/rpc";
 import { liveTradeRoutes } from "./routes/trade";
 
 export async function registerLive(app: FastifyInstance, d: LiveDeps) {
@@ -18,6 +19,7 @@ export async function registerLive(app: FastifyInstance, d: LiveDeps) {
   await app.register(liveCreateRoutes, { d });
   await app.register(liveAuthRoutes, { d, kv });
   await app.register(liveTradeRoutes, { d });
+  await app.register(liveRpcRoutes, { d });
   await app.register(liveAdminRoutes, { d });
   await app.register(liveWsRoutes, { d });
 }

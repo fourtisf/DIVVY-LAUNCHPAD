@@ -38,9 +38,10 @@ ENV_DIR=/etc/divvy
 CUR=/srv/divvy/current
 ECO=$CUR/deploy/ecosystem.config.cjs
 LIVE_MARK=/root/uspad-live-since
-# The browser's RPC. Public and rate-limited; a second Helius key restricted to uspad.fun is better
-# (it ends up in the browser, so never the server's key). Changing it needs `update` and Nginx's CSP.
-BROWSER_RPC=https://api.mainnet-beta.solana.com
+# The browser's RPC: uspad's own relay to the server's RPC (apps/api/src/live/routes/rpc.ts). The public
+# mainnet RPC refuses websites' requests, and the Helius key must never reach a browser. A full URL
+# here (e.g. a second Helius key restricted to uspad.fun) works too. `update` applies it.
+BROWSER_RPC=/api/rpc
 # Starting caps (owner can change them in worker.env): launcher 1 SOL/h, swaps 5 SOL/h (2 per
 # stock), sends $1,000/h.
 LAUNCHER_CAP=1000000000
@@ -443,8 +444,8 @@ SHELL=/bin/bash
 EOF
 
   say "Nginx: situs live, launch dijeda"
-  local rpc_host=${BROWSER_RPC#https://}
-  rpc_host=${rpc_host%%/*}
+  local rpc_host=$DOMAIN
+  case $BROWSER_RPC in https://*) rpc_host=${BROWSER_RPC#https://}; rpc_host=${rpc_host%%/*} ;; esac
   install -d -m 755 /var/www/certbot
   sed -e "s/rpc\.divvy\.example/$rpc_host/g" -e "s/divvy\.example/$DOMAIN/g" "$CUR/deploy/nginx/divvy.conf" > /etc/nginx/sites-available/uspad-live.conf
   touch /etc/nginx/divvy-launches-paused
@@ -496,6 +497,8 @@ update() {
     return
   fi
   load_secrets
+  # Inlined into the web build (NEXT_PUBLIC_*), so set before building.
+  set_env $ENV_DIR/build.env NEXT_PUBLIC_SOLANA_RPC_URL "$BROWSER_RPC"
   build_release
   smoke "$REL"
   if ! diff -q <(ls -1 "$CUR/packages/db/prisma/migrations") <(ls -1 "$REL/packages/db/prisma/migrations") > /dev/null; then

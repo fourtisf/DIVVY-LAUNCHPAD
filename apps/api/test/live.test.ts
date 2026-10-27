@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import bs58 from "bs58";
 import sharp from "sharp";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { Keypair, type Connection } from "@solana/web3.js";
 import { Redis } from "ioredis";
@@ -201,6 +201,25 @@ describe.skipIf(!run)("live mode", () => {
     const chk = (await get("/api/check?ticker=M00NP1G")).json() as { ticker: { code: string; collidesWith: { mint: string | null } } };
     expect(chk.ticker.code).toBe("TICKER_TAKEN");
     expect(((await get("/api/check?x=%40moonpigfun")).json() as { x: { code: string } }).x.code).toBe("X_TAKEN");
+  });
+
+  it("relays the browser's RPC calls to the server's RPC, and only the methods the site uses", async () => {
+    const call = (method: string, params: unknown[] = []) => post("/api/rpc", { jsonrpc: "2.0", id: 1, method, params });
+    expect((await call("getProgramAccounts")).statusCode).toBe(403);
+    expect((await post("/api/rpc", [{ jsonrpc: "2.0", id: 1, method: "getBalance" }])).statusCode).toBe(400);
+    const seen: { url: string; body: { method: string } }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
+      seen.push({ url: String(url), body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: 5 } }));
+    });
+    try {
+      const r = await call("getBalance", [admin.address]);
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ result: { value: 5 } });
+      expect(seen).toEqual([{ url: "https://rpc.invalid", body: { jsonrpc: "2.0", id: 1, method: "getBalance", params: [admin.address] } }]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("lets admins pause launches and hide coins, with an audit trail", async () => {

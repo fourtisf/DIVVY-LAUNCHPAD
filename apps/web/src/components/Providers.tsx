@@ -19,7 +19,12 @@ import { ToastProvider } from "./Toasts";
  * (Backpack registers itself that way, as do current Phantom and Solflare builds).
  */
 export function Providers({ config, children }: { config: Config; children: ReactNode }) {
-  const endpoint = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(config.network === "devnet" ? "devnet" : "mainnet-beta");
+  // A path is uspad's own RPC relay (/api/rpc, apps/api/src/live/routes/rpc.ts); web3.js needs it absolute.
+  // On the server nothing is sent, so any origin will do there.
+  const rpc = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+  const endpoint = rpc?.startsWith("/")
+    ? `${typeof window === "undefined" ? "http://localhost" : window.location.origin}${rpc}`
+    : rpc || clusterApiUrl(config.network === "devnet" ? "devnet" : "mainnet-beta");
   const wallets = useMemo(() => [new PhantomWalletAdapter(), new SolflareWalletAdapter()], []);
   return (
     <ConfigProvider value={config}>

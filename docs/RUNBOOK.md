@@ -803,7 +803,7 @@ Look at the provider's status page.
 **Fix:**
 
 - **Server side.** Switch `SOLANA_RPC_URL` and `SOLANA_WS_URL` in `/etc/divvy/api.env` and `/etc/divvy/worker.env` to the backup provider. Keep that provider's details in the ops log beforehand. It must serve the same cluster: the API and the worker refuse to start otherwise ("Worker or API won't start"). Holder snapshots try Helius DAS first and fall back to `getProgramAccounts`, so a non-Helius backup works; set `HOLDERS_VIA_DAS=false` in `worker.env` to skip the failing DAS call. Then reload the API and restart the worker (Deploy step 4, minding the payout lock).
-- **Browser side.** `NEXT_PUBLIC_SOLANA_RPC_URL` is baked into the web build:
+- **Browser side.** With `NEXT_PUBLIC_SOLANA_RPC_URL=/api/rpc` (uspad.fun) the browser goes through the API's relay to `SOLANA_RPC_URL`, so the server-side switch covers it. Only for a full URL: it is baked into the web build:
   1. Add the new origin, as both `https://` and `wss://`, to `connect-src` in the Nginx CSP (keep `ws://localhost:*`), then run `sudo nginx -t && sudo systemctl reload nginx`.
   2. Change the value in `/etc/divvy/build.env`.
   3. Redeploy the same SHA (Deploy steps 1 to 5).
