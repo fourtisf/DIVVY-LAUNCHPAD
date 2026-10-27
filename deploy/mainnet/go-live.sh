@@ -150,7 +150,9 @@ prepare() {
     grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
     note "swap 2 GB dibuat"
   fi
-  apt-get update -q > /dev/null
+  # A broken third-party repository (expired key, say) fails `apt-get update` without stopping the
+  # Ubuntu lists from refreshing, so it's reported and the install goes on.
+  apt-get update -q > /tmp/uspad-apt.log 2>&1 || { note "apt-get update melaporkan masalah (bukan dari Ubuntu):"; grep -E '^(E|W):' /tmp/uspad-apt.log | sed 's/^/     /' | head -n 6; }
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q postgresql redis-server jq libnginx-mod-http-geoip2 > /dev/null
 
   say "User dan folder (satu user per aplikasi)"
