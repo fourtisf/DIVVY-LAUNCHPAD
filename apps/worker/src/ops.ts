@@ -25,6 +25,7 @@ export async function pricesJob(d: WorkerDeps): Promise<void> {
 /** Hot-wallet balances and indexer lag → Redis (admin overview) and alerts (HANDOFF §8). */
 export async function statusJob(d: WorkerDeps): Promise<void> {
   const wallets: WorkerStatus["wallets"] = [];
+  const seen = new Set<string>();
   for (const [role, get] of [["launcher", d.wallets.launcher], ["payout_vault", d.wallets.payoutVault], ["fee_claimer", d.wallets.feeClaimer]] as const) {
     let address: string;
     try {
@@ -32,6 +33,9 @@ export async function statusJob(d: WorkerDeps): Promise<void> {
     } catch {
       continue; // this process doesn't hold that key
     }
+    // uspad runs all three roles on one operations wallet (owner decision 2026-10-27): report it once.
+    if (seen.has(address)) continue;
+    seen.add(address);
     const lamports = await d.conn.getBalance(get().publicKey, "confirmed").catch(() => null);
     if (lamports === null) continue;
     const sol = lamports / 1e9;

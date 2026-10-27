@@ -16,6 +16,8 @@ I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-config --send
 
 The rest of this file is what the script does and why.
 
+**Two wallets** (owner decision 2026-10-27): the **platform admin** (signs the PlatformConfig and its updates, never read by the apps; 0.02 SOL once) and one **operations wallet** (`/etc/divvy/keys/fee-claimer.json`) that launches coins, claims and sells fees, buys the stocks and sends them. It is also the PlatformConfig's fee wallet and Fee Key wallet. Keep its balance small.
+
 **Gates.** A phase marked 💰 spends SOL: it starts only after the owner says so in chat, for that step (CLAUDE.md rule 3). Scripts that send need `--send` and `I_HAVE_OWNER_APPROVAL=yes`. Private keys are made on the server and never pasted anywhere (rule 4).
 
 Where the server is now: Ubuntu, root login, the password-free preview (`uspad-api`, `uspad-web`) running as `divvy` from `/srv/divvy/app` on ports 4000 and 3000, Nginx with a Let's Encrypt certificate for `uspad.fun`, and the firewall on 22, 80 and 443.

@@ -90,6 +90,29 @@ platform_pda() { # admin pubkey → PlatformConfig PDA, from the SDK (seed ["pla
     console.log(getPdaPlatformId(LAUNCHPAD_PROGRAM, new PublicKey(process.argv[1])).publicKey.toBase58());' "$1" 2>/dev/null)
 }
 
+balance_of() { # address → lamports on mainnet, or "?"
+  (cd "$CUR/packages/solana" && RPC_URL="$RPC" node -e '
+    const { Connection, PublicKey } = require("@solana/web3.js");
+    new Connection(process.env.RPC_URL, "confirmed").getBalance(new PublicKey(process.argv[1]))
+      .then((l) => console.log(l), () => console.log("?"));' "$1" 2>/dev/null) || echo "?"
+}
+
+# uspad runs the launcher, fee-claimer and payout-vault roles on one operations wallet (owner
+# decision 2026-10-27), kept in fee-claimer.json because it is also the PlatformConfig's fee and
+# Fee Key wallet. Earlier runs made separate launcher and payout-vault keys: point worker.env at the
+# operations wallet and delete those keys, but only if they hold nothing on chain.
+merge_wallets() {
+  local f addr bal
+  [ -f $ENV_DIR/worker.env ] && sed -i -E "s#^(LAUNCHER|PAYOUT_VAULT)_KEYPAIR_PATH=.*#\1_KEYPAIR_PATH=$KEYS/fee-claimer.json#" $ENV_DIR/worker.env
+  for f in $KEYS/launcher.json $KEYS/payout-vault.json; do
+    [ -f "$f" ] || continue
+    addr=$(pubkey "$f")
+    bal=$([ -L "$CUR" ] && balance_of "$addr" || echo "?")
+    if [ "$bal" = 0 ]; then rm -f "$f"; note "wallet lama $addr kosong, dihapus"
+    else note "PERHATIAN: wallet lama $addr berisi $bal lamports (atau tidak bisa dicek); $f disimpan"; fi
+  done
+}
+
 account_exists() { # address → "yes"/"no" on mainnet
   (cd "$CUR/packages/solana" && RPC_URL="$RPC" node -e '
     const { Connection, PublicKey } = require("@solana/web3.js");
@@ -197,11 +220,10 @@ prepare() {
   REDIS_URL="redis://default:$REDIS_PASS@127.0.0.1:6379/0"
   REDISCLI_AUTH="$REDIS_PASS" redis-cli -h 127.0.0.1 ping | grep -q PONG || die "Redis tidak menjawab"
 
-  say "Wallet: launcher, payout vault, fee claimer, dan platform admin"
-  gen_key $KEYS/launcher.json divvy-worker
-  gen_key $KEYS/payout-vault.json divvy-worker
+  say "Wallet: platform admin dan wallet operasional"
   gen_key $KEYS/fee-claimer.json divvy-worker
   gen_key "$ADMIN_KEY" root
+  merge_wallets
   FEE=$(pubkey $KEYS/fee-claimer.json)
   ADMIN=$(pubkey "$ADMIN_KEY")
 
@@ -272,8 +294,9 @@ EOF
 $shared
 JUP_API_KEY=$JUP_API_KEY
 JITO_TIP_LAMPORTS=100000
-LAUNCHER_KEYPAIR_PATH=$KEYS/launcher.json
-PAYOUT_VAULT_KEYPAIR_PATH=$KEYS/payout-vault.json
+# One operations wallet for all three roles (owner decision 2026-10-27).
+LAUNCHER_KEYPAIR_PATH=$KEYS/fee-claimer.json
+PAYOUT_VAULT_KEYPAIR_PATH=$KEYS/fee-claimer.json
 FEE_CLAIMER_KEYPAIR_PATH=$KEYS/fee-claimer.json
 $business
 WORKER_ROLES=launch,claims,indexer,payouts,prices,status,reserved
@@ -310,10 +333,8 @@ EOF
   cat <<EOF
 
    Alamat wallet (publik, aman dibagikan):
-     platform admin  $ADMIN
-     fee claimer     $FEE
-     launcher        $(pubkey $KEYS/launcher.json)
-     payout vault    $(pubkey $KEYS/payout-vault.json)
+     platform admin      $ADMIN   (0,02 SOL sekali, untuk PlatformConfig)
+     wallet operasional  $FEE   (membuat koin, mengambil fee, membeli dan mengirim saham)
    PlatformConfig yang akan dibuat: $PDA
 
    Langkah berikutnya:
@@ -485,7 +506,7 @@ status() {
     say "Wallet (saldo SOL di mainnet)"
     local args=()
     args+=("platform-admin=$(pubkey "$ADMIN_KEY")")
-    for r in fee-claimer launcher payout-vault; do args+=("$r=$(pubkey $KEYS/$r.json)"); done
+    args+=("operasional=$(pubkey $KEYS/fee-claimer.json)")
     (cd "$CUR/packages/solana" && RPC_URL="$RPC" node -e '
       const { Connection, PublicKey } = require("@solana/web3.js");
       const c = new Connection(process.env.RPC_URL, "confirmed");
