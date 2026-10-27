@@ -25,6 +25,8 @@
 #   I_HAVE_OWNER_APPROVAL=yes go-live.sh payouts live
 #                                 💰 real dividends: claims the fee vault, buys the stocks, sends them.
 #   go-live.sh payouts dry-run    back to computing without sending.
+#   go-live.sh token-ca <address> shows the uspad token's contract address in the hero instead of
+#                                 "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
 #   go-live.sh status             apps, health, wallet addresses and balances.
 #
@@ -687,6 +689,15 @@ payouts() {
 }
 
 # --------------------------------------------------------------------------------------------------
+token_ca() {
+  [[ ${1:-} =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || die "pakai: go-live.sh token-ca <alamat mint uspad token>"
+  [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
+  set_env $ENV_DIR/build.env NEXT_PUBLIC_TOKEN_CA "$1"
+  update
+  note "CA di situs: $1"
+}
+
+# --------------------------------------------------------------------------------------------------
 status() {
   load_secrets
   say "Aplikasi"
@@ -722,6 +733,7 @@ case "${1:-}" in
   open-launches) open_launches ;;
   launches) launches "${2:-}" "${3:-}" ;;
   payouts) payouts "${2:-}" ;;
+  token-ca) token_ca "${2:-}" ;;
   status) status ;;
-  *) sed -n '2,32p' "$0"; exit 1 ;;
+  *) sed -n '2,34p' "$0"; exit 1 ;;
 esac
