@@ -23,6 +23,8 @@
 
 set -Eeuo pipefail
 umask 077
+# Started from a directory this user can't read (root's home), find fails going back to it.
+cd /
 export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 ENV_FILE="${DIVVY_ENV_FILE:-/etc/divvy/backup.env}"

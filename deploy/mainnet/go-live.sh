@@ -114,7 +114,8 @@ run_backup() {
   # A log left owned by root (a backup started by hand as root) would stop every later backup.
   install -d -o divvy-backup -g adm -m 750 /var/log/divvy/backup
   [ -f "$log" ] && chown divvy-backup:adm "$log"
-  if sudo -u divvy-backup -H bash -c "/usr/local/bin/divvy-pg-backup >> $log 2>&1"; then return 0; fi
+  # From /, not root's home: divvy-backup can't enter /root, and find fails going back to it.
+  if (cd / && sudo -u divvy-backup -H bash -c "/usr/local/bin/divvy-pg-backup >> $log 2>&1"); then return 0; fi
   tail -n 5 "$log" | sed 's/^/   /'
   note "disk: $(df -h /var/backups/divvy | awk 'NR == 2 { print $4 " free of " $2 }')"
   return 1
