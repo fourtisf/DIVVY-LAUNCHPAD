@@ -568,8 +568,20 @@ update() {
   (cd /srv/divvy/releases && ls -1dt -- */ | tail -n +6 | while read -r d; do
     [ "$(readlink -f "$d")" = "$(readlink -f $CUR)" ] || rm -rf -- "/srv/divvy/releases/${d%/}"
   done)
+  self_update
   sleep 8
   status
+}
+
+# This script as the release has it, so new commands work right after `update`. A rename, never a write
+# in place: bash is still reading the running copy.
+self_update() {
+  local self new=$CUR/deploy/mainnet/go-live.sh
+  self=$(readlink -f "$0")
+  case "$self" in /srv/*) return 0 ;; esac
+  [ -f "$new" ] && ! cmp -s "$new" "$self" || return 0
+  install -m 700 "$new" "$self.new" && mv -f "$self.new" "$self"
+  note "$self diperbarui: perintah baru langsung bisa dipakai"
 }
 
 # Not in the middle of a payout run (RUNBOOK "Deploy").
