@@ -672,7 +672,7 @@ launch_fee() {
 # --------------------------------------------------------------------------------------------------
 # Dividends: dry-run computes every round without signing; live claims, swaps and sends (RUNBOOK
 # "Switching dry-run to live").
-dbq() { sudo -u postgres psql -X -d divvy "$@"; }
+dbq() { sudo -u postgres psql -X -P pager=off -d divvy "$@"; }
 payouts() {
   local log=/var/log/divvy/worker/worker.out.log
   case "${1:-}" in
