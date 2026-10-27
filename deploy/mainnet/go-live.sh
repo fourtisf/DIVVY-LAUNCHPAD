@@ -370,6 +370,13 @@ switch() {
   pda=$(env_get $ENV_DIR/api.env DIVVY_PLATFORM_CONFIG)
   [ "$(account_exists "$pda")" = yes ] || die "PlatformConfig $pda belum ada di mainnet. Buat dulu: go-live.sh platform-config"
 
+  # The release from `prepare` may be behind the branch: go live on the latest commit.
+  sudo -u divvy git -C /srv/divvy/repo.git fetch --prune -q origin
+  if [ "$(cat "$CUR/REVISION" 2>/dev/null)" != "$(sudo -u divvy git -C /srv/divvy/repo.git rev-parse "refs/heads/$BRANCH")" ]; then
+    build_release
+    point_current "$REL"
+    migrate
+  fi
   smoke "$(readlink -f $CUR)"
 
   say "Matikan situs demo"
@@ -422,13 +429,21 @@ EOF
   install -d -m 755 /var/www/certbot
   sed -e "s/rpc\.divvy\.example/$rpc_host/g" -e "s/divvy\.example/$DOMAIN/g" "$CUR/deploy/nginx/divvy.conf" > /etc/nginx/sites-available/uspad-live.conf
   touch /etc/nginx/divvy-launches-paused
+  # The preview's site is kept aside, so a rejected config puts it back instead of leaving Nginx
+  # unable to start.
+  local preview=/root/uspad-preview-nginx.conf
+  [ -e /etc/nginx/sites-enabled/uspad.conf ] && cp -L /etc/nginx/sites-enabled/uspad.conf "$preview"
   rm -f /etc/nginx/sites-enabled/uspad.conf /etc/nginx/sites-enabled/default
   ln -sf /etc/nginx/sites-available/uspad-live.conf /etc/nginx/sites-enabled/uspad-live.conf
   if ! nginx -t > /dev/null 2>&1; then
     if nginx -t 2>&1 | grep -q "Address family not supported"; then
       sed -i '/listen \[::\]/d' /etc/nginx/sites-available/uspad-live.conf
     fi
-    nginx -t || die "konfigurasi Nginx ditolak (lihat di atas)"
+    if ! nginx -t; then
+      rm -f /etc/nginx/sites-enabled/uspad-live.conf
+      [ -f "$preview" ] && cp "$preview" /etc/nginx/sites-enabled/uspad.conf
+      die "konfigurasi Nginx ditolak (lihat di atas); situs lama dipasang lagi"
+    fi
   fi
   if has_systemd; then systemctl reload nginx; else nginx -s reload; fi
 
