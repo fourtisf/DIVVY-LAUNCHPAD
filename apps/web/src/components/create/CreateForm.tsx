@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import useSWR from "swr";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import {
   avatarDataUri,
@@ -19,7 +19,6 @@ import { api, ApiRequestError, qs } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { useDebounced } from "@/lib/hooks";
 import { errorText, useSession } from "@/lib/session";
-import { confirmSignature, payLaunchFee, SentUnconfirmed, TxExpired } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { CoinCard } from "../CoinCard";
 import { Icon } from "../Icon";
@@ -47,43 +46,36 @@ type Check = { s: "idle" | "ok" | "fail"; m: string };
 const toCheck = (r: { status: Check["s"]; message: string } | undefined, idle: string): Check => (r ? { s: r.status, m: r.message } : { s: "idle", m: idle });
 
 /**
- * A launch fee this wallet sent that no launch has used yet, with its blockhash's last valid block
- * height. The next try settles it on chain first (landed: it pays for the launch; expired: it never
- * landed and nothing was paid), so a launch refused or interrupted after the payment never costs a
- * second fee. sessionStorage, so a reload keeps it.
+ * A launch fee this wallet paid on its own, before the fee moved into the coin's create (2026-10-27),
+ * that no launch used. The next launch hands it to the API, which credits it: that launch's create then
+ * carries no fee. Read only; nothing new is written here.
  */
-type Held = { sig: string; lvbh: number };
 const heldFee = {
-  get(w: string): Held | null {
+  get(w: string): string | null {
     try {
       const raw = w ? sessionStorage.getItem(`uspad:launch-fee:${w}`) : null;
       if (!raw) return null;
-      // Saved before the block height was kept: a bare signature, settled from history alone.
-      if (/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(raw)) return { sig: raw, lvbh: 0 };
+      if (/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(raw)) return raw;
       const v = JSON.parse(raw);
-      return v && typeof v.sig === "string" && typeof v.lvbh === "number" ? v : null;
+      return typeof v?.sig === "string" ? v.sig : null;
     } catch {
       return null;
     }
   },
-  set(w: string, h: Held | null) {
+  clear(w: string) {
     try {
-      if (h) sessionStorage.setItem(`uspad:launch-fee:${w}`, JSON.stringify(h));
-      else sessionStorage.removeItem(`uspad:launch-fee:${w}`);
+      sessionStorage.removeItem(`uspad:launch-fee:${w}`);
     } catch {
-      // Storage off: a payment the API already recorded is still credited to the wallet.
+      /* storage off */
     }
   },
 };
-const errCode = (e: unknown) => (e instanceof ApiRequestError ? e.body?.code : undefined);
 
 export function CreateForm() {
   const config = useConfig();
   const toast = useToast();
   const router = useRouter();
-  const walletCtx = useWallet();
-  const { publicKey } = walletCtx;
-  const { connection } = useConnection();
+  const { publicKey } = useWallet();
   const { setVisible } = useWalletModal();
   const { me, ensureSignedIn } = useSession();
   const [d, setD] = useState<Draft>(saved);
@@ -92,10 +84,10 @@ export function CreateForm() {
   const [launch, setLaunch] = useState<{ id: string; ticker: string; img: string; pays: string } | null>(null);
   // Why the last launch didn't happen, kept under the button: a toast alone is gone in 2.6 s.
   const [launchError, setLaunchError] = useState<string | null>(null);
-  // Creator-paid launches (Config.launchFee): the fee in SOL, and where its payment is: waiting for the
-  // wallet's approval, or sent and confirming on chain.
+  // The creator's wallet pays for the coin's create (owner decision 2026-10-27): uspad's fee inside it,
+  // and about what the create itself costs.
   const feeSol = config.launchFee.to ? config.launchFee.amount.ui : 0;
-  const [feeStep, setFeeStep] = useState<"approve" | "confirm" | null>(null);
+  const createSol = config.launchFee.createCost.ui;
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -153,12 +145,10 @@ export function CreateForm() {
           ? "Add a picture to continue."
           : cx.s === "fail"
             ? "Fix the X account to continue."
-            : feeStep === "approve"
-              ? `Approve the ${feeSol} SOL launch fee in your wallet…`
-              : feeStep === "confirm"
-                ? "Confirming your launch fee on chain…"
-                : feeSol
-                ? `Ready. You'll approve the ${feeSol} SOL launch fee in your wallet.`
+            : feeSol
+              ? `Ready. Your wallet approves the ${feeSol} SOL fee and about ${createSol} SOL to create the coin.`
+              : createSol
+                ? `Ready. Your wallet approves about ${createSol} SOL to create the coin.`
                 : "Ready. Launching takes a few seconds.";
 
   const t = displayTicker(d.ticker) || "TICKER";
@@ -173,72 +163,20 @@ export function CreateForm() {
     const wallet = publicKey?.toBase58() ?? "";
     try {
       if (!config.demo && !(await ensureSignedIn())) return;
-      const body = { name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, x: d.x, telegram: d.tg, website: d.web };
-      // With a payment, the API reads it from the chain, and its RPC can be a few seconds behind the wallet's.
-      const post = async (feeSig?: string) => {
-        for (let i = 0; ; i++) {
-          try {
-            return await api<{ launchId: string }>("/api/launch", { method: "POST", body: JSON.stringify({ ...body, feeSig }) });
-          } catch (e) {
-            if (feeSig && i < 5 && errCode(e) === "FEE_NOT_FOUND") await new Promise((r) => setTimeout(r, 2000));
-            else throw e;
-          }
-        }
-      };
-      let res: { launchId: string } | null = null;
-      const held = heldFee.get(wallet);
-      if (held) {
-        try {
-          // Settle it on chain first: still confirming, it's waited for; expired, it never landed.
-          setFeeStep("confirm");
-          await confirmSignature(connection, held.sig, held.lvbh);
-          res = await post(held.sig);
-        } catch (e) {
-          if (!(e instanceof TxExpired || errCode(e) === "FEE_USED" || errCode(e) === "BAD_FEE")) throw e;
-          heldFee.set(wallet, null);
-        }
-      }
-      if (!res) {
-        try {
-          res = await post();
-        } catch (e) {
-          if (!(errCode(e) === "FEE_REQUIRED" && config.launchFee.to && wallet)) throw e;
-        }
-      }
-      if (!res) {
-        // A paid launch: the wallet sends the fee, then the same request carries the payment for the API
-        // to check on chain. A launch refused after that keeps the fee for the next one.
-        setFeeStep("approve");
-        let sig: string;
-        try {
-          sig = await payLaunchFee(walletCtx, connection, config.launchFee.to!, BigInt(config.launchFee.amount.raw), (s, lvbh) => {
-            heldFee.set(wallet, { sig: s, lvbh });
-            setFeeStep("confirm");
-          });
-        } catch (e) {
-          // Expired: it never landed, so there's nothing to keep.
-          if (e instanceof TxExpired) heldFee.set(wallet, null);
-          throw e;
-        }
-        res = await post(sig);
-      }
-      heldFee.set(wallet, null);
+      // The launch modal takes it from here: the wallet signs the create when the server hands it over.
+      const feeSig = heldFee.get(wallet) ?? undefined;
+      const res = await api<{ launchId: string }>("/api/launch", {
+        method: "POST",
+        body: JSON.stringify({ name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, x: d.x, telegram: d.tg, website: d.web, feeSig }),
+      });
+      if (feeSig) heldFee.clear(wallet);
       setLaunch({ id: res.launchId, ticker: t, img: d.upload.url, pays: d.pays });
     } catch (err) {
-      if (errCode(err) === "FEE_USED" || errCode(err) === "BAD_FEE") heldFee.set(wallet, null);
-      const pending = err instanceof SentUnconfirmed || errCode(err) === "FEE_NOT_FOUND";
-      const m = pending
-        ? "Your payment is still confirming. Press Launch coin again in a minute: it uses the same payment, so you won't pay twice."
-        : err instanceof TxExpired
-          ? "The payment didn't go through in time. Nothing was charged. Press Launch coin to try again."
-          : errorText(err, "The launch failed. Try again.");
+      const m = errorText(err, "The launch failed. Try again.");
       if (m) {
-        const kept = !pending && heldFee.get(wallet) ? " Your launch fee is kept for your next launch." : "";
-        toast(m + kept);
-        setLaunchError(m + kept);
+        toast(m);
+        setLaunchError(m);
       }
-    } finally {
-      setFeeStep(null);
     }
   };
 
@@ -406,11 +344,11 @@ export function CreateForm() {
             </ul>
           </div>
           <div className="panel">
-            <div className="sumline"><span>Cost to launch</span><b>{feeSol ? `${feeSol} SOL` : "Free"}</b></div>
+            <div className="sumline"><span>Cost to launch</span><b>{feeSol || createSol ? `${feeSol ? `${feeSol} + ` : ""}~${createSol} SOL` : "Free"}</b></div>
             <div className="sumline"><span>Your share of every trade</span><b>{bpsLabel(config.fees.creatorBps)}</b></div>
             <div className="sumline"><span>Holders&apos; share</span><b id="holdShare">{bpsLabel(config.fees.holdersBps)} in {d.pays}</b></div>
             <div className="sumline"><span>Dev buy</span><b>None, for anyone</b></div>
-            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || feeStep !== null || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
+            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
               Launch coin
             </button>
             <p className="note" id="launchHint" style={{ textAlign: "center", color: launchError ? "var(--red)" : undefined }}>

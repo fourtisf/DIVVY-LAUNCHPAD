@@ -20,6 +20,9 @@ enum CoinStatus {
 
 enum LaunchStep {
   checking
+  /// Waiting for the creator's wallet to sign the create (owner decision 2026-10-27: the creator pays
+  /// for and signs their coin's create, so explorers show them as its dev).
+  signing
   bundling
   landed
   indexed
@@ -305,6 +308,16 @@ model Launch {
   attempts             Int        @default(0)
   /// Block height after which the sent create can no longer land (crash recovery).
   lastValidBlockHeight BigInt?
+  /// The create for the creator's wallet to sign (base64, no signatures). It names the mint, so the API
+  /// returns it to the launch's creator only. The mint's signature stays in worker memory.
+  unsignedTx           String?
+  /// The create as the creator's wallet returned it, signed (base64). The worker checks it is still this
+  /// create and that the creator's signature is good before it adds the mint's.
+  creatorSigned        String?
+  /// The creator turned the create down in their wallet.
+  signRefused          Boolean    @default(false)
+  /// uspad's launch fee inside the create (0 for admins or a launch paid by an earlier fee).
+  feeLamports          BigInt?
   signature            String?
   /// { code, message, collidesWith } when step = failed.
   error                Json?

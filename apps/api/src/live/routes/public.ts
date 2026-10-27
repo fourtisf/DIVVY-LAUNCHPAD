@@ -20,6 +20,7 @@ import { getLaunchSettings } from "@divvy/server";
 import { graduationFdvLamports, LAUNCHLAB_DEFAULT_CURVE, WSOL_MINT } from "@divvy/solana";
 import { sendError } from "../../errors";
 import type { LiveDeps } from "../deps";
+import { CREATE_COST_LAMPORTS } from "../launchfee";
 import { amount, boardRows, coinByMint, coinByTicker, HOUR, pendingHoldersLamports, toDetail, toReceipt, toRound, toSummary, topOfHour, type CoinRow } from "../data";
 
 /** Rounds that paid holders: live, delivered, on time or late (carried rounds paid nothing). */
@@ -89,7 +90,7 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
       demo: false,
       launchesOpen: settings.launchesOpen,
       launchesPausedReason: settings.reason,
-      launchFee: { amount: amount(d.env.LAUNCH_FEE_LAMPORTS, 9), to: d.env.LAUNCH_FEE_LAMPORTS > 0n ? d.env.LAUNCH_FEE_WALLET! : null },
+      launchFee: { amount: amount(d.env.LAUNCH_FEE_LAMPORTS, 9), to: d.env.LAUNCH_FEE_LAMPORTS > 0n ? d.env.LAUNCH_FEE_WALLET! : null, createCost: amount(CREATE_COST_LAMPORTS, 9) },
       fees: p.fees,
       graduation: {
         targetUsd: fdvSol * prices.solUsd,

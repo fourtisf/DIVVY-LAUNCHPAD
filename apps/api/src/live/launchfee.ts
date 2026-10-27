@@ -1,8 +1,9 @@
 /**
- * Creator-paid launches (owner decision 2026-10-27). Before a launch the creator's wallet sends
- * LAUNCH_FEE_LAMPORTS to LAUNCH_FEE_WALLET, the operations wallet that pays the create; the API reads
- * that transfer from the chain before it queues the launch. Each payment is a LaunchFee row, used by
- * one launch: a launch that fails gives it back as credit for the creator's next one (worker failLaunch).
+ * Creator-paid launches (owner decisions 2026-10-27). The creator's wallet signs and pays for its coin's
+ * create, with uspad's LAUNCH_FEE_LAMPORTS to LAUNCH_FEE_WALLET inside it (apps/worker/src/launch.ts):
+ * the fee lands with the coin or not at all. Before that move the fee was a transfer of its own, which
+ * the API read from the chain; each such payment is a LaunchFee row. One that no launch used is credit:
+ * the next launch's create then carries no fee (worker failLaunch gives a failed launch's back).
  */
 import type { VersionedTransactionResponse } from "@solana/web3.js";
 import { Prisma } from "@divvy/db";
@@ -11,6 +12,14 @@ import { sendError } from "../errors";
 import type { LiveDeps } from "./deps";
 
 type Reply = Parameters<typeof sendError>[0];
+
+/**
+ * About what a create costs its creator besides the fee: the rent of the pool, its vaults and the mint,
+ * the network fee and the Jito tip. uspad's creates on 2026-10-27 moved about 0.0086 SOL (Solscan,
+ * initialize_with_token_2022 by the operations wallet), so 0.009 is shown and 0.012 is required.
+ */
+export const CREATE_COST_LAMPORTS = 9_000_000n;
+export const CREATE_BALANCE_LAMPORTS = 12_000_000n;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 /**
  * A payment older than this can't pay for a launch: it was made for something else. A day, so a

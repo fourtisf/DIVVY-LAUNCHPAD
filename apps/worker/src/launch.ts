@@ -1,24 +1,32 @@
 /**
- * Launch pipeline (HANDOFF §3.1, §3.5). The API reserved the identity as a pending Coin; here we:
+ * Launch pipeline (HANDOFF §3.1, §3.5). The API reserved the coin as a pending Coin; here we:
  *   1. write the token metadata JSON,
  *   2. generate the mint keypair in memory (only the public key is stored, never returned by the API
  *      until the create lands),
- *   3. build initialize_with_token_2022 signed by the launcher and the mint, with the Jito tip inside,
- *   4. send it ONLY as a Jito bundle on mainnet (devnet has no block engine, so devnet uses the RPC),
- *   5. confirm, then mark the coin live.
- * A failed launch releases the ticker, picture and X account so the user can try again.
+ *   3. build initialize_with_token_2022 paid by the creator's wallet, with uspad's launch fee and the
+ *      Jito tip inside, and sign it with the mint,
+ *   4. hand it to the creator's wallet to sign (owner decision 2026-10-27: the creator, not uspad, signs
+ *      and pays, so explorers show them as the coin's dev). The wallet gets it without the mint's
+ *      signature, so it can't go out without this process,
+ *   5. send it ONLY as a Jito bundle on mainnet (devnet has no block engine, so devnet uses the RPC),
+ *   6. confirm, then mark the coin live.
+ * A failed launch frees its upload and X link so the user can try again; nothing is charged, since the
+ * fee is in the create.
  */
+import { createPublicKey, verify } from "node:crypto";
 import BN from "bn.js";
-import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey, TransactionMessage, VersionedTransaction, type Connection } from "@solana/web3.js";
 import { publishLive, getLaunchSettings } from "@divvy/server";
-import { KEYS } from "@divvy/shared";
 import { LAUNCHLAB_DEFAULT_CURVE } from "@divvy/solana";
 import { assertCanSend, createTransaction, decodePool, MainnetDisabledError, poolAddresses, poolPriceSol, signatureOf } from "@divvy/solana/live";
 import type { WorkerDeps } from "./deps";
 
-/** Rough lamports a create costs the launcher before the tip (account rent + fees), counted against the hourly cap. */
-export const CREATE_COST_ESTIMATE = 40_000_000n;
+/** Creates sent per launch (each needs the creator's signature). */
 const MAX_ATTEMPTS = 3;
+/** Rounds the creator may leave unapproved (each with a fresh blockhash) before the launch is given up. */
+const MAX_SIGN_ROUNDS = 3;
+/** How long one round waits for the creator's signature, and how often it looks (tests shorten them). */
+export const signing = { waitMs: 60_000, pollMs: 500 };
 
 class LaunchError extends Error {
   constructor(
@@ -46,17 +54,6 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
     if (!settings.launchesOpen && !d.params.adminWallets.has(coin.creatorWallet)) throw new LaunchError("LAUNCHES_PAUSED", settings.reason ?? "Launches are paused for now");
     assertCanSend(d.sol, "launch.create");
 
-    // Hourly spend cap for the launcher hot wallet (HANDOFF §9).
-    const reserve = CREATE_COST_ESTIMATE + BigInt(d.sol.jitoTipLamports);
-    const spendKey = KEYS.launcherSpend(hourKey());
-    const spent = BigInt(await d.redis.incrby(spendKey, Number(reserve)));
-    await d.redis.expire(spendKey, 7200);
-    if (spent > d.params.launcherHourlyCapLamports) {
-      await d.redis.decrby(spendKey, Number(reserve));
-      await d.alerts.send("launcher-cap", "warn", "Launcher hourly spend cap reached; launches are being refused");
-      throw new LaunchError("LAUNCHES_BUSY", "Launches are busy right now. Try again in a few minutes.");
-    }
-
     // 1. Token metadata (Metaplex-style JSON, as pump-style launchpads use).
     const links = (coin.links ?? {}) as { x?: string; telegram?: string; website?: string };
     const meta = {
@@ -73,16 +70,20 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
 
     // 2. Mint keypair: memory only. Only the public key is written down.
     const mint = Keypair.generate();
-    const launcher = d.wallets.launcher();
+    const creator = new PublicKey(coin.creatorWallet);
     const { poolId } = poolAddresses(d.programs.launchLab, mint.publicKey);
+    // uspad's fee rides inside the create: none for admins, nor when an earlier payment covers this launch.
+    const credited = await d.prisma.launchFee.findUnique({ where: { launchId } });
+    const feeLamports = d.env.LAUNCH_FEE_LAMPORTS > 0n && !d.params.adminWallets.has(coin.creatorWallet) && !credited ? d.env.LAUNCH_FEE_LAMPORTS : 0n;
     await d.prisma.coin.update({ where: { id: coin.id }, data: { metadataUri, mint: mint.publicKey.toBase58(), poolState: poolId.toBase58() } });
-    await d.prisma.launch.update({ where: { id: launchId }, data: { mintPubkey: mint.publicKey.toBase58() } });
+    await d.prisma.launch.update({ where: { id: launchId }, data: { mintPubkey: mint.publicKey.toBase58(), feeLamports } });
 
     const { platform } = await d.chain();
     let landedSig: string | null = null;
     let sentAny = false;
     let lastError = "The create didn't land";
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !landedSig; attempt++) {
+    let unapproved = 0;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !landedSig; ) {
       // A previous attempt may have landed late.
       if (await d.conn.getAccountInfo(mint.publicKey, "confirmed")) {
         landedSig = await createSignature(d.conn, mint.publicKey);
@@ -92,9 +93,8 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
       const useJito = d.sol.cluster === "mainnet-beta";
       const tx = createTransaction({
         programId: d.programs.launchLab,
-        payer: launcher.publicKey,
-        payerKeypair: launcher,
-        creator: new PublicKey(coin.creatorWallet),
+        payer: creator,
+        creator,
         globalConfig: d.sol.globalConfig,
         platformId: d.sol.platformConfig,
         platform,
@@ -109,19 +109,31 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
         recentBlockhash: blockhash,
         cuPriceMicroLamports: useJito ? undefined : d.env.CU_PRICE_MICRO_LAMPORTS,
         tip: useJito ? { account: await d.jito.randomTipAccount(), lamports: d.sol.jitoTipLamports } : undefined,
+        fee: feeLamports > 0n ? { to: new PublicKey(d.env.LAUNCH_FEE_WALLET!), lamports: feeLamports } : undefined,
       });
-      const signature = signatureOf(tx);
-      await d.txlog({ purpose: "launch.create", signer: "launcher", signature, coinId: coin.id });
+
+      // 4. The creator signs in their wallet.
+      const signed = await creatorSigned(d, launchId, tx, mint, lastValidBlockHeight);
+      if (signed === "refused") throw new LaunchError("LAUNCH_CANCELLED", "You turned the launch down in your wallet. Nothing was charged.");
+      if (!signed) {
+        if (await d.conn.getAccountInfo(mint.publicKey, "confirmed")) continue; // an earlier attempt landed
+        if (++unapproved >= MAX_SIGN_ROUNDS) throw new LaunchError("LAUNCH_NOT_APPROVED", "The launch wasn't approved in your wallet in time. Nothing was charged. Try again.");
+        continue; // asked again, with a fresh blockhash
+      }
+      const create = signed;
+      const signature = signatureOf(create);
+      await d.txlog({ purpose: "launch.create", signer: "creator", signature, coinId: coin.id });
       await d.prisma.launch.update({
         where: { id: launchId },
-        data: { step: "bundling", signature, lastValidBlockHeight: BigInt(lastValidBlockHeight), attempts: { increment: 1 } },
+        data: { step: "bundling", signature, lastValidBlockHeight: BigInt(lastValidBlockHeight), attempts: { increment: 1 }, unsignedTx: null, creatorSigned: null },
       });
+      attempt++;
 
       // From here on the create may be on its way: only the chain can say it didn't land.
       sentAny = true;
       try {
         if (useJito) {
-          const bundleId = await d.jito.sendBundle([Buffer.from(tx.serialize()).toString("base64")]);
+          const bundleId = await d.jito.sendBundle([Buffer.from(create.serialize()).toString("base64")]);
           await d.prisma.launch.update({ where: { id: launchId }, data: { bundleId } });
           await d.prisma.signedTx.update({ where: { signature }, data: { bundleId } });
           const st = await d.jito.waitForBundle(bundleId, 60_000);
@@ -129,7 +141,7 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
           if (st?.status === "Landed" && (await confirmed(d.conn, signature))) landedSig = signature;
           else lastError = `bundle ${st?.status ?? "timed out"}`;
         } else {
-          await d.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+          await d.conn.sendRawTransaction(create.serialize(), { skipPreflight: false, maxRetries: 3 });
           const r = await d.conn.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed").catch((e: Error) => ({ value: { err: e.message } }));
           if (!r.value.err) landedSig = signature;
           else lastError = JSON.stringify(r.value.err);
@@ -160,6 +172,88 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
     const l = await d.prisma.launch.findUnique({ where: { id: launchId } });
     if (l?.step === "checking") await failLaunch(d, launchId, "LAUNCH_FAILED", "The launch failed. Nothing was created. Try again.");
   }
+}
+
+const ED25519_SPKI = Buffer.from("302a300506032b6570032100", "hex");
+
+/** Whether `sig` is `signer`'s ed25519 signature over `message`. */
+export function signedBy(signer: PublicKey, message: Uint8Array, sig: Uint8Array): boolean {
+  try {
+    return verify(null, message, createPublicKey({ key: Buffer.concat([ED25519_SPKI, signer.toBuffer()]), format: "der", type: "spki" }), sig);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hands the create to the creator's wallet (GET /api/launch/:id returns it to them alone, without the
+ * mint's signature) and waits for it to come back signed. Returns the create to send, with the mint's
+ * signature added: the same message, or one the wallet changed only by adding or adjusting compute
+ * budget instructions (a priority fee), which the mint then signs. Null when no good signature came in
+ * time or the launch moved on (an earlier attempt landed); "refused" when they turned it down.
+ */
+async function creatorSigned(d: WorkerDeps, launchId: string, tx: VersionedTransaction, mint: Keypair, lastValidBlockHeight: number): Promise<VersionedTransaction | "refused" | null> {
+  const unsigned = Buffer.from(new VersionedTransaction(tx.message).serialize()).toString("base64");
+  await d.prisma.launch.update({
+    where: { id: launchId },
+    data: { step: "signing", unsignedTx: unsigned, creatorSigned: null, signRefused: false, lastValidBlockHeight: BigInt(lastValidBlockHeight) },
+  });
+  const creator = tx.message.staticAccountKeys[0]!;
+  const end = Date.now() + signing.waitMs;
+  while (Date.now() < end) {
+    const l = await d.prisma.launch.findUnique({ where: { id: launchId }, select: { step: true, creatorSigned: true, signRefused: true } });
+    if (!l || l.step !== "signing") return null;
+    if (l.signRefused) return "refused";
+    if (l.creatorSigned) {
+      const back = acceptSigned(l.creatorSigned, tx, creator, mint);
+      if (back) return back;
+      d.log("launch: the signed create isn't this create, or isn't signed by its creator", { launchId });
+      await d.prisma.launch.update({ where: { id: launchId }, data: { creatorSigned: null } });
+    }
+    await new Promise((r) => setTimeout(r, signing.pollMs));
+  }
+  return null;
+}
+
+/** The create, with the creator's good signature on it, ready for the mint's; null for anything else. */
+export function acceptSigned(b64: string, ours: VersionedTransaction, creator: PublicKey, mint: Keypair): VersionedTransaction | null {
+  let back: VersionedTransaction;
+  try {
+    back = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
+  } catch {
+    return null;
+  }
+  const i = back.message.staticAccountKeys.findIndex((k) => k.equals(creator));
+  const sig = i >= 0 && i < back.message.header.numRequiredSignatures ? back.signatures[i] : undefined;
+  if (!sig || !signedBy(creator, back.message.serialize(), sig)) return null;
+  if (Buffer.from(back.message.serialize()).equals(Buffer.from(ours.message.serialize()))) {
+    ours.addSignature(creator, sig);
+    return ours;
+  }
+  if (!sameCreate(back, ours)) return null;
+  back.sign([mint]);
+  return back;
+}
+
+/** Same payer, blockhash and instructions, compute budget instructions aside (a wallet's priority fee). */
+function sameCreate(a: VersionedTransaction, b: VersionedTransaction): boolean {
+  if (a.message.addressTableLookups.length || b.message.addressTableLookups.length) return false;
+  const [x, y] = [a, b].map((t) => TransactionMessage.decompile(t.message));
+  if (!x!.payerKey.equals(y!.payerKey) || x!.recentBlockhash !== y!.recentBlockhash) return false;
+  const core = (m: TransactionMessage) => m.instructions.filter((ix) => !ix.programId.equals(ComputeBudgetProgram.programId));
+  const [p, q] = [core(x!), core(y!)];
+  return (
+    p.length === q.length &&
+    p.every((ix, n) => {
+      const o = q[n]!;
+      return (
+        ix.programId.equals(o.programId) &&
+        Buffer.from(ix.data).equals(Buffer.from(o.data)) &&
+        ix.keys.length === o.keys.length &&
+        ix.keys.every((k, j) => k.pubkey.equals(o.keys[j]!.pubkey) && k.isSigner === o.keys[j]!.isSigner && k.isWritable === o.keys[j]!.isWritable)
+      );
+    })
+  );
 }
 
 /** The oldest signature touching the mint is its create (paged back to the beginning). */
@@ -203,7 +297,7 @@ export async function markLanded(d: WorkerDeps, launchId: string, signature: str
   const now = new Date();
   // Idempotent: the launch processor, the indexer and the reconciler may all get here (audit).
   const moved = await d.prisma.$transaction(async (tx) => {
-    const l = await tx.launch.updateMany({ where: { id: launchId, step: { in: ["checking", "bundling"] } }, data: { step: "landed", signature } });
+    const l = await tx.launch.updateMany({ where: { id: launchId, step: { in: ["checking", "signing", "bundling"] } }, data: { step: "landed", signature, unsignedTx: null } });
     if (l.count !== 1) return false;
     await tx.coin.updateMany({ where: { id: launch.coin!.id, status: "pending" }, data: { status: "live", createdSig: signature, launchedAt: now } });
     return true;
@@ -224,7 +318,7 @@ export async function failLaunch(d: WorkerDeps, launchId: string, code: string, 
   const launch = await d.prisma.launch.findUnique({ where: { id: launchId }, include: { coin: true } });
   if (!launch) return;
   await d.prisma.$transaction(async (tx) => {
-    const l = await tx.launch.updateMany({ where: { id: launchId, step: { in: ["checking", "bundling"] } }, data: { step: "failed", error: { code, message } } });
+    const l = await tx.launch.updateMany({ where: { id: launchId, step: { in: ["checking", "signing", "bundling"] } }, data: { step: "failed", error: { code, message }, unsignedTx: null } });
     if (l.count !== 1) return;
     // A paid launch's fee becomes the creator's credit for their next launch (apps/api/src/live/launchfee.ts).
     await tx.launchFee.updateMany({ where: { launchId }, data: { launchId: null } });
@@ -255,6 +349,14 @@ export async function reconcileLaunches(d: WorkerDeps, requeue: (launchId: strin
       if (mint && (await d.conn.getAccountInfo(new PublicKey(mint), "confirmed"))) await markLanded(d, l.id, await createSignature(d.conn, new PublicKey(mint)));
       else if (l.lastValidBlockHeight !== null && BigInt(height) > l.lastValidBlockHeight + 150n) await failLaunch(d, l.id, "LAUNCH_FAILED", "The launch didn't land on chain. Nothing was created. Try again.");
     }
+  }
+  // Waiting for a signature for 5 minutes means the worker that held the mint key stopped: an earlier
+  // create may still have landed (its blockhash expired long ago), otherwise nothing can go out any more.
+  const unsigned = await d.prisma.launch.findMany({ where: { step: "signing", updatedAt: { lt: new Date(Date.now() - 5 * 60_000) } }, include: { coin: true }, take: 50 });
+  for (const l of unsigned) {
+    const mint = l.coin?.mint ?? l.mintPubkey;
+    if (mint && (await d.conn.getAccountInfo(new PublicKey(mint), "confirmed"))) await markLanded(d, l.id, await createSignature(d.conn, new PublicKey(mint)));
+    else await failLaunch(d, l.id, "LAUNCH_FAILED", "The launch stopped before it was sent. Nothing was charged. Try again.");
   }
   const lost = await d.prisma.launch.findMany({ where: { step: "checking", createdAt: { lt: new Date(Date.now() - 5 * 60_000) } }, select: { id: true }, take: 50 });
   for (const l of lost) await requeue(l.id);

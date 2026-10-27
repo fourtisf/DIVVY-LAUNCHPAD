@@ -552,6 +552,11 @@ update() {
   fi
   say "Reload aplikasi"
   nginx_launch_limit
+  # The worker puts the launch fee in the creator's create since 2026-10-27: give it the API's value.
+  for k in LAUNCH_FEE_LAMPORTS LAUNCH_FEE_WALLET; do
+    v=$(env_get $ENV_DIR/api.env "$k")
+    [ -n "$v" ] && [ "$(env_get $ENV_DIR/worker.env "$k")" != "$v" ] && set_env $ENV_DIR/worker.env "$k" "$v"
+  done
   pm2as divvy-web reload "$ECO" --only divvy-web --update-env > /dev/null
   pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
   restart_worker
@@ -685,15 +690,18 @@ launch_fee() {
   lamports=$((10#$int * 1000000000 + 10#$frac))
   [ "$lamports" -le 1000000000 ] || die "lebih dari 1 SOL per launch: salah ketik? (contoh: 0.02)"
   wallet=$(pubkey $KEYS/fee-claimer.json)
-  set_env $ENV_DIR/api.env LAUNCH_FEE_LAMPORTS "$lamports"
-  set_env $ENV_DIR/api.env LAUNCH_FEE_WALLET "$wallet"
+  # The API asks for it and the worker puts it in the create the creator signs: both need it.
+  for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do
+    set_env "$f" LAUNCH_FEE_LAMPORTS "$lamports"
+    set_env "$f" LAUNCH_FEE_WALLET "$wallet"
+  done
   pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+  restart_worker
   sleep 3
   if [ "$lamports" -gt 0 ]; then
-    [ "$lamports" -ge 15000000 ] || note "Peringatan: satu create memakan sekitar 0,012 SOL dari wallet operasional; fee ini tidak menutupnya."
-    note "Biaya launch: $1 SOL per koin, dibayar wallet creator ke $wallet. Tanpa batas harian per wallet."
+    note "Biaya launch: $1 SOL per koin ke $wallet, di dalam transaksi create yang ditandatangani creator (plus ~0,009 SOL biaya buat koin). Tanpa batas harian per wallet."
   else
-    note "Launch gratis lagi (dibayar wallet operasional), dengan batas harian per wallet."
+    note "Tanpa fee uspad: creator hanya membayar biaya buat koin (~0,009 SOL), dengan batas harian per wallet."
   fi
   note "config: $(curl -fsS https://$DOMAIN/api/config 2>/dev/null | jq -c .launchFee 2>/dev/null || echo '?')"
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { VersionedTransaction } from "@solana/web3.js";
+import { useWallet } from "@solana/wallet-adapter-react";
 import {
   short,
   usd,
@@ -10,21 +12,24 @@ import {
 } from "@divvy/shared";
 import { api } from "@/lib/api";
 import { useAssets, useConfig } from "@/lib/config";
+import { checkCreate, UnsafeTransaction } from "@/lib/txcheck";
 import { CoinSpin3D } from "../Coin3D";
 import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 
 const STEPS = [
   "Checking ticker, name and X account",
+  "Approve the launch in your wallet",
   "Sending the create in a private bundle",
   "Live on chain",
   "On the board",
 ];
 const STEP_INDEX: Record<LaunchStep, number> = {
   checking: 0,
-  bundling: 1,
-  landed: 2,
-  indexed: 4,
+  signing: 1,
+  bundling: 2,
+  landed: 3,
+  indexed: 5,
   failed: -1,
 };
 
@@ -56,6 +61,29 @@ export function LaunchModal({
     status: LaunchStatus;
     mcapUsd: number | null;
   } | null>(null);
+  const wallet = useWallet();
+  // The create the wallet was last asked to sign: a new attempt brings a new one.
+  const asked = useRef<string | null>(null);
+
+  /**
+   * The creator signs their coin's create (owner decision 2026-10-27): checked here before the wallet
+   * opens, then sent back signed for the worker to add the mint's signature. Turning it down, or a
+   * create that fails the check, ends the launch with nothing charged.
+   */
+  const signCreate = async (b64: string) => {
+    try {
+      if (!wallet.publicKey || !wallet.signTransaction) throw new Error("This wallet can't sign the launch");
+      const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+      checkCreate(tx, wallet.publicKey, config.network, { to: config.launchFee.to, lamports: BigInt(config.launchFee.amount.raw) });
+      const signed = await wallet.signTransaction(tx);
+      let bin = "";
+      for (const b of signed.serialize()) bin += String.fromCharCode(b);
+      await api(`/api/launch/${launchId}/sign`, { method: "POST", body: JSON.stringify({ signedTx: btoa(bin) }) });
+    } catch (e) {
+      if (e instanceof UnsafeTransaction) toast(e.message);
+      await api(`/api/launch/${launchId}/sign`, { method: "POST", body: JSON.stringify({ refused: true }) }).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     let stop = false;
@@ -67,6 +95,10 @@ export function LaunchModal({
         const i = STEP_INDEX[s.step];
         if (i < 0) return onDone(s);
         setK(i);
+        if (s.step === "signing" && s.tx && s.tx !== asked.current) {
+          asked.current = s.tx;
+          void signCreate(s.tx);
+        }
         if (i >= STEPS.length) {
           // By mint: coins can share a ticker.
           const coin = s.mint ? await api<CoinDetail>(`/api/coins/${s.mint}`).catch(() => null) : null;
@@ -160,7 +192,7 @@ export function LaunchModal({
         ) : (
           <div className="in">
             <h2 id="modalTitle">Minting ${ticker}</h2>
-            <p>Keep this tab open. It takes a few seconds.</p>
+            <p>{k === 1 ? "Your wallet pays for the coin's create and signs it, so the coin is yours on chain. Keep this tab open." : "Keep this tab open. It takes a few seconds."}</p>
             <ul className="prog" id="prog">
               {STEPS.map((s, i) => (
                 <li key={s} className={i < k ? "done" : i === k ? "now" : ""}>

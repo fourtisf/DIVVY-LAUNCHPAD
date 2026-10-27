@@ -141,7 +141,10 @@ export function createInstruction(p: CreateParams): TransactionInstruction {
 
 export interface CreateTxParams extends CreateParams {
   mintKeypair: Keypair;
-  payerKeypair: Keypair;
+  /** Signs as the payer here. Without it only the mint signs: the payer (the creator's wallet) signs later. */
+  payerKeypair?: Keypair;
+  /** uspad's launch fee, from the payer, inside the create (it lands with the coin or not at all). */
+  fee?: { to: PublicKey; lamports: bigint };
   recentBlockhash: string;
   cuLimit?: number;
   cuPriceMicroLamports?: number;
@@ -151,14 +154,15 @@ export interface CreateTxParams extends CreateParams {
 
 export function createTransaction(p: CreateTxParams): VersionedTransaction {
   if (!p.mintKeypair.publicKey.equals(p.mint)) throw new Error("mint keypair mismatch");
-  if (!p.payerKeypair.publicKey.equals(p.payer)) throw new Error("payer keypair mismatch");
+  if (p.payerKeypair && !p.payerKeypair.publicKey.equals(p.payer)) throw new Error("payer keypair mismatch");
   const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: p.cuLimit ?? 400_000 })];
   if (p.cuPriceMicroLamports) ixs.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: p.cuPriceMicroLamports }));
   ixs.push(createInstruction(p));
+  if (p.fee && p.fee.lamports > 0n) ixs.push(SystemProgram.transfer({ fromPubkey: p.payer, toPubkey: p.fee.to, lamports: p.fee.lamports }));
   if (p.tip) ixs.push(SystemProgram.transfer({ fromPubkey: p.payer, toPubkey: p.tip.account, lamports: p.tip.lamports }));
   const msg = new TransactionMessage({ payerKey: p.payer, recentBlockhash: p.recentBlockhash, instructions: ixs }).compileToV0Message();
   const tx = new VersionedTransaction(msg);
-  tx.sign([p.payerKeypair, p.mintKeypair]);
+  tx.sign(p.payerKeypair ? [p.payerKeypair, p.mintKeypair] : [p.mintKeypair]);
   return tx;
 }
 

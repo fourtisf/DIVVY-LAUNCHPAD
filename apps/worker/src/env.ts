@@ -47,10 +47,21 @@ const EnvSchema = z.object({
   /** Largest swap per dividend asset per hour. Halves after a swap is refused for price impact, grows back after good ones. */
   SWAP_BATCH_MAX_LAMPORTS: z.coerce.number().int().positive().default(20_000_000_000),
   PUSH_HOURLY_CAP_USD: z.coerce.number().positive().default(25_000),
+  /**
+   * uspad's launch fee, paid by the creator inside their coin's create to LAUNCH_FEE_WALLET (owner
+   * decision 2026-10-27). The same values as the API's (go-live.sh launch-fee sets both).
+   */
+  LAUNCH_FEE_LAMPORTS: z.coerce.bigint().nonnegative().default(0n),
+  LAUNCH_FEE_WALLET: z
+    .string()
+    .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
+    .optional(),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;
 
 export function loadWorkerEnv(src: NodeJS.ProcessEnv = process.env): WorkerEnv {
-  return EnvSchema.parse(definedEnv(src));
+  const env = EnvSchema.parse(definedEnv(src));
+  if (env.LAUNCH_FEE_LAMPORTS > 0n && !env.LAUNCH_FEE_WALLET) throw new Error("LAUNCH_FEE_LAMPORTS needs LAUNCH_FEE_WALLET, the wallet the fee goes to");
+  return env;
 }

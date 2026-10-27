@@ -21,7 +21,7 @@ Divvy is a Solana memecoin launchpad built on Raydium LaunchLab. Every coin trad
 3. **No mainnet spend** (PlatformConfig creation, funding wallets, test launches) without the owner's explicit approval in chat.
 4. **Private keys** never go in the repo, the database, logs or client bundles. Hot wallets keep minimal balances with spend caps.
 5. **The server is the authority** for anti-vamp, rate limits, amounts and fees. Client-side checks are only UI feedback.
-6. **Mint addresses stay secret until the create lands.** Creates go only through Jito bundles.
+6. **Mint addresses stay secret until the create lands.** Creates go only through Jito bundles. One exception (owner decision 2026-10-27): the creator's wallet, which signs and pays for its coin's create, sees it a few seconds early; the mint's signature never leaves the worker.
 7. **The dividend engine is idempotent** (unique coin+hour) and has a dry-run mode. Run dry-run first.
 8. **Copy:** sentence case, plain verbs, no all-caps labels. Keep the prototype's wording unless the owner changes it. "Paid every hour" becomes "credited every hour" only if the owner picks the claim model (HANDOFF §3.4).
 

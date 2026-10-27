@@ -46,7 +46,7 @@ export default async function HowPage() {
           <span className="n">1</span>
           <div>
             <h3>You fill in the form</h3>
-            <p>Name, ticker, picture and the stock your holders will earn: NVDAx, SPYx, TSLAx and the rest. {c.launchFee.to ? `Launching costs ${c.launchFee.amount.ui} SOL, sent from your wallet when you launch; if the launch fails, it's kept for your next one.` : "Launching costs nothing."} The stock is locked once the coin is live.</p>
+            <p>Name, ticker, picture and the stock your holders will earn: NVDAx, SPYx, TSLAx and the rest. {c.launchFee.to ? `Launching costs the ${c.launchFee.amount.ui} SOL fee and about ${c.launchFee.createCost.ui} SOL to create the coin, both in the one transaction your wallet signs: a launch that doesn't land costs nothing.` : c.launchFee.createCost.ui ? `Launching costs about ${c.launchFee.createCost.ui} SOL to create the coin, in the transaction your wallet signs.` : "Launching costs nothing."} The stock is locked once the coin is live.</p>
           </div>
         </li>
         <li>
@@ -59,8 +59,8 @@ export default async function HowPage() {
         <li>
           <span className="n">3</span>
           <div>
-            <h3>The launcher creates it in a private bundle</h3>
-            <p>uspad&apos;s launcher wallet creates the coin on a Raydium LaunchLab bonding curve and pays the rent. The create goes out as a private bundle and the address isn&apos;t shown before it lands, so nobody can buy in the block it&apos;s created in. There&apos;s no dev buy for anyone.</p>
+            <h3>Your wallet creates it, in a private bundle</h3>
+            <p>Your wallet signs and pays for the create on a Raydium LaunchLab bonding curve, so on chain and on explorers the coin is yours. The create goes out as a private bundle and the address isn&apos;t shown to anyone else before it lands, so nobody can buy in the block it&apos;s created in. There&apos;s no dev buy for anyone.</p>
           </div>
         </li>
         <li>

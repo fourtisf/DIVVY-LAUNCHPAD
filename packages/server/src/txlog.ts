@@ -9,11 +9,16 @@ export interface SignedTxEntry {
   dryRun?: boolean;
 }
 
-/** Every signed transaction is recorded with its purpose before it is sent (CLAUDE.md conventions). */
+/**
+ * Every signed transaction is recorded with its purpose before it is sent (CLAUDE.md conventions). The
+ * same transaction sent again (rebuilt with an unchanged blockhash, so the same signature) is recorded once.
+ */
 export const prismaTxLogger =
   (prisma: PrismaClient) =>
   async (e: SignedTxEntry): Promise<void> => {
-    await prisma.signedTx.create({
-      data: { purpose: e.purpose, signer: e.signer, signature: e.signature, coinId: e.coinId ?? null, bundleId: e.bundleId ?? null, dryRun: e.dryRun ?? false },
+    await prisma.signedTx.upsert({
+      where: { signature: e.signature },
+      create: { purpose: e.purpose, signer: e.signer, signature: e.signature, coinId: e.coinId ?? null, bundleId: e.bundleId ?? null, dryRun: e.dryRun ?? false },
+      update: {},
     });
   };

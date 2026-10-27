@@ -105,7 +105,7 @@ function toBase64(b: Uint8Array): string {
 /** A user-facing message for a failed sign-in or API call ("User rejected" stays quiet). */
 export function errorText(e: unknown, fallback: string): string | null {
   if (e instanceof ApiRequestError) return e.message;
-  if (e instanceof Error && (["UnsafeTransaction", "SentUnconfirmed", "TxExpired", "NotEnoughSol"].includes(e.name) || e.message.startsWith("The transaction failed on chain"))) return e.message;
+  if (e instanceof Error && (["UnsafeTransaction", "SentUnconfirmed", "TxExpired"].includes(e.name) || e.message.startsWith("The transaction failed on chain"))) return e.message;
   const m = e instanceof Error ? e.message : "";
   if (/reject|cancel|denied/i.test(m)) return null;
   return fallback;

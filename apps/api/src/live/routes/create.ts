@@ -14,6 +14,7 @@ import {
   imageOk,
   KEYS,
   LaunchRequestSchema,
+  LaunchSignSchema,
   normalizeXHandle,
   xProfileUrl,
   type CheckResponse,
@@ -26,8 +27,8 @@ import { sendCheckFailure, sendError } from "../../errors";
 import { processImage } from "../../media";
 import type { LiveDeps } from "../deps";
 import { invalidateBoard } from "../data";
-import { launchFee } from "../launchfee";
-import { refuseBlockedCountry, requireViewer } from "../viewer";
+import { CREATE_BALANCE_LAMPORTS, CREATE_COST_LAMPORTS, launchFee } from "../launchfee";
+import { getViewer, refuseBlockedCountry, requireViewer } from "../viewer";
 
 /**
  * Coins may share a ticker, a name, a picture or an X account (owner decision 2026-10-27): only the
@@ -174,9 +175,18 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
       const early = await launchChecks(d, b, v.userId);
       if (early.fail) return early.fail(reply);
       const { up, asset } = early;
-      // The fee is asked for only once the form passes, so nobody pays for a launch that would be refused.
-      const fee = paid ? await launchFee(d, v, b.feeSig) : null;
-      if (fee?.fail) return fee.fail(reply);
+      // An earlier fee paid on its own, or a failed launch's, covers this launch: its create then carries none.
+      const credit = paid ? await launchFee(d, v, b.feeSig) : null;
+      const fee = credit && !credit.fail ? credit : null;
+      // The creator's wallet pays for the create and the fee inside it: check it can before anything is
+      // reserved (an RPC hiccup doesn't block the launch; the wallet's own check comes before signing).
+      const feeDue = paid && !fee ? d.env.LAUNCH_FEE_LAMPORTS : 0n;
+      const need = CREATE_BALANCE_LAMPORTS + feeDue;
+      const balance = await d.conn.getBalance(new PublicKey(v.wallet), "confirmed").catch(() => null);
+      if (balance !== null && BigInt(balance) < need) {
+        const parts = feeDue > 0n ? `the ${Number(feeDue) / 1e9} SOL launch fee plus about ${Number(CREATE_COST_LAMPORTS) / 1e9} SOL to create the coin` : `about ${Number(CREATE_COST_LAMPORTS) / 1e9} SOL to create the coin`;
+        return sendError(reply, 402, "NOT_ENOUGH_SOL", `Your wallet needs at least ${Number(need) / 1e9} SOL to launch: ${parts}.`);
+      }
 
       let launchId: string;
       try {
@@ -245,6 +255,8 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const l = await d.prisma.launch.findUnique({ where: { id: req.params.id }, include: { coin: true } });
     if (!l || !l.coin) return sendError(reply, 404, "LAUNCH_NOT_FOUND", "No such launch");
     const out: LaunchStatus = { id: l.id, step: l.step, ticker: l.coin.ticker };
+    // The create to sign names the mint: its creator alone gets it before the coin lands.
+    if (l.step === "signing" && l.unsignedTx && (await getViewer(d, req))?.userId === l.userId) out.tx = l.unsignedTx;
     // The mint is revealed only once the create has landed (HANDOFF §3.5).
     if ((l.step === "landed" || l.step === "indexed") && l.coin.mint) {
       out.mint = l.coin.mint;
@@ -255,5 +267,21 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
       out.error = { code: e.code ?? "LAUNCH_FAILED", message: e.message ?? "The launch failed. Nothing was created.", collidesWith: null };
     }
     return out;
+  });
+
+  // The creator's wallet signed the create the worker handed over (or turned it down). The worker checks
+  // the signature against the create's message before it adds the mint's and sends it.
+  app.post<{ Params: { id: string } }>("/api/launch/:id/sign", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (req, reply) => {
+    const v = await requireViewer(d, req, reply);
+    if (!v) return;
+    const b = LaunchSignSchema.safeParse(req.body);
+    if (!b.success) return sendError(reply, 422, "BAD_SIGNATURE", "That isn't a signature");
+    if ("signedTx" in b.data && !/^[A-Za-z0-9+/]+={0,2}$/.test(b.data.signedTx)) return sendError(reply, 422, "BAD_SIGNATURE", "That isn't a signed transaction");
+    const l = await d.prisma.launch.findUnique({ where: { id: req.params.id } });
+    if (!l || l.userId !== v.userId) return sendError(reply, 404, "LAUNCH_NOT_FOUND", "No such launch");
+    const data = "signedTx" in b.data ? { creatorSigned: b.data.signedTx } : { signRefused: true };
+    const done = await d.prisma.launch.updateMany({ where: { id: l.id, step: "signing" }, data });
+    if (done.count !== 1) return sendError(reply, 409, "NOT_SIGNING", "This launch isn't waiting for a signature");
+    return { ok: true };
   });
 }

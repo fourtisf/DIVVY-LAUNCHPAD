@@ -1,6 +1,6 @@
 "use client";
 
-import { ComputeBudgetProgram, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type Connection } from "@solana/web3.js";
+import { PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
 import type { WalletContextState } from "@solana/wallet-adapter-react";
 import { checkTransaction, type TxKind } from "./txcheck";
 
@@ -18,11 +18,6 @@ export class TxExpired extends Error {
   constructor() {
     super("The transaction didn't land in time. Nothing was spent; try again.");
   }
-}
-
-/** The wallet can't cover what it's about to send, checked before the wallet opens. */
-export class NotEnoughSol extends Error {
-  override name = "NotEnoughSol";
 }
 
 const failedOnChain = () => new Error("The transaction failed on chain. Only the network fee was spent.");
@@ -90,54 +85,6 @@ export async function confirmSignature(connection: Connection, sig: string, last
     }
     await sleep(1000);
   }
-}
-
-/** Room left in the wallet after the fee: the network and priority fees, and an account that stays rent exempt. */
-const FEE_HEADROOM_LAMPORTS = 1_000_000n;
-const FEE_TX_CU = 2_000;
-/** About 0.00001 SOL of priority fee, so the payment gets into a busy block. */
-const FEE_TX_CU_PRICE = 5_000_000;
-
-/**
- * The creator's launch fee: a SOL transfer from the connected wallet to uspad's launch wallet
- * (Config.launchFee), built here so there's nothing to check. The balance is checked before the wallet
- * opens. The signed transaction is sent from here and again every few seconds until it lands (wallets
- * that can only sign-and-send send it once). `onSent` gets the signature and its last valid block
- * height as soon as it's out, so a payment survives a reload. Returns once it's confirmed; the API then
- * verifies it on chain before it queues the launch.
- */
-export async function payLaunchFee(
-  wallet: WalletContextState,
-  connection: Connection,
-  to: string,
-  lamports: bigint,
-  onSent: (sig: string, lastValidBlockHeight: number) => void,
-): Promise<string> {
-  if (!wallet.publicKey || (!wallet.signTransaction && !wallet.sendTransaction)) throw new Error("Connect a wallet first");
-  const need = lamports + FEE_HEADROOM_LAMPORTS;
-  if (BigInt(await connection.getBalance(wallet.publicKey, "confirmed")) < need)
-    throw new NotEnoughSol(`Your wallet needs at least ${Number(need) / 1e9} SOL to launch: the ${Number(lamports) / 1e9} SOL fee plus a little for the network.`);
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-  const message = new TransactionMessage({
-    payerKey: wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [
-      ComputeBudgetProgram.setComputeUnitLimit({ units: FEE_TX_CU }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: FEE_TX_CU_PRICE }),
-      SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: new PublicKey(to), lamports }),
-    ],
-  }).compileToV0Message();
-  const tx = new VersionedTransaction(message);
-  if (wallet.signTransaction) {
-    const raw = (await wallet.signTransaction(tx)).serialize();
-    // The first send runs the preflight, so a refusal (a balance that changed) shows up here.
-    const sig = await connection.sendRawTransaction(raw, { maxRetries: 0 });
-    onSent(sig, lastValidBlockHeight);
-    return confirmSignature(connection, sig, lastValidBlockHeight, () => connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }));
-  }
-  const sig = await wallet.sendTransaction(tx, connection, { maxRetries: 3 });
-  onSent(sig, lastValidBlockHeight);
-  return confirmSignature(connection, sig, lastValidBlockHeight);
 }
 
 export const explorerTx = (sig: string, network: "mainnet-beta" | "devnet") => `https://solscan.io/tx/${sig}${network === "devnet" ? "?cluster=devnet" : ""}`;

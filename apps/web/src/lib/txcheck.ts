@@ -73,3 +73,56 @@ export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, ne
     }
   }
 }
+
+/** initialize_with_token_2022's discriminator, the create's own (Anchor sighash; packages/solana createInstruction). */
+const INITIALIZE_WITH_TOKEN_2022 = Buffer.from("25be7ede2c9aab11", "hex");
+/** The Jito tip is a small transfer; anything bigger to an address the page can't check is refused. */
+const MAX_TIP_LAMPORTS = 1_000_000n;
+
+/**
+ * The coin's create, which the creator's wallet signs and pays for (owner decision 2026-10-27). It may
+ * spend the creator's SOL on the new coin's accounts (inside LaunchLab's create), uspad's launch fee to
+ * uspad's fee wallet, and one small Jito tip; nothing else. The payer and the coin's creator must both
+ * be this wallet, the only other signer is the new mint, and no account comes from a lookup table.
+ */
+export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network: "mainnet-beta" | "devnet", fee: { to: string | null; lamports: bigint }): void {
+  const msg = tx.message;
+  const keys = msg.staticAccountKeys;
+  if (msg.addressTableLookups.length) throw new UnsafeTransaction("this launch loads accounts from elsewhere");
+  if (!keys[0]?.equals(wallet)) throw new UnsafeTransaction("another account would pay for this launch");
+  if (msg.header.numRequiredSignatures !== 2) throw new UnsafeTransaction("this launch needs another signer");
+  const mint = keys[1]!;
+  const at = (ix: { accountKeyIndexes: number[] }, i: number) => {
+    const k = ix.accountKeyIndexes[i];
+    return k === undefined ? null : (keys[k] ?? null);
+  };
+  let creates = 0;
+  let fees = 0;
+  let tips = 0;
+  for (const ix of msg.compiledInstructions) {
+    const prog = keys[ix.programIdIndex]?.toBase58() ?? "";
+    const data = Buffer.from(ix.data);
+    if (prog === ComputeBudgetProgram.programId.toBase58()) continue;
+    if (prog === LAUNCHLAB[network]) {
+      // Accounts: 0 payer, 1 creator, 6 the new mint (packages/solana createInstruction).
+      if (!data.subarray(0, 8).equals(INITIALIZE_WITH_TOKEN_2022)) throw new UnsafeTransaction("a LaunchLab instruction that isn't a coin create");
+      if (!at(ix, 0)?.equals(wallet) || !at(ix, 1)?.equals(wallet)) throw new UnsafeTransaction("a coin create for someone else");
+      if (!at(ix, 6)?.equals(mint)) throw new UnsafeTransaction("a coin create for another mint");
+      creates++;
+      continue;
+    }
+    if (prog === SystemProgram.programId.toBase58()) {
+      if (data.length !== 12 || data.readUInt32LE(0) !== 2 || !at(ix, 0)?.equals(wallet)) throw new UnsafeTransaction("a SOL transfer that isn't the launch fee or the tip");
+      const to = at(ix, 1)?.toBase58();
+      const lamports = data.readBigUInt64LE(4);
+      if (fee.to && to === fee.to && fees === 0) {
+        if (lamports > fee.lamports) throw new UnsafeTransaction("a launch fee above uspad's");
+        fees++;
+      } else if (tips === 0 && lamports <= MAX_TIP_LAMPORTS) tips++;
+      else throw new UnsafeTransaction("a SOL transfer that isn't the launch fee or the tip");
+      continue;
+    }
+    throw new UnsafeTransaction(`unexpected program ${prog}`);
+  }
+  if (creates !== 1) throw new UnsafeTransaction("this isn't a coin create");
+}

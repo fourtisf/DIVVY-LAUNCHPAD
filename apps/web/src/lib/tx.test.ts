@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Keypair, type Connection, type VersionedTransaction } from "@solana/web3.js";
-import type { WalletContextState } from "@solana/wallet-adapter-react";
-import { confirmSignature, NotEnoughSol, payLaunchFee, SentUnconfirmed, TxExpired } from "./tx";
+import type { Connection } from "@solana/web3.js";
+import { confirmSignature, SentUnconfirmed, TxExpired } from "./tx";
 
 type Status = { confirmationStatus?: string; err?: unknown } | null;
 
@@ -71,36 +70,5 @@ describe("confirmSignature", () => {
     await settle(confirmSignature(conn, "SIG", 100, resend));
     expect(resend).toHaveBeenCalledTimes(2);
     expect(sent).toEqual([]);
-  });
-});
-
-describe("payLaunchFee", () => {
-  const owner = Keypair.generate().publicKey;
-  const to = Keypair.generate().publicKey.toBase58();
-  const wallet = (signed: VersionedTransaction[] = []) =>
-    ({
-      publicKey: owner,
-      signTransaction: vi.fn(async (tx: VersionedTransaction) => {
-        signed.push(tx);
-        return tx;
-      }),
-    }) as unknown as WalletContextState;
-
-  it("refuses before the wallet opens when the balance can't cover the fee and the network", async () => {
-    const { conn } = fakeConn({ statuses: [null], balance: 20_500_000 });
-    const w = wallet();
-    await expect(payLaunchFee(w, conn, to, 20_000_000n, () => {})).rejects.toBeInstanceOf(NotEnoughSol);
-    expect(w.signTransaction).not.toHaveBeenCalled();
-  });
-
-  it("pays with a priority fee, reports the signature at once, and sends again until it confirms", async () => {
-    const { conn, sent } = fakeConn({ statuses: [null, null, null, { confirmationStatus: "confirmed" }] });
-    const signed: VersionedTransaction[] = [];
-    const onSent = vi.fn();
-    await expect(settle(payLaunchFee(wallet(signed), conn, to, 20_000_000n, onSent))).resolves.toBe("SIG");
-    expect(onSent).toHaveBeenCalledWith("SIG", 100);
-    expect(sent).toEqual(["send", "resend"]);
-    // Compute unit limit and price, then the transfer.
-    expect(signed[0]!.message.compiledInstructions).toHaveLength(3);
   });
 });

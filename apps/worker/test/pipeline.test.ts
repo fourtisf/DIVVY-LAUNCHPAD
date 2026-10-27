@@ -3,10 +3,11 @@
  */
 import { execSync } from "node:child_process";
 import { join } from "node:path";
+import { createPrivateKey, sign } from "node:crypto";
 import bs58 from "bs58";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Redis } from "ioredis";
-import { Keypair, MessageV0, VersionedTransaction, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, MessageV0, SystemProgram, TransactionMessage, VersionedTransaction, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
 import { PrismaClient } from "@divvy/db";
 import { foldName, foldTicker, loadParams } from "@divvy/shared";
 import { prismaTxLogger, setLaunchSettings, type PriceCache } from "@divvy/server";
@@ -14,7 +15,7 @@ import { EVENT_IX_TAG_LE, POOL_CREATE_EVENT_DISC, programs, TRADE_EVENT_DISC, ty
 import type { WorkerDeps } from "../src/deps";
 import { loadWorkerEnv } from "../src/env";
 import { Indexer } from "../src/indexer";
-import { failLaunch, processLaunch } from "../src/launch";
+import { failLaunch, processLaunch, reconcileLaunches, signing } from "../src/launch";
 
 const BASE_DB = process.env.DATABASE_URL;
 const REDIS = process.env.REDIS_URL;
@@ -75,6 +76,47 @@ function deps(sol: Partial<SolanaEnv>): WorkerDeps {
 const launcher = Keypair.generate();
 let assetId = "";
 let userId = "";
+const ED25519_PKCS8 = Buffer.from("302e020100300506032b657004220420", "hex");
+/** The creator's wallet, which signs the create in the browser. */
+let creatorKp = Keypair.generate();
+
+/**
+ * The browser's side of a launch: whenever the worker asks for the creator's signature, the wallet signs
+ * the create (or turns it down, or another key signs it) and the page posts the signature. Returns a
+ * stop function.
+ */
+function wallet(launchId: string, act: "sign" | "refuse" | "wrong-key" | "priority-fee" | "other-tx" = "sign") {
+  let stop = false;
+  const loop = (async () => {
+    while (!stop) {
+      const l = await prisma.launch.findUnique({ where: { id: launchId } });
+      if (l?.step === "signing" && l.unsignedTx && !l.creatorSigned && !l.signRefused) {
+        let tx = VersionedTransaction.deserialize(Buffer.from(l.unsignedTx, "base64"));
+        // What the wallet gets carries no signature at all: the mint's stays in the worker.
+        expect(tx.signatures.every((sig) => sig.every((b) => b === 0))).toBe(true);
+        if (act === "refuse") await prisma.launch.update({ where: { id: launchId }, data: { signRefused: true } });
+        else {
+          if (act === "priority-fee" || act === "other-tx") {
+            // A wallet that adds its own priority fee (or, for "other-tx", slips in a transfer).
+            const m = TransactionMessage.decompile(tx.message);
+            m.instructions.unshift(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }));
+            if (act === "other-tx") m.instructions.push(SystemProgram.transfer({ fromPubkey: creatorKp.publicKey, toPubkey: Keypair.generate().publicKey, lamports: 1 }));
+            tx = new VersionedTransaction(m.compileToV0Message());
+          }
+          const kp = act === "wrong-key" ? Keypair.generate() : creatorKp;
+          const key = createPrivateKey({ key: Buffer.concat([ED25519_PKCS8, Buffer.from(kp.secretKey.subarray(0, 32))]), format: "der", type: "pkcs8" });
+          tx.signatures[0] = sign(null, tx.message.serialize(), key);
+          await prisma.launch.update({ where: { id: launchId }, data: { creatorSigned: Buffer.from(tx.serialize()).toString("base64") } });
+        }
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  })();
+  return () => {
+    stop = true;
+    return loop;
+  };
+}
 
 async function pendingLaunch(ticker: string) {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
@@ -100,7 +142,10 @@ describe.skipIf(!run)("launch pipeline", () => {
     await redis.del(...(await redis.keys("divvy:launcher-spend:*")).concat("divvy:none"));
     const a = await prisma.dividendAsset.create({ data: { symbol: "NVDAx", name: "NVDAx", kind: "stock", mint: Keypair.generate().publicKey.toBase58(), decimals: 8, tokenProgram: "token_2022", mono: "NV", chipBg: "#000", chipFg: "#fff", source: "test", fetchedAt: new Date() } });
     assetId = a.id;
-    userId = (await prisma.user.create({ data: { wallet: Keypair.generate().publicKey.toBase58() } })).id;
+    creatorKp = Keypair.generate();
+    userId = (await prisma.user.create({ data: { wallet: creatorKp.publicKey.toBase58() } })).id;
+    signing.waitMs = 2000;
+    signing.pollMs = 10;
     rpcSends = 0;
     bundles = [];
   });
@@ -118,7 +163,9 @@ describe.skipIf(!run)("launch pipeline", () => {
       generated.push(k);
       return k;
     });
+    const done = wallet(launch.id);
     await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), launch.id);
+    await done();
     spy.mockRestore();
     const l = await prisma.launch.findUniqueOrThrow({ where: { id: launch.id }, include: { coin: true } });
     expect(l.step).toBe("indexed");
@@ -131,7 +178,9 @@ describe.skipIf(!run)("launch pipeline", () => {
     const keys = tx.message.staticAccountKeys.map((k) => k.toBase58());
     expect(keys).toContain(tipAccount.toBase58());
     expect(keys).toContain(l.mintPubkey);
-    // Signed by the launcher and the mint; the mint secret was never stored.
+    // Paid and signed by the creator's wallet (the coin's dev on explorers) and signed by the mint.
+    expect(keys[0]).toBe(creatorKp.publicKey.toBase58());
+    expect(keys).not.toContain(launcher.publicKey.toBase58());
     expect(tx.signatures.filter((s) => s.some((b) => b !== 0))).toHaveLength(2);
     // The mint's secret key appears nowhere in the database.
     const mintKp = generated.find((k) => k.publicKey.toBase58() === l.mintPubkey)!;
@@ -143,17 +192,102 @@ describe.skipIf(!run)("launch pipeline", () => {
     expect(dump).not.toContain(bs58.encode(mintKp.secretKey));
     expect(dump).not.toContain(Buffer.from(mintKp.secretKey).toString("base64"));
     expect(dump).not.toContain(JSON.stringify(Array.from(mintKp.secretKey)));
-    expect(await prisma.signedTx.findMany({ select: { purpose: true, signer: true, bundleId: true } })).toEqual([{ purpose: "launch.create", signer: "launcher", bundleId: "bundle-1" }]);
+    expect(await prisma.signedTx.findMany({ select: { purpose: true, signer: true, bundleId: true } })).toEqual([{ purpose: "launch.create", signer: "creator", bundleId: "bundle-1" }]);
+    expect(l.unsignedTx).toBeNull();
+  });
+
+  it("puts uspad's launch fee inside the creator's create, and none for an admin", async () => {
+    const feeWallet = Keypair.generate().publicKey;
+    const paid = (params = loadParams({})) => {
+      const d = deps({ cluster: "mainnet-beta", mainnetEnabled: true });
+      return { ...d, params, env: { ...d.env, LAUNCH_FEE_LAMPORTS: 20_000_000n, LAUNCH_FEE_WALLET: feeWallet.toBase58() } };
+    };
+    const transfers = (b64: string) => {
+      const tx = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
+      const k = tx.message.staticAccountKeys;
+      return tx.message.compiledInstructions
+        .filter((ix) => k[ix.programIdIndex]!.equals(SystemProgram.programId))
+        .map((ix) => ({ from: k[ix.accountKeyIndexes[0]!]!.toBase58(), to: k[ix.accountKeyIndexes[1]!]!.toBase58(), lamports: Buffer.from(ix.data).readBigUInt64LE(4) }));
+    };
+    const { launch } = await pendingLaunch("FEE");
+    let done = wallet(launch.id);
+    await processLaunch(paid(), launch.id);
+    await done();
+    const me = creatorKp.publicKey.toBase58();
+    expect(transfers(bundles[0]![0]!)).toEqual([
+      { from: me, to: feeWallet.toBase58(), lamports: 20_000_000n },
+      { from: me, to: tipAccount.toBase58(), lamports: 100_000n },
+    ]);
+    expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).feeLamports).toBe(20_000_000n);
+
+    const { coin, launch: admins } = await pendingLaunch("FREE2");
+    done = wallet(admins.id);
+    await processLaunch(paid(loadParams({ ADMIN_WALLETS: coin.creatorWallet })), admins.id);
+    await done();
+    expect(transfers(bundles[1]![0]!)).toEqual([{ from: me, to: tipAccount.toBase58(), lamports: 100_000n }]);
+  });
+
+  it("a creator who turns the create down in their wallet is charged nothing", async () => {
+    const { coin, launch } = await pendingLaunch("NOPE");
+    const done = wallet(launch.id, "refuse");
+    await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), launch.id);
+    await done();
+    const l = await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } });
+    expect(l).toMatchObject({ step: "failed", error: { code: "LAUNCH_CANCELLED" }, unsignedTx: null });
+    expect(bundles).toHaveLength(0);
+    expect((await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } })).status).toBe("failed");
+  });
+
+  it("a signature from another key doesn't send the create; unapproved rounds end the launch", async () => {
+    signing.waitMs = 150;
+    const { launch } = await pendingLaunch("FAKE");
+    const done = wallet(launch.id, "wrong-key");
+    await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), launch.id);
+    await done();
+    expect(await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).toMatchObject({ step: "failed", error: { code: "LAUNCH_NOT_APPROVED" } });
+    expect(bundles).toHaveLength(0);
+    expect(await prisma.signedTx.count()).toBe(0);
+  });
+
+  it("takes a create the wallet gave a priority fee, and refuses one it changed otherwise", async () => {
+    const { launch } = await pendingLaunch("PRIO");
+    let done = wallet(launch.id, "priority-fee");
+    await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), launch.id);
+    await done();
+    expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("indexed");
+    const sent = VersionedTransaction.deserialize(Buffer.from(bundles[0]![0]!, "base64"));
+    // The wallet's message (its priority fee added to the limit, the create and the tip), signed by the creator and then by the mint.
+    expect(sent.message.compiledInstructions).toHaveLength(4);
+    expect(sent.signatures.filter((s) => s.some((b) => b !== 0))).toHaveLength(2);
+
+    signing.waitMs = 150;
+    const { launch: other } = await pendingLaunch("SNEAK");
+    done = wallet(other.id, "other-tx");
+    await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), other.id);
+    await done();
+    expect(await prisma.launch.findUniqueOrThrow({ where: { id: other.id } })).toMatchObject({ step: "failed", error: { code: "LAUNCH_NOT_APPROVED" } });
+    expect(bundles).toHaveLength(1);
+  });
+
+  it("the reconciler ends a launch whose worker stopped while waiting for the signature", async () => {
+    const { launch } = await pendingLaunch("GONE");
+    await prisma.launch.update({ where: { id: launch.id }, data: { step: "signing", unsignedTx: "x", updatedAt: new Date(Date.now() - 6 * 60_000) } });
+    await reconcileLaunches(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), async () => {});
+    expect(await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).toMatchObject({ step: "failed", unsignedTx: null });
   });
 
   it("a bundle that hasn't landed leaves the launch to the reconciler instead of failing it (audit)", async () => {
     const { coin, launch } = await pendingLaunch("SLOW");
     const slowJito = { ...jito, waitForBundle: async () => ({ bundle_id: "b", status: "Invalid", landed_slot: null }) } as unknown as WorkerDeps["jito"];
+    const done = wallet(launch.id);
     await processLaunch({ ...deps({ cluster: "mainnet-beta", mainnetEnabled: true }), jito: slowJito }, launch.id);
+    await done();
     expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("bundling");
     // The identity stays reserved: the create could still land until its blockhash expires.
     expect((await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } })).tickerNorm).toBe(foldTicker("SLOW"));
-  });
+    // Each new attempt was signed again by the creator.
+    expect(bundles).toHaveLength(3);
+  }, 30_000);
 
   it("while launches are paused, only an admin's launch goes out", async () => {
     await setLaunchSettings(prisma, { launchesOpen: false, reason: "Launches open soon." });
@@ -163,7 +297,9 @@ describe.skipIf(!run)("launch pipeline", () => {
     expect(bundles).toHaveLength(0);
 
     const { coin, launch: mine } = await pendingLaunch("TEST");
+    const done = wallet(mine.id);
     await processLaunch({ ...deps({ cluster: "mainnet-beta", mainnetEnabled: true }), params: loadParams({ ADMIN_WALLETS: coin.creatorWallet }) }, mine.id);
+    await done();
     expect((await prisma.launch.findUniqueOrThrow({ where: { id: mine.id } })).step).not.toBe("failed");
     expect(bundles).toHaveLength(1);
   });

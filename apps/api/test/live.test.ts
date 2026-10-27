@@ -260,58 +260,69 @@ describe.skipIf(!run)("live mode", () => {
     expect(((await upload(img, await login(keypair()))).json() as { check: { status: string } }).check.status).toBe("ok");
   });
 
-  it("charges the launch fee when one is set: one launch per payment, no cooldown or daily cap, credit after a failure", async () => {
+  it("paid launches: the fee rides in the creator's create, the balance is checked, the create goes to the creator alone to sign", async () => {
     const { buildApp } = await import("../src/app");
     const { createLiveDeps } = await import("../src/live/deps");
     const feeWallet = Keypair.generate().publicKey.toBase58();
     const txs = new Map<string, VersionedTransactionResponse>();
-    const conn = { ...fakeConn, getTransaction: async (sig: string) => txs.get(sig) ?? null } as unknown as Connection;
+    let balance = 2_000_000_000;
+    const conn = { ...fakeConn, getBalance: async () => balance, getTransaction: async (sig: string) => txs.get(sig) ?? null } as unknown as Connection;
     const paidEnv = { ...env, LAUNCH_FEE_LAMPORTS: 20_000_000n, LAUNCH_FEE_WALLET: feeWallet };
     const paid = await buildApp({ env: paidEnv, live: createLiveDeps(paidEnv, { prisma, conn }) });
     // The fee stands in for the free-launch guard: this wallet has no X and no history.
     walletAgeDays = 0;
     try {
-      const cfg = expectShape(ConfigSchema, (await paid.inject({ method: "GET", url: "/api/config" })).json()) as { launchFee: { amount: { ui: number }; to: string | null } };
-      expect(cfg.launchFee).toMatchObject({ amount: { ui: 0.02 }, to: feeWallet });
+      const cfg = expectShape(ConfigSchema, (await paid.inject({ method: "GET", url: "/api/config" })).json()) as { launchFee: { amount: { ui: number }; to: string | null; createCost: { ui: number } } };
+      expect(cfg.launchFee).toMatchObject({ amount: { ui: 0.02 }, to: feeWallet, createCost: { ui: 0.009 } });
 
       // `user` launched Moon Pig above, so the free launch's cooldown is still running.
       const u = await login(user);
       const img = await picture();
       const coin = async (name: string, ticker: string) => ({ name, ticker, dividendAsset: "NVDAx", imageId: ((await upload(img, u)).json() as { imageId: string }).imageId });
-      const launch = (body: object) => paid.inject({ method: "POST", url: "/api/launch", payload: body, headers: u });
-      const code = (r: { json: () => unknown }) => (r.json() as { code: string }).code;
-      const sig = (n: number) => bs58.encode(Buffer.alloc(64, n));
+      const launch = (body: object, headers = u) => paid.inject({ method: "POST", url: "/api/launch", payload: body, headers });
 
-      const fish = await coin("Gold Fish", "GFISH");
-      const ask = await launch(fish);
-      expect(ask.statusCode).toBe(402);
-      expect(code(ask)).toBe("FEE_REQUIRED");
-      expect(code(await launch({ ...fish, feeSig: sig(1) }))).toBe("FEE_NOT_FOUND");
-      txs.set(sig(2), transferTx(user.address, feeWallet, 10_000_000));
-      expect(code(await launch({ ...fish, feeSig: sig(2) }))).toBe("BAD_FEE");
-      txs.set(sig(3), transferTx(admin.address, feeWallet, 20_000_000));
-      expect(code(await launch({ ...fish, feeSig: sig(3) }))).toBe("BAD_FEE");
+      // The wallet must cover the fee and the create: 0.02 + 0.012 SOL.
+      balance = 31_000_000;
+      const short = await launch(await coin("Gold Fish", "GFISH"));
+      expect(short.statusCode).toBe(402);
+      expect(short.json()).toMatchObject({ code: "NOT_ENOUGH_SOL", message: "Your wallet needs at least 0.032 SOL to launch: the 0.02 SOL launch fee plus about 0.009 SOL to create the coin." });
+      balance = 2_000_000_000;
 
-      txs.set(sig(4), transferTx(user.address, feeWallet, 20_000_000));
-      const first = await launch({ ...fish, feeSig: sig(4) });
-      expect(first.statusCode).toBe(201);
-      const fee = await prisma.launchFee.findUniqueOrThrow({ where: { sig: sig(4) } });
-      expect(fee).toMatchObject({ lamports: 20_000_000n, launchId: (first.json() as { launchId: string }).launchId });
+      // No separate payment any more: the launch is queued straight away, past the cooldown and daily cap.
+      const ids: string[] = [];
+      for (const [name, ticker] of [["Gold Fish", "GFISH"], ["Rocket Cat", "RCAT"], ["Sky Whale", "SWHALE"]] as const) {
+        const r = await launch(await coin(name, ticker));
+        expect(r.statusCode).toBe(201);
+        ids.push((r.json() as { launchId: string }).launchId);
+      }
 
-      // One payment, one launch; the next payment launches again straight away, past the daily cap.
-      const cat = await coin("Rocket Cat", "RCAT");
-      expect(code(await launch({ ...cat, feeSig: sig(4) }))).toBe("FEE_USED");
-      txs.set(sig(5), transferTx(user.address, feeWallet, 20_000_000));
-      const second = await launch({ ...cat, feeSig: sig(5) });
-      expect(second.statusCode).toBe(201);
+      // A fee paid on its own before the move (or left by a failed launch) is credit: it covers the next launch.
+      const sig = bs58.encode(Buffer.alloc(64, 9));
+      txs.set(sig, transferTx(user.address, feeWallet, 20_000_000));
+      const credited = await launch({ ...(await coin("Deep Crab", "DCRAB")), feeSig: sig });
+      expect(credited.statusCode).toBe(201);
+      expect((await prisma.launchFee.findUniqueOrThrow({ where: { sig } })).launchId).toBe((credited.json() as { launchId: string }).launchId);
 
-      // A launch that fails gives its fee back (worker failLaunch); the next launch uses it without paying.
-      await prisma.launchFee.updateMany({ where: { sig: sig(5) }, data: { launchId: null } });
-      const whale = await launch(await coin("Sky Whale", "SWHALE"));
-      expect(whale.statusCode).toBe(201);
-      expect((await prisma.launchFee.findUniqueOrThrow({ where: { sig: sig(5) } })).launchId).toBe((whale.json() as { launchId: string }).launchId);
-      expect(await prisma.launch.count({ where: { userId: fee.userId } })).toBeGreaterThan(3);
-      expect(code(await launch(await coin("Deep Crab", "DCRAB")))).toBe("FEE_REQUIRED");
+      // The worker hands the create over: its creator gets it, nobody else does.
+      const [first] = ids;
+      await prisma.launch.update({ where: { id: first }, data: { step: "signing", unsignedTx: "AQID" } });
+      const status = (headers: Record<string, string> = {}) => paid.inject({ method: "GET", url: `/api/launch/${first}`, headers }).then((r) => expectShape(LaunchStatusSchema, r.json()) as { step: string; tx?: string });
+      expect(await status(u)).toMatchObject({ step: "signing", tx: "AQID" });
+      expect((await status()).tx).toBeUndefined();
+      const other = await login(keypair());
+      expect((await status(other)).tx).toBeUndefined();
+
+      // The creator's signature goes to the worker; nobody else can sign or cancel someone's launch.
+      const sign = (body: object, headers = u, id = first) => paid.inject({ method: "POST", url: `/api/launch/${id}/sign`, payload: body, headers });
+      const signedTx = Buffer.alloc(300, 7).toString("base64");
+      expect((await sign({ signedTx }, other)).statusCode).toBe(404);
+      expect((await sign({ signedTx: "not base64 at all! ".repeat(8) })).statusCode).toBe(422);
+      expect((await sign({ signedTx })).statusCode).toBe(200);
+      expect((await prisma.launch.findUniqueOrThrow({ where: { id: first } })).creatorSigned).toBe(signedTx);
+      expect((await sign({ refused: true }, u, ids[1])).statusCode).toBe(409);
+      await prisma.launch.update({ where: { id: ids[1] }, data: { step: "signing" } });
+      expect((await sign({ refused: true }, u, ids[1])).statusCode).toBe(200);
+      expect((await prisma.launch.findUniqueOrThrow({ where: { id: ids[1] } })).signRefused).toBe(true);
     } finally {
       walletAgeDays = 30;
       await paid.close();

@@ -9,7 +9,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { checkTransaction } from "./txcheck";
+import { checkCreate, checkTransaction, UnsafeTransaction } from "./txcheck";
 
 const JUPITER = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 const LAUNCHLAB = new PublicKey("LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj");
@@ -89,5 +89,52 @@ describe("checkTransaction", () => {
       });
     expect(() => checkTransaction(tx(vault, [transfer(ata(wallet, stock))]), wallet, "mainnet-beta", "claim")).not.toThrow();
     expect(() => checkTransaction(tx(vault, [transfer(ata(Keypair.generate().publicKey, stock))]), wallet, "mainnet-beta", "claim")).toThrow(/token instruction 12/);
+  });
+});
+
+describe("checkCreate", () => {
+  const me = Keypair.generate().publicKey;
+  const mint = Keypair.generate().publicKey;
+  const feeTo = Keypair.generate().publicKey;
+  const tip = Keypair.generate().publicKey;
+  const create = (payer = me, creator = me, m = mint, disc = "25be7ede2c9aab11") =>
+    new TransactionInstruction({
+      programId: LAUNCHLAB,
+      keys: [payer, creator, Keypair.generate().publicKey, Keypair.generate().publicKey, Keypair.generate().publicKey, Keypair.generate().publicKey, m].map((pubkey, i) => ({
+        pubkey,
+        isSigner: i === 0 || i === 6,
+        isWritable: i === 0 || i >= 5,
+      })),
+      data: Buffer.concat([Buffer.from(disc, "hex"), Buffer.alloc(40)]),
+    });
+  const build = (ixs: TransactionInstruction[], payer = me) =>
+    new VersionedTransaction(new TransactionMessage({ payerKey: payer, recentBlockhash: "11111111111111111111111111111111", instructions: ixs }).compileToV0Message());
+  const fee = { to: feeTo.toBase58(), lamports: 20_000_000n };
+  const ok = () => [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+    create(),
+    SystemProgram.transfer({ fromPubkey: me, toPubkey: feeTo, lamports: 20_000_000 }),
+    SystemProgram.transfer({ fromPubkey: me, toPubkey: tip, lamports: 100_000 }),
+  ];
+
+  it("passes the creator's own create with uspad's fee and a tip", () => {
+    expect(() => checkCreate(build(ok()), me, "mainnet-beta", fee)).not.toThrow();
+    // An admin's create carries no fee.
+    expect(() => checkCreate(build([create(), SystemProgram.transfer({ fromPubkey: me, toPubkey: tip, lamports: 100_000 })]), me, "mainnet-beta", fee)).not.toThrow();
+  });
+
+  it("refuses a create paid by, or made for, someone else", () => {
+    const other = Keypair.generate().publicKey;
+    expect(() => checkCreate(build([create(other, me)], other), me, "mainnet-beta", fee)).toThrow(UnsafeTransaction);
+    expect(() => checkCreate(build([create(me, other)]), me, "mainnet-beta", fee)).toThrow(/someone else/);
+  });
+
+  it("refuses more SOL than the fee and a small tip, and anything that isn't a create", () => {
+    const [cu, c, f, t] = ok();
+    expect(() => checkCreate(build([cu!, c!, SystemProgram.transfer({ fromPubkey: me, toPubkey: feeTo, lamports: 30_000_000 }), t!]), me, "mainnet-beta", fee)).toThrow(/above uspad's/);
+    expect(() => checkCreate(build([cu!, c!, f!, SystemProgram.transfer({ fromPubkey: me, toPubkey: tip, lamports: 50_000_000 })]), me, "mainnet-beta", fee)).toThrow(/isn't the launch fee or the tip/);
+    expect(() => checkCreate(build([...ok(), SystemProgram.transfer({ fromPubkey: me, toPubkey: tip, lamports: 1 })]), me, "mainnet-beta", fee)).toThrow(/isn't the launch fee or the tip/);
+    expect(() => checkCreate(build([cu!, create(me, me, mint, "faea0d7b9eb9d7d0"), f!, t!]), me, "mainnet-beta", fee)).toThrow(/isn't a coin create/);
+    expect(() => checkCreate(build([cu!, f!, t!]), me, "mainnet-beta", fee)).toThrow(/a coin create|another signer/);
   });
 });

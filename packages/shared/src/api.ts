@@ -57,8 +57,12 @@ export const ConfigSchema = z.object({
   demo: z.boolean(),
   launchesOpen: z.boolean(),
   launchesPausedReason: z.string().nullable(),
-  /** What a launch costs its creator, sent to `to` before the create; 0 and null when launching is free. */
-  launchFee: z.object({ amount: AmountSchema, to: base58.nullable() }),
+  /**
+   * What a launch costs its creator, who signs and pays for their coin's create (owner decision
+   * 2026-10-27): uspad's fee, sent to `to` inside the create (0 and null when there's none), and about
+   * what the create itself costs (account rent, the network fee and the Jito tip).
+   */
+  launchFee: z.object({ amount: AmountSchema, to: base58.nullable(), createCost: AmountSchema }),
   fees: z.object({
     tradeFeeBps: z.number().int(),
     protocolBps: z.number().int(),
@@ -309,12 +313,15 @@ export const LaunchRequestSchema = z.object({
   x: z.string().max(200).optional().default(""),
   telegram: z.string().max(100).optional().default(""),
   website: z.string().max(200).optional().default(""),
-  /** The creator's launch-fee transfer, when the API answered FEE_REQUIRED (Config.launchFee). */
+  /** A launch fee paid on its own earlier (before the fee moved into the create), used as credit. */
   feeSig: z.string().max(100).optional(),
 });
+
+/** POST /api/launch/:id/sign: the create as the creator's wallet signed it (base64), or that they turned it down. */
+export const LaunchSignSchema = z.union([z.object({ signedTx: z.string().min(100).max(2400) }), z.object({ refused: z.literal(true) })]);
 export type LaunchRequest = z.input<typeof LaunchRequestSchema>;
 
-export const LaunchStepSchema = z.enum(["checking", "bundling", "landed", "indexed", "failed"]);
+export const LaunchStepSchema = z.enum(["checking", "signing", "bundling", "landed", "indexed", "failed"]);
 export type LaunchStep = z.infer<typeof LaunchStepSchema>;
 export const LaunchStatusSchema = z.object({
   id: z.string(),
@@ -322,6 +329,11 @@ export const LaunchStatusSchema = z.object({
   ticker: z.string(),
   /** Only present from "landed" on. Never revealed earlier (HANDOFF §3.5). */
   mint: base58.optional(),
+  /**
+   * While step = "signing", to the launch's creator only: the create for their wallet to sign (base64,
+   * without signatures). It names the mint, which only the creator sees before the coin lands.
+   */
+  tx: z.string().optional(),
   signature: z.string().optional(),
   error: ApiErrorSchema.optional(),
 });

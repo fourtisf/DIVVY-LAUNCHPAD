@@ -54,10 +54,11 @@ const every = (pattern: string, name: string, ttlMs: number, fn: () => Promise<u
 
 if (roles.has("launch")) {
   const queue = new Queue<LaunchJob>(QUEUES.launch, { connection: bullConnection(env.REDIS_URL) });
-  // One create per launch at a time, even if a job is re-queued while the first is still running.
+  // One create per launch at a time, even if a job is re-queued while the first is still running. A
+  // launch spends most of its time waiting for its creator's wallet, so many run side by side.
   const worker = new Worker<LaunchJob>(QUEUES.launch, async (job) => withLock(d.redis, `launch:${job.data.launchId}`, 10 * 60_000, () => processLaunch(d, job.data.launchId)), {
     connection: bullConnection(env.REDIS_URL),
-    concurrency: 4,
+    concurrency: 16,
   });
   stops.push(() => worker.close(), () => queue.close());
   every("* * * * *", "launch-reconcile", 55_000, () =>
