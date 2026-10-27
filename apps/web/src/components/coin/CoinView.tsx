@@ -28,23 +28,23 @@ import { CoinFlip3D } from "../Coin3D";
 import { Countdown } from "../Countdown";
 import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
-import { Chart } from "./Chart";
+import { CandleChart } from "./CandleChart";
 import { ReportButton } from "./ReportButton";
 import { TradeBox } from "./TradeBox";
 
 type List<T> = { items: T[]; nextCursor?: string | null };
 
-const TF_LABELS = ["1h", "6h", "24h", "All"] as const;
-
-/** Chart timeframe → candle query. "All" picks a bucket size from the coin's age. */
-function candleQuery(tf: (typeof TF_LABELS)[number], ageMin: number): { tf: CandleTf; limit: number } {
-  if (tf === "1h") return { tf: "1m", limit: 60 };
-  if (tf === "6h") return { tf: "5m", limit: 72 };
-  if (tf === "24h") return { tf: "5m", limit: 288 };
-  if (ageMin <= 180) return { tf: "1m", limit: 180 };
-  if (ageMin <= 1440) return { tf: "5m", limit: 288 };
-  return { tf: "1h", limit: 1000 };
-}
+/** Candle sizes, as the buttons show them. */
+const INTERVALS: { tf: CandleTf; label: string }[] = [
+  { tf: "1m", label: "1m" },
+  { tf: "5m", label: "5m" },
+  { tf: "15m", label: "15m" },
+  { tf: "1h", label: "1h" },
+  { tf: "4h", label: "4h" },
+  { tf: "1d", label: "1D" },
+];
+/** A coin's first candle size: minutes while it's young, then longer ones. */
+const defaultInterval = (ageMin: number): CandleTf => (ageMin <= 360 ? "1m" : ageMin <= 4320 ? "15m" : "1h");
 
 /** How often the page re-reads the coin, its chart and its trades (the indexer polls every 4 s). */
 const LIVE_MS = 8_000;
@@ -59,22 +59,17 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
   const ageMin = minutesSince(coin.createdAt);
   const m = coin.mint;
 
-  const [tf, setTf] = useState<(typeof TF_LABELS)[number]>("All");
-  const cq = candleQuery(tf, ageMin);
-  const { data: candles } = useSWR<CandleList>(`/api/coins/${m}/candles` + qs({ tf: cq.tf, unit: "mcap", limit: cq.limit }), { refreshInterval: LIVE_MS });
-  // The line needs two points, and a new coin has one candle or none: it starts at launch, at the first
-  // candle's open (or today's market cap with no trades yet), and ends now.
-  const chartData = useMemo(() => {
-    const pts = (candles?.items ?? []).map((c) => ({ t: c.t, v: c.c }));
-    const launched = Math.floor(new Date(coin.createdAt).getTime() / 1000);
-    const first = candles?.items[0];
-    if (!first || first.t > launched) pts.unshift({ t: launched, v: first?.o ?? coin.marketCapUsd });
-    if (pts.length < 2) pts.push({ t: Math.floor(Date.now() / 1000), v: coin.marketCapUsd });
-    return pts;
-  }, [candles, coin.createdAt, coin.marketCapUsd]);
+  const [tf, setTf] = useState<CandleTf>(() => defaultInterval(ageMin));
+  const [unit, setUnit] = useState<"price" | "mcap">("mcap");
+  const { data: candles } = useSWR<CandleList>(`/api/coins/${m}/candles` + qs({ tf, unit, limit: 300 }), { refreshInterval: LIVE_MS, keepPreviousData: false });
 
   const [tab, setTab] = useState<"payouts" | "holders" | "trades">("payouts");
   const { data: payouts } = useSWR<List<PayoutRound>>(`/api/coins/${m}/payouts?limit=10`, { fallbackData: initialPayouts });
+  // Hours that paid holders, as dots under the candles.
+  const payoutHours = useMemo(
+    () => (payouts?.items ?? []).filter((p) => p.status === "ok" || p.status === "late").map((p) => Math.floor(new Date(p.hour).getTime() / 1000)),
+    [payouts],
+  );
   const { data: holders } = useSWR<List<Holder>>(tab === "holders" ? `/api/coins/${m}/holders` : null);
   const { data: trades } = useSWR<List<Trade>>(tab === "trades" ? `/api/coins/${m}/trades?limit=24` : null, { refreshInterval: LIVE_MS });
   const { data: meter = initialMeter } = useSWR<Meter>(`/api/coins/${m}/meter`, { fallbackData: initialMeter, refreshInterval: 30_000 });
@@ -127,16 +122,24 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
         <div className="stack">
           <div className="panel">
             <div className="chart-head">
-              <div className="faint" style={{ fontSize: 13 }}>Market cap, all-time high {usd(coin.athUsd)}</div>
-              <div className="tf" role="group" aria-label="Time frame">
-                {TF_LABELS.map((t) => (
-                  <button type="button" key={t} aria-pressed={tf === t} onClick={() => setTf(t)}>{t}</button>
+              <div className="tf" role="group" aria-label="Candle size">
+                {INTERVALS.map((t) => (
+                  <button type="button" key={t.tf} aria-pressed={tf === t.tf} onClick={() => setTf(t.tf)}>{t.label}</button>
                 ))}
               </div>
+              <div className="tf" role="group" aria-label="Chart of">
+                <button type="button" aria-pressed={unit === "price"} onClick={() => setUnit("price")}>Price</button>
+                <button type="button" aria-pressed={unit === "mcap"} onClick={() => setUnit("mcap")}>Market cap</button>
+              </div>
             </div>
-            <Chart data={chartData} ticks={ageMin >= 60} label={`Market cap chart for $${coin.ticker}`} />
+            <CandleChart
+              candles={candles}
+              solUsd={config.quote.priceUsd}
+              payoutHours={payoutHours}
+              label={`${unit === "price" ? "Price" : "Market cap"} chart for $${coin.ticker}`}
+            />
             <div className="legend">
-              <span><i style={{ background: "var(--g)" }} />Market cap</span>
+              <span>Market cap all-time high {usd(coin.athUsd)}</span>
               <span><i style={{ background: "var(--teal)" }} />Hourly payout to holders</span>
             </div>
           </div>

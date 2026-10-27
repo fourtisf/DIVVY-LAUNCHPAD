@@ -133,10 +133,18 @@ export function CreateForm() {
     }
   };
 
+  const blank = (): Draft => ({ name: "", ticker: "", desc: "", pays: d.pays, x: "", tg: "", web: "", imgPreview: null, upload: null });
+  const another = () => {
+    setLaunch(null);
+    saved = blank();
+    setD(saved);
+    setImgCheck({ s: "idle", m: "Upload a picture" });
+  };
+
   const done = (s: LaunchStatus) => {
     setLaunch(null);
     if (s.step === "indexed") {
-      saved = { name: "", ticker: "", desc: "", pays: d.pays, x: "", tg: "", web: "", imgPreview: null, upload: null };
+      saved = blank();
       router.push(`/coin/${encodeURIComponent(s.ticker)}`);
       toast(`$${s.ticker} is live`);
     } else {
@@ -310,7 +318,7 @@ export function CreateForm() {
           </div>
         </aside>
       </div>
-      {launch && <LaunchModal launchId={launch.id} ticker={launch.ticker} img={launch.img} pays={launch.pays} onDone={done} />}
+      {launch && <LaunchModal launchId={launch.id} ticker={launch.ticker} img={launch.img} pays={launch.pays} onDone={done} onAnother={another} />}
     </>
   );
 }

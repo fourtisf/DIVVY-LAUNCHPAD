@@ -19,6 +19,7 @@
     "@solana/wallet-adapter-solflare": "^0.6.34",
     "@solana/web3.js": "^1.99.0",
     "bs58": "^6.0.0",
+    "lightweight-charts": "5.0.9",
     "next": "15.5.28",
     "react": "19.2.9",
     "react-dom": "19.2.9",

@@ -27,7 +27,33 @@ const PAID = { dryRun: false, step: "delivered", status: { in: ["ok", "late"] } 
 
 const PageQuery = z.object({ cursor: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(100).default(60) });
 const iso = (t: number | Date) => new Date(t).toISOString();
-const TF = { "1m": "m1", "5m": "m5", "1h": "h1", "1d": "d1" } as const;
+// The indexer stores 1m, 5m, 1h and 1d candles; 15m and 4h are made from 5m and 1h ones.
+const TF = {
+  "1m": { db: "m1", n: 1 },
+  "5m": { db: "m5", n: 1 },
+  "15m": { db: "m5", n: 3 },
+  "1h": { db: "h1", n: 1 },
+  "4h": { db: "h1", n: 4 },
+  "1d": { db: "d1", n: 1 },
+} as const;
+const TF_SEC = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 } as const;
+
+type CandleRow = { ts: Date; o: unknown; h: unknown; l: unknown; c: unknown; volSol: bigint };
+/** Stored candles, oldest first, merged into buckets of `span` seconds (15m from 5m, 4h from 1h). */
+export function mergeCandles(rows: CandleRow[], span: number): { t: number; o: number; h: number; l: number; c: number; vol: bigint }[] {
+  const out: { t: number; o: number; h: number; l: number; c: number; vol: bigint }[] = [];
+  for (const r of rows) {
+    const t = Math.floor(r.ts.getTime() / 1000 / span) * span;
+    const last = out[out.length - 1];
+    if (last?.t === t) {
+      last.h = Math.max(last.h, Number(r.h));
+      last.l = Math.min(last.l, Number(r.l));
+      last.c = Number(r.c);
+      last.vol += r.volSol;
+    } else out.push({ t, o: Number(r.o), h: Number(r.h), l: Number(r.l), c: Number(r.c), vol: r.volSol });
+  }
+  return out;
+}
 
 export function sortRows(rows: CoinRow[], sort: z.infer<typeof CoinSortSchema>, now: number): CoinRow[] {
   const age = (c: CoinRow) => (now - (c.launchedAt ?? c.createdAt).getTime()) / 60_000;
@@ -199,11 +225,13 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const solUsd = (await d.prices()).solUsd;
     // Candles store SOL per token; USD uses today's SOL price (approximation, noted in docs).
     const k = solUsd * (q.data.unit === "mcap" ? 1e9 : 1);
-    const rows = await d.prisma.candle.findMany({ where: { coinId: c.id, tf: TF[q.data.tf] }, orderBy: { ts: "desc" }, take: q.data.limit });
+    const { db, n } = TF[q.data.tf];
+    const rows = await d.prisma.candle.findMany({ where: { coinId: c.id, tf: db }, orderBy: { ts: "desc" }, take: q.data.limit * n });
+    const merged = mergeCandles(rows.reverse(), TF_SEC[q.data.tf]);
     return {
       tf: q.data.tf,
       unit: q.data.unit,
-      items: rows.reverse().map((r) => ({ t: Math.floor(r.ts.getTime() / 1000), o: Number(r.o) * k, h: Number(r.h) * k, l: Number(r.l) * k, c: Number(r.c) * k, vol: amount(r.volSol, 9) })),
+      items: merged.slice(-q.data.limit).map((r) => ({ t: r.t, o: r.o * k, h: r.h * k, l: r.l * k, c: r.c * k, vol: amount(r.vol, 9) })),
     };
   });
 

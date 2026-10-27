@@ -138,7 +138,7 @@ export function activity(store: MockStore, now: number): LiveEvent[] {
   return ev;
 }
 
-const TF_SEC: Record<z.infer<typeof CandleTfSchema>, number> = { "1m": 60, "5m": 300, "1h": 3600, "1d": 86400 };
+const TF_SEC: Record<z.infer<typeof CandleTfSchema>, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400 };
 
 export async function publicRoutes(app: FastifyInstance, { store }: { store: MockStore }) {
   const config = buildConfig();

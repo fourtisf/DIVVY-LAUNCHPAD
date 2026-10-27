@@ -72,3 +72,16 @@ button.ca-pill:hover{border-color:var(--hair3)}
 a.x-pill{text-decoration:none;cursor:pointer}
 a.x-pill:hover{border-color:var(--hair3);color:var(--text)}
 .x-pill svg{flex:none;opacity:.9}
+
+/* Coin page candlestick chart (owner request 2026-10-27; lightweight-charts, CandleChart.tsx). */
+.cchart-legend{display:flex;flex-wrap:wrap;gap:4px 14px;min-height:20px;margin-bottom:6px;font-size:12.5px;color:var(--faint)}
+.cchart-legend b{color:var(--text);font-weight:600}
+.cchart-plot{height:340px}
+@media (max-width:640px){.cchart-plot{height:260px}}
+
+/* Launch modal, once the coin is live (LaunchModal.tsx). */
+.modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:18px}
+.modal-actions .btn-lg{grid-column:1 / -1}
+.modal-actions .btn{justify-content:center;text-align:center}
+.mint-copy{display:inline-flex;align-items:center;gap:6px;border:0;background:none;color:inherit;font:inherit;padding:0;cursor:pointer}
+.mint-copy:hover{color:var(--g-hi)}

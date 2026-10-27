@@ -16,6 +16,7 @@ import { Redis } from "ioredis";
 import { PrismaClient } from "@divvy/db";
 import { ApiErrorSchema, CheckResponseSchema, CoinDetailSchema, CoinListSchema, ConfigSchema, LaunchStatusSchema, MeSchema, StatsSchema, UploadResponseSchema } from "@divvy/shared";
 import { foldName, foldTicker } from "@divvy/shared";
+import { mergeCandles } from "../src/live/routes/public";
 import { expectShape } from "./util";
 
 const BASE_DB = process.env.DATABASE_URL;
@@ -201,6 +202,34 @@ describe.skipIf(!run)("live mode", () => {
     const chk = (await get("/api/check?ticker=M00NP1G")).json() as { ticker: { code: string; collidesWith: { mint: string | null } } };
     expect(chk.ticker.code).toBe("TICKER_TAKEN");
     expect(((await get("/api/check?x=%40moonpigfun")).json() as { x: { code: string } }).x.code).toBe("X_TAKEN");
+  });
+
+  it("serves 15m and 4h candles merged from the stored 5m and 1h ones", async () => {
+    const coin = await prisma.coin.findUniqueOrThrow({ where: { tickerNorm: "CHIPDOG" } });
+    const at = (min: number) => new Date(Date.UTC(2026, 9, 27, 9, min));
+    const rows: [number, number, number, number, number, bigint][] = [
+      [0, 1, 3, 1, 2, 10n],
+      [5, 2, 4, 2, 3, 20n],
+      [10, 3, 3, 0.5, 1, 30n],
+      [15, 1, 2, 1, 2, 40n],
+    ];
+    await prisma.candle.createMany({ data: rows.map(([m, o, h, l, c, v]) => ({ coinId: coin.id, tf: "m5", ts: at(m), o, h, l, c, volSol: v })) });
+    const r = (await get(`/api/coins/${coin.mint}/candles?tf=15m&unit=price`)).json() as { tf: string; items: { t: number; vol: { raw: string } }[] };
+    expect(r.tf).toBe("15m");
+    expect(r.items.map((i) => ({ t: i.t, vol: i.vol.raw }))).toEqual([
+      { t: at(0).getTime() / 1000, vol: "60" },
+      { t: at(15).getTime() / 1000, vol: "40" },
+    ]);
+    // The prices themselves (the test has no SOL price, so they read 0 above):
+    const merged = mergeCandles(
+      rows.map(([m, o, h, l, c, v]) => ({ ts: at(m), o, h, l, c, volSol: v })),
+      900,
+    );
+    expect(merged.map(({ o, h, l, c }) => ({ o, h, l, c }))).toEqual([
+      { o: 1, h: 4, l: 0.5, c: 1 },
+      { o: 1, h: 2, l: 1, c: 2 },
+    ]);
+    await prisma.candle.deleteMany({ where: { coinId: coin.id } });
   });
 
   it("relays the browser's RPC calls to the server's RPC, and only the methods the site uses", async () => {

@@ -210,7 +210,7 @@ export const TradeSchema = z.object({
 export const TradeListSchema = z.object({ items: z.array(TradeSchema), nextCursor: z.string().nullable() });
 export type Trade = z.infer<typeof TradeSchema>;
 
-export const CandleTfSchema = z.enum(["1m", "5m", "1h", "1d"]);
+export const CandleTfSchema = z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]);
 export type CandleTf = z.infer<typeof CandleTfSchema>;
 export const CandleSchema = z.object({
   /** Bucket start, unix seconds. */
