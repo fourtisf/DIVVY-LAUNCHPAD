@@ -41,8 +41,9 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
   const coin = launch.coin;
 
   try {
+    // Admins can launch while launches are paused, as the API lets them: the owner's test launch.
     const settings = await getLaunchSettings(d.prisma);
-    if (!settings.launchesOpen) throw new LaunchError("LAUNCHES_PAUSED", settings.reason ?? "Launches are paused for now");
+    if (!settings.launchesOpen && !d.params.adminWallets.has(coin.creatorWallet)) throw new LaunchError("LAUNCHES_PAUSED", settings.reason ?? "Launches are paused for now");
     assertCanSend(d.sol, "launch.create");
 
     // Hourly spend cap for the launcher hot wallet (HANDOFF §9).

@@ -55,13 +55,18 @@ export function CreateForm() {
   const [imgCheck, setImgCheck] = useState<Check>(() => (saved.upload ? { s: saved.upload.check.status, m: saved.upload.check.message } : { s: "idle", m: "Upload a picture" }));
   const [over, setOver] = useState(false);
   const [launch, setLaunch] = useState<{ id: string; ticker: string; img: string; pays: string } | null>(null);
+  // Why the last launch didn't happen, kept under the button: a toast alone is gone in 2.6 s.
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     saved = d;
   }, [d]);
 
-  const set = (k: keyof Draft) => (e: { target: { value: string } }) => setD((p) => ({ ...p, [k]: e.target.value }));
+  const set = (k: keyof Draft) => (e: { target: { value: string } }) => {
+    setLaunchError(null);
+    setD((p) => ({ ...p, [k]: e.target.value }));
+  };
 
   // Live anti-vamp feedback from the server (the authority), debounced.
   const dq = useDebounced({ ticker: d.ticker, name: d.name, x: d.x }, 150);
@@ -111,6 +116,7 @@ export function CreateForm() {
     if (!ready || !d.upload) return;
     // Demo mode keeps the prototype's flow (launch without a wallet). Live mode needs a signed-in wallet.
     if (!publicKey && !config.demo) return setVisible(true);
+    setLaunchError(null);
     try {
       if (!config.demo && !(await ensureSignedIn())) return;
       const { launchId } = await api<{ launchId: string }>("/api/launch", {
@@ -120,7 +126,10 @@ export function CreateForm() {
       setLaunch({ id: launchId, ticker: t, img: d.upload.url, pays: d.pays });
     } catch (err) {
       const m = errorText(err, "The launch failed. Try again.");
-      if (m) toast(m);
+      if (m) {
+        toast(m);
+        setLaunchError(m);
+      }
     }
   };
 
@@ -130,7 +139,11 @@ export function CreateForm() {
       saved = { name: "", ticker: "", desc: "", pays: d.pays, x: "", tg: "", web: "", imgPreview: null, upload: null };
       router.push(`/coin/${encodeURIComponent(s.ticker)}`);
       toast(`$${s.ticker} is live`);
-    } else toast(s.error?.message ?? "The launch failed. Nothing was created.");
+    } else {
+      const m = s.error?.message ?? "The launch failed. Nothing was created.";
+      toast(m);
+      setLaunchError(m);
+    }
   };
 
   const checkRow = (k: string, v: Check) => (
@@ -283,14 +296,16 @@ export function CreateForm() {
             <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
               Launch coin
             </button>
-            <p className="note" id="launchHint" style={{ textAlign: "center" }}>
+            <p className="note" id="launchHint" style={{ textAlign: "center", color: launchError ? "var(--red)" : undefined }}>
               {me?.blocked
                 ? "uspad isn't available in your country."
-                : config.launchesOpen
-                  ? hint
-                  : me?.isAdmin
-                    ? `Paused for everyone else; you can launch as an admin. ${hint}`
-                    : (config.launchesPausedReason ?? "Launches are paused.")}
+                : launchError
+                  ? launchError
+                  : config.launchesOpen
+                    ? hint
+                    : me?.isAdmin
+                      ? `Paused for everyone else; you can launch as an admin. ${hint}`
+                      : (config.launchesPausedReason ?? "Launches are paused.")}
             </p>
           </div>
         </aside>

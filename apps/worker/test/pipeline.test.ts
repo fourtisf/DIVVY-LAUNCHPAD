@@ -9,7 +9,7 @@ import { Redis } from "ioredis";
 import { Keypair, MessageV0, VersionedTransaction, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
 import { PrismaClient } from "@divvy/db";
 import { foldName, foldTicker, loadParams } from "@divvy/shared";
-import { prismaTxLogger, type PriceCache } from "@divvy/server";
+import { prismaTxLogger, setLaunchSettings, type PriceCache } from "@divvy/server";
 import { EVENT_IX_TAG_LE, POOL_CREATE_EVENT_DISC, programs, TRADE_EVENT_DISC, type PlatformState, type SolanaEnv } from "@divvy/solana/live";
 import type { WorkerDeps } from "../src/deps";
 import { loadWorkerEnv } from "../src/env";
@@ -153,6 +153,19 @@ describe.skipIf(!run)("launch pipeline", () => {
     expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("bundling");
     // The identity stays reserved: the create could still land until its blockhash expires.
     expect((await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } })).tickerNorm).toBe(foldTicker("SLOW"));
+  });
+
+  it("while launches are paused, only an admin's launch goes out", async () => {
+    await setLaunchSettings(prisma, { launchesOpen: false, reason: "Launches open soon." });
+    const { launch } = await pendingLaunch("SHUT");
+    await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), launch.id);
+    expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).error).toMatchObject({ code: "LAUNCHES_PAUSED", message: "Launches open soon." });
+    expect(bundles).toHaveLength(0);
+
+    const { coin, launch: mine } = await pendingLaunch("TEST");
+    await processLaunch({ ...deps({ cluster: "mainnet-beta", mainnetEnabled: true }), params: loadParams({ ADMIN_WALLETS: coin.creatorWallet }) }, mine.id);
+    expect((await prisma.launch.findUniqueOrThrow({ where: { id: mine.id } })).step).not.toBe("failed");
+    expect(bundles).toHaveLength(1);
   });
 
   it("mainnet gate: with DIVVY_MAINNET_ENABLED off nothing is signed and the identity is released", async () => {
