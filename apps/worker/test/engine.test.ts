@@ -217,7 +217,7 @@ describe.skipIf(!run)("dividend engine", () => {
     expect(alloc[coins.D]).toEqual([2_500_000n, 500_000n]);
 
     const rounds = Object.fromEntries((await prisma.payoutRound.findMany({ where: { dryRun: true } })).map((r) => [r.coinId, r]));
-    // D: 0.0025 SOL × $150 = $0.375 < MIN_ROUND_USD $5 → carried, allocation stays unattached.
+    // D: 0.0025 SOL × $150 = $0.375 < MIN_ROUND_USD $1 → carried, allocation stays unattached.
     expect(rounds[coins.D]).toMatchObject({ status: "carried", carriedOutLamports: 2_500_000n, solIn: 0n });
     // NVDAx batch: 0.15 SOL × 150 / 180 × 0.995 = 0.124375 NVDAx = 12,437,500 units.
     // A:B = 100:50 → 8,291,666.67 / 4,145,833.33 → floors 8,291,666 + 4,145,833, dust 1 to A.
@@ -411,7 +411,8 @@ describe.skipIf(!run)("dividend engine", () => {
 
   it("pays a backlog over the swap budget in part, carries the rest, and halves the size after an impact refusal (audit)", async () => {
     await seed();
-    const base = deps(loadParams({ PAYOUTS_DRY_RUN: "true" }));
+    // A $5 round minimum, so the part of B's share that fits the budget is under it.
+    const base = deps(loadParams({ PAYOUTS_DRY_RUN: "true", MIN_ROUND_USD: "5" }));
     const d = { ...base, env: { ...base.env, SWAP_BATCH_MAX_LAMPORTS: 75_000_000 } };
     await runPayouts(d, stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
     const rounds = Object.fromEntries((await prisma.payoutRound.findMany({ where: { dryRun: true, hour: HOUR } })).map((r) => [r.coinId, r]));

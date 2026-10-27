@@ -36,7 +36,7 @@ The details are in `docs/AUDIT.md`, "Open owner decisions".
       - With local storage, use an absolute folder outside `/srv/divvy` (NEW-4) and back it up.
 - [ ] **Dividend assets** at launch. Insert `DividendAsset` rows from `scripts/phase0/fetch-xstocks.ts` output, never typed by hand, and only after R4 and R5 are go.
 - [ ] **Thresholds:**
-      - `MIN_ROUND_USD`: the spec says $5; the economics model suggests $1 with batched swaps.
+      - `MIN_ROUND_USD`: $1 (owner decision 2026-10-27, the economics model's figure with batched swaps; the spec said $5).
       - `MIN_HOLDER_USD`, `AUTO_PUSH_MIN_USD`, `PUSH_NEW_ATA_MIN_USD` and `MAX_SWAP_IMPACT_BPS`.
 - [ ] **Hourly caps and the swap size limit**, each set on purpose and not left at its default (HANDOFF §9):
       - `SWAP_HOURLY_CAP_LAMPORTS` (default 100 SOL): what the fee claimer may swap into stocks in an hour.

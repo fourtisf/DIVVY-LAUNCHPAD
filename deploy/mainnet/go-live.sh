@@ -28,6 +28,8 @@
 #   I_HAVE_OWNER_APPROVAL=yes go-live.sh payouts live
 #                                 💰 real dividends: claims the fee vault, buys the stocks, sends them.
 #   go-live.sh payouts dry-run    back to computing without sending.
+#   go-live.sh payouts minimum <USD>
+#                                 a coin's hourly holders' share under this waits for the next hour ($1).
 #   go-live.sh token-ca <address> shows the uspad token's contract address in the hero instead of
 #                                 "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
@@ -290,7 +292,7 @@ FEE_CREATOR_BPS=15
 FEE_DIVVY_BPS=10
 PAYOUT_DELIVERY=push
 PAYOUTS_DRY_RUN=true
-MIN_ROUND_USD=5
+MIN_ROUND_USD=1
 MIN_HOLDER_USD=10
 AUTO_PUSH_MIN_USD=1
 DELIVERY_FEE_USD=0.02
@@ -712,7 +714,14 @@ payouts() {
       restart_worker
       note "Dividen kembali ke dry-run"
       ;;
-    *) die "pakai: go-live.sh payouts check | live | dry-run" ;;
+    minimum)
+      [[ ${2:-} =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v v="$2" 'BEGIN { exit !(v > 0 && v <= 100) }' || die "pakai: go-live.sh payouts minimum <USD>, misalnya 1"
+      for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do set_env "$f" MIN_ROUND_USD "$2"; done
+      pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+      restart_worker
+      note "Jatah holder satu koin di bawah \$$2 per jam menunggu jam berikutnya (tidak hilang)."
+      ;;
+    *) die "pakai: go-live.sh payouts check | live | dry-run | minimum <USD>" ;;
   esac
 }
 
@@ -761,8 +770,8 @@ case "${1:-}" in
   open-launches) open_launches ;;
   launches) launches "${2:-}" "${3:-}" ;;
   launch-fee) launch_fee "${2:-}" ;;
-  payouts) payouts "${2:-}" ;;
+  payouts) payouts "${2:-}" "${3:-}" ;;
   token-ca) token_ca "${2:-}" ;;
   status) status ;;
-  *) sed -n '2,37p' "$0"; exit 1 ;;
+  *) sed -n '2,39p' "$0"; exit 1 ;;
 esac

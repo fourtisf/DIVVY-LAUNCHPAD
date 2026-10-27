@@ -19,7 +19,8 @@ const ParamsSchema = z.object({
   /** "push" sends every round; "claim" credits a ledger (HANDOFF §3.4). Copy follows this switch. */
   PAYOUT_DELIVERY: z.enum(["push", "claim"]).default("push"),
   PAYOUTS_DRY_RUN: z.enum(["true", "false"]).default("true"),
-  MIN_ROUND_USD: z.coerce.number().positive().default(5),
+  /** A coin's hourly holders' share under this carries to the next hour (owner decision 2026-10-27: $1, ECONOMICS.md). */
+  MIN_ROUND_USD: z.coerce.number().positive().default(1),
   MIN_HOLDER_USD: z.coerce.number().positive().default(10),
   AUTO_PUSH_MIN_USD: z.coerce.number().positive().default(1),
   /**
