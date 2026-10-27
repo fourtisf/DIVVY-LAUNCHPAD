@@ -10,6 +10,9 @@ sudo -iu divvy git -C /srv/divvy/app pull && install -m 700 /srv/divvy/app/deplo
 /root/go-live.sh platform-config         # dry run; then, with the owner's OK and 0.02 SOL on the admin:
 I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-config --send
 /root/go-live.sh switch                  # demo off, live on, launches paused, payouts in dry-run
+/root/go-live.sh x-login                 # "Link your X account": the X app's Client ID and Secret
+/root/go-live.sh cp-creator              # dry run, from the epoch after the PlatformConfig's; then, with the owner's OK:
+I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh cp-creator --send
 /root/go-live.sh update                  # every later deploy
 /root/go-live.sh status
 ```
@@ -73,6 +76,8 @@ Follow setup-vps.md with these changes:
 | `NEXT_PUBLIC_TOKEN_CA` | empty ("CA: coming soon") until the uspad token exists |
 
 ## Phase 2. 💰 The PlatformConfig
+
+**Done on 2026-10-27**: `F9mp8bF7frk6Tir1RNoMZEt9vJkLX3TzTtzxz1GZR2FV` (docs/VERIFIED.md item 27). The site went live the same day with launches paused.
 
 Once per admin wallet; it sets the fee split and where fees and Fee Keys go. Rent is 0.0075 SOL (944 bytes, from the SDK layout), so **0.02 SOL** to the admin covers creation, the update in phase 3 and fees.
 

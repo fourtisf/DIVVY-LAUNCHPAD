@@ -8,6 +8,12 @@
 #   I_HAVE_OWNER_APPROVAL=yes go-live.sh platform-config --send
 #                                 💰 creates it. Only after the owner's OK in chat (CLAUDE.md rule 3).
 #   go-live.sh switch             demo off, live site on, launches paused, payouts in dry-run.
+#   go-live.sh x-login            asks for the X app's OAuth 2.0 Client ID and Secret and turns on
+#                                 "Link your X account" (no rebuild).
+#   go-live.sh cp-creator         dry run: the CPMM creator fee of graduated coins to the operations
+#                                 wallet. Possible from the epoch after the PlatformConfig's.
+#   I_HAVE_OWNER_APPROVAL=yes go-live.sh cp-creator --send
+#                                 💰 sets it (about 0.0001 SOL) and turns on CPMM_CREATOR_FEES.
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
 #   go-live.sh status             apps, health, wallet addresses and balances.
 #
@@ -496,7 +502,16 @@ update() {
   say "Reload aplikasi"
   pm2as divvy-web reload "$ECO" --only divvy-web --update-env > /dev/null
   pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
-  # Not in the middle of a payout run (RUNBOOK "Deploy").
+  restart_worker
+  (cd /srv/divvy/releases && ls -1dt -- */ | tail -n +6 | while read -r d; do
+    [ "$(readlink -f "$d")" = "$(readlink -f $CUR)" ] || rm -rf -- "/srv/divvy/releases/${d%/}"
+  done)
+  sleep 8
+  status
+}
+
+# Not in the middle of a payout run (RUNBOOK "Deploy").
+restart_worker() {
   local i
   for i in $(seq 1 60); do
     [ "$(REDISCLI_AUTH="$(env_get "$GEN" REDIS_PASS)" redis-cli -h 127.0.0.1 EXISTS divvy:lock:payouts)" = 0 ] && break
@@ -504,11 +519,45 @@ update() {
     sleep 5
   done
   pm2as divvy-worker restart "$ECO" --only divvy-worker --update-env > /dev/null
-  (cd /srv/divvy/releases && ls -1dt -- */ | tail -n +6 | while read -r d; do
-    [ "$(readlink -f "$d")" = "$(readlink -f $CUR)" ] || rm -rf -- "/srv/divvy/releases/${d%/}"
-  done)
-  sleep 8
-  status
+}
+
+# --------------------------------------------------------------------------------------------------
+# The X app comes from developer.x.com (User authentication settings: Web App, read only, callback
+# https://uspad.fun/api/auth/x/callback). The secret is typed here, never pasted into a chat.
+x_login() {
+  [ -s $ENV_DIR/api.env ] || die "jalankan 'go-live.sh prepare' dulu"
+  local id secret
+  read -rp "X OAuth 2.0 Client ID: " id
+  read -rsp "X OAuth 2.0 Client Secret (tidak tampil saat diketik): " secret; echo
+  [ -n "$id" ] && [ -n "$secret" ] || die "Client ID dan Client Secret wajib diisi"
+  sed -i -E '/^X_(CLIENT_ID|CLIENT_SECRET|REDIRECT_URI)=/d' $ENV_DIR/api.env
+  printf 'X_CLIENT_ID=%s\nX_CLIENT_SECRET=%s\nX_REDIRECT_URI=https://%s/api/auth/x/callback\n' "$id" "$secret" "$DOMAIN" >> $ENV_DIR/api.env
+  [ -f "$LIVE_MARK" ] || { note "disimpan; aktif setelah 'go-live.sh switch'"; return 0; }
+  pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+  sleep 4
+  [ "$(curl -fsS https://$DOMAIN/api/config | jq -r .flags.xOAuth)" = true ] || die "API belum melihat setelan X (cek /var/log/divvy/api/api.err.log)"
+  say "Link X aktif: buka https://$DOMAIN/create dan klik 'Link your X account'"
+}
+
+# --------------------------------------------------------------------------------------------------
+cp_creator() {
+  load_secrets
+  [ -L "$CUR" ] && [ -f "$ADMIN_KEY" ] || die "jalankan 'go-live.sh prepare' dulu"
+  local fee send=()
+  fee=$(pubkey $KEYS/fee-claimer.json)
+  if [ "${1:-}" = "--send" ]; then
+    [ "${I_HAVE_OWNER_APPROVAL:-}" = yes ] || die "--send butuh I_HAVE_OWNER_APPROVAL=yes (persetujuan owner di chat)"
+    send=(--send)
+  fi
+  say "Creator fee pool CPMM ke wallet operasional $fee ${send[*]:-(dry run)}"
+  (cd "$CUR/packages/solana" && env RPC_URL="$RPC" PLATFORM_ADMIN_KEYPAIR="$ADMIN_KEY" CP_CREATOR="$fee" I_HAVE_OWNER_APPROVAL="${I_HAVE_OWNER_APPROVAL:-}" \
+    ./node_modules/.bin/tsx scripts/phase0/set-cp-creator.ts "${send[@]}" 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g'
+  [ ${#send[@]} = 0 ] && return 0
+  # Set on chain (the script stops this function otherwise): the worker may collect it now.
+  sed -i -E '/^CPMM_CREATOR_FEES=/d' $ENV_DIR/worker.env
+  echo CPMM_CREATOR_FEES=true >> $ENV_DIR/worker.env
+  if [ -f "$LIVE_MARK" ]; then restart_worker; fi
+  note "CPMM_CREATOR_FEES=true di worker.env"
 }
 
 # --------------------------------------------------------------------------------------------------
@@ -542,6 +591,8 @@ case "${1:-}" in
   platform-config) platform_config "${2:-}" ;;
   switch) switch ;;
   update) update ;;
+  x-login) x_login ;;
+  cp-creator) cp_creator "${2:-}" ;;
   status) status ;;
-  *) sed -n '2,15p' "$0"; exit 1 ;;
+  *) sed -n '2,21p' "$0"; exit 1 ;;
 esac
