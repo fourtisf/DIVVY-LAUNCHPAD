@@ -1,8 +1,13 @@
 # uspad intro video for X
 
-Video: `uspad-intro-1920x1080.mp4` (16:9, 34 s, 30 fps, H.264, no sound; X autoplays muted).
+Video: `uspad-intro-1920x1080.mp4` (16:9, 34 s, 30 fps, H.264, AAC 192k at -14 LUFS).
 Renderer: `brand/uspad/src/intro-video.cjs` (`node brand/uspad/src/intro-video.cjs brand/uspad`,
-`--stills <dir>` for one frame per scene).
+`--stills <dir>` for one frame per scene), then the soundtrack: `python3 brand/uspad/src/intro-music.py
+brand/uspad` (needs numpy and ffmpeg; replaces the video's audio).
+
+The music is original, synthesised by `intro-music.py` (no samples, nothing to license): 109 BPM in A
+minor, a click per typed letter of the hashtag, a riser into the drop on "Meet uspad" at 8.8 s, clock
+ticks and a coin ding per "Sent" row, and an impact into a closing C chord.
 
 It rides the #BOYCOTTPUMPFUN timeline (2026-10-27). Pump.fun appears only as that hashtag: no logo of
 theirs and no claim about them. Every uspad fact matches the site's How it works page.
