@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSWRConfig } from "swr";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
@@ -29,6 +30,9 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   const [amt, setAmt] = useState(side === "buy" ? "0.5" : sellPreset);
   const [bal, setBal] = useState<{ sol: number | null; tokens: number | null; tokensRaw: bigint | null }>({ sol: null, tokens: null, tokensRaw: null });
   const [busy, setBusy] = useState(false);
+  // Bumped after a trade, so the balances are read again.
+  const [balTick, setBalTick] = useState(0);
+  const { mutate } = useSWRConfig();
   // What a trade in progress is waiting for, on the button: the wallet's approval, then the network.
   const [stage, setStage] = useState<"wallet" | "confirming">("wallet");
   const [slippageBps, setSlippageBps] = useState(100);
@@ -51,7 +55,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
     return () => {
       off = true;
     };
-  }, [publicKey, connection, coin.mint]);
+  }, [publicKey, connection, coin.mint, balTick]);
 
   const v = parseAmount(amt);
   const recv =
@@ -85,6 +89,14 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       if (r.priceImpactBps > 1500 && !window.confirm(`This trade moves the price by about ${(r.priceImpactBps / 100).toFixed(1)}%. Continue?`)) return;
       await signAndSend(walletCtx, connection, r.tx, { network: config.network, kind: "trade", coinMint: coin.mint }, () => setStage("confirming"));
       toast(side === "buy" ? `Bought ${num(r.expectedOut.ui)} $${coin.ticker}` : `Sold for ${sol(r.expectedOut.ui)}`);
+      // The wallet's balances now, the coin's numbers once the indexer has seen the trade (it polls every 4 s).
+      setBalTick((t) => t + 1);
+      for (const ms of [2_500, 7_000]) {
+        setTimeout(() => {
+          setBalTick((t) => t + 1);
+          void mutate((k) => typeof k === "string" && (k.startsWith(`/api/coins/${coin.mint}`) || k === `/api/coins/${encodeURIComponent(coin.ticker)}`));
+        }, ms);
+      }
     } catch (e) {
       // Errors after sending come back with their own wording; this one is only for before.
       console.error("trade", e);

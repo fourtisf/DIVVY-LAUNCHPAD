@@ -46,7 +46,11 @@ function candleQuery(tf: (typeof TF_LABELS)[number], ageMin: number): { tf: Cand
   return { tf: "1h", limit: 1000 };
 }
 
-export function CoinView({ coin, initialMeter, initialPayouts }: { coin: CoinDetail; initialMeter: Meter; initialPayouts: List<PayoutRound> }) {
+/** How often the page re-reads the coin, its chart and its trades (the indexer polls every 4 s). */
+const LIVE_MS = 8_000;
+
+export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { coin: CoinDetail; initialMeter: Meter; initialPayouts: List<PayoutRound> }) {
+  const { data: coin = initialCoin } = useSWR<CoinDetail>(`/api/coins/${encodeURIComponent(initialCoin.ticker)}`, { fallbackData: initialCoin, refreshInterval: LIVE_MS });
   const config = useConfig();
   const assets = useAssets();
   const toast = useToast();
@@ -57,7 +61,7 @@ export function CoinView({ coin, initialMeter, initialPayouts }: { coin: CoinDet
 
   const [tf, setTf] = useState<(typeof TF_LABELS)[number]>("All");
   const cq = candleQuery(tf, ageMin);
-  const { data: candles } = useSWR<CandleList>(`/api/coins/${m}/candles` + qs({ tf: cq.tf, unit: "mcap", limit: cq.limit }));
+  const { data: candles } = useSWR<CandleList>(`/api/coins/${m}/candles` + qs({ tf: cq.tf, unit: "mcap", limit: cq.limit }), { refreshInterval: LIVE_MS });
   // The line needs two points, and a new coin has one candle or none: it starts at launch, at the first
   // candle's open (or today's market cap with no trades yet), and ends now.
   const chartData = useMemo(() => {
@@ -72,7 +76,7 @@ export function CoinView({ coin, initialMeter, initialPayouts }: { coin: CoinDet
   const [tab, setTab] = useState<"payouts" | "holders" | "trades">("payouts");
   const { data: payouts } = useSWR<List<PayoutRound>>(`/api/coins/${m}/payouts?limit=10`, { fallbackData: initialPayouts });
   const { data: holders } = useSWR<List<Holder>>(tab === "holders" ? `/api/coins/${m}/holders` : null);
-  const { data: trades } = useSWR<List<Trade>>(tab === "trades" ? `/api/coins/${m}/trades?limit=24` : null);
+  const { data: trades } = useSWR<List<Trade>>(tab === "trades" ? `/api/coins/${m}/trades?limit=24` : null, { refreshInterval: LIVE_MS });
   const { data: meter = initialMeter } = useSWR<Meter>(`/api/coins/${m}/meter`, { fallbackData: initialMeter, refreshInterval: 30_000 });
 
   const [hold, setHold] = useState(1);
