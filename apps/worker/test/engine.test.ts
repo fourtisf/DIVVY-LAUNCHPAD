@@ -584,14 +584,49 @@ describe.skipIf(!run)("dividend engine", () => {
 
   it("splits trades from before a fee change at the old weights and later ones at the new (owner decision 2026-10-27)", async () => {
     await seed();
-    // Seeded slots: A 10 and 11, B 12, C 13, D 14. The change lands at slot 12.
-    await runPayouts(deps(loadParams({ PAYOUTS_DRY_RUN: "true", FEE_SPLIT_BEFORE: "12:50:10" })), stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
+    // Seeded slots: A 10 and 11, B 12, C 13, D 14. The change lands at slot 11; trades in that slot count as before it.
+    await runPayouts(deps(loadParams({ PAYOUTS_DRY_RUN: "true", FEE_SPLIT_BEFORE: "11:50:10" })), stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
     const alloc = Object.fromEntries((await prisma.feeAllocation.findMany({ where: { dryRun: true } })).map((a) => [a.coinId, [a.holdersLamports, a.divvyLamports]]));
     // A paid 0.60%: 5/6 to holders. B, C and D paid 0.85%: 50/85 to holders, the remainder to uspad.
     expect(alloc[coins.A]).toEqual([100_000_000n, 20_000_000n]);
     expect(alloc[coins.B]).toEqual([35_294_117n, 24_705_883n]);
     expect(alloc[coins.C]).toEqual([52_941_176n, 37_058_824n]);
     expect(alloc[coins.D]).toEqual([1_764_705n, 1_235_295n]);
+  });
+
+  it("a claim that landed but errored before its amount was saved is attributed from the chain (audit)", async () => {
+    await seed();
+    timing.pollMs = 1;
+    const d = deps(params({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
+    const crash: PayoutChain = {
+      ...stubChain(273_000_000n),
+      claimVault: async (onSigned: OnSigned) => {
+        await onSigned("CLAIM-X");
+        throw new Error("block height exceeded");
+      },
+      outcome: async () => ({ status: "landed", delta: 273_000_000n, slot: 100n }),
+    };
+    await expect(runPayouts(d, crash, HOUR, false)).rejects.toThrow(/block height/);
+    // The indexer reaches the claim transaction before the next run.
+    const max = (await prisma.trade.aggregate({ _max: { id: true } }))._max.id!;
+    await prisma.vaultClaim.updateMany({ where: { sig: "CLAIM-X" }, data: { toTradeId: max } });
+    await runPayouts(d, crash, HOUR, false, () => new Date(HOUR.getTime() + 300_000), { resumeOnly: true }).catch(() => {});
+    const c = await prisma.vaultClaim.findFirstOrThrow({ where: { sig: "CLAIM-X" } });
+    expect(c.lamports).toBe(273_000_000n);
+    expect((await prisma.feeAllocation.aggregate({ where: { vaultClaimId: c.id }, _sum: { lamports: true } }))._sum.lamports).toBe(273_000_000n);
+  });
+
+  it("a size limit too small for any coin's round doubles instead of stopping the stock for days (audit)", async () => {
+    await seed();
+    const nvda = await prisma.dividendAsset.findUniqueOrThrow({ where: { symbol: "NVDAx" } });
+    const key = `divvy:swap-limit:dry:${nvda.id}`;
+    // 0.01 SOL across A (0.1 SOL owed), B (0.05) and D: every part is under $1, so every NVDAx coin carries.
+    await redis.set(key, "10000000");
+    await runPayouts(deps(params({ PAYOUTS_DRY_RUN: "true" })), stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
+    const rounds = await prisma.payoutRound.findMany({ where: { hour: HOUR, dryRun: true, coin: { dividendAssetId: nvda.id } } });
+    expect(rounds.every((r) => r.status === "carried")).toBe(true);
+    expect(await redis.get(key)).toBe("20000000");
+    await redis.del(key);
   });
 
   it("counts each coin's holders from the chain for the board, without the curve, in dry-run too", async () => {

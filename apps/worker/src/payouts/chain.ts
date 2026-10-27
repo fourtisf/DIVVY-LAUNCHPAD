@@ -245,10 +245,23 @@ export function liveChain(d: WorkerDeps): PayoutChain {
       const vtx = swapTransaction(payer.publicKey, { ...built, instructions: [extra[0]!, ...built.instructions, ...extra.slice(1)] }, blockhash);
 
       // Simulate: the payer may spend at most the swap amount plus fees, rent and tip, and the payout
-      // vault must receive at least Jupiter's minimum.
-      const before = await d.conn.getMultipleAccountsInfo([payer.publicKey, address], "confirmed");
-      const sim = await d.conn.simulateTransaction(vtx, { sigVerify: false, commitment: "confirmed", accounts: { encoding: "base64", addresses: [payer.publicKey.toBase58(), address.toBase58()] } });
+      // vault must receive at least Jupiter's minimum. With one operations wallet (owner decision
+      // 2026-10-27) the signer also holds every holder's undelivered stock: none of the vault's other
+      // stock accounts may go down either (audit: a Jupiter route can move any account the signer owns).
+      const stockAccounts = (await d.prisma.dividendAsset.findMany({ where: { kind: "stock" }, select: { mint: true, tokenProgram: true } }))
+        .filter((a) => !!a.mint)
+        .map((a) => ata(payoutVault().publicKey, new PublicKey(a.mint!), a.tokenProgram === "spl_token" ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID))
+        .filter((k) => !k.equals(address));
+      const watched = [payer.publicKey, address, ...stockAccounts];
+      const before = await d.conn.getMultipleAccountsInfo(watched, "confirmed");
+      const sim = await d.conn.simulateTransaction(vtx, { sigVerify: false, commitment: "confirmed", accounts: { encoding: "base64", addresses: watched.map((k) => k.toBase58()) } });
       if (sim.value.err) throw new SwapRejected(`simulation failed: ${JSON.stringify(sim.value.err)}`);
+      const amount = (data: Buffer | undefined) => (data && data.length >= 165 ? AccountLayout.decode(data.subarray(0, 165)).amount : 0n);
+      stockAccounts.forEach((k, i) => {
+        const pre = amount(before[i + 2]?.data);
+        const post = amount(sim.value.accounts?.[i + 2] ? Buffer.from(sim.value.accounts[i + 2]!.data[0] ?? "", "base64") : undefined);
+        if (post < pre) throw new SwapRejected(`simulation moves stock out of the payout vault's account ${k.toBase58()}`);
+      });
       const [payerAfter, destAfter] = sim.value.accounts ?? [];
       const spent = BigInt(before[0]?.lamports ?? 0) - BigInt(payerAfter?.lamports ?? 0);
       const maxSpend = lamportsIn + 30_000_000n + BigInt(tip ? d.sol.jitoTipLamports : 0);

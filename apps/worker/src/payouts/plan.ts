@@ -134,11 +134,13 @@ export type DeliveryAction = "send" | "send_create_ata" | "hold";
  * HANDOFF §3.4. Wallets that already hold the asset's token account get their credit once it passes
  * AUTO_PUSH_MIN_USD. Under "push", wallets without one are sent too, but only once the credit is worth
  * PUSH_NEW_ATA_MIN_USD, so the payout vault never pays more rent than the dividend is worth. Under
- * "claim", they keep the credit and claim it, paying their own rent.
+ * "claim", they keep the credit and claim it, paying their own rent. A `stale` credit (no new dividend
+ * for a week) is sent whatever its size, as long as it covers its delivery (deliveryCharge): otherwise
+ * a holder who sold with a small credit would never get it (audit).
  */
-export function deliveryAction(p: { delivery: "push" | "claim"; hasAta: boolean; creditUsd: number; autoPushMinUsd: number; pushNewAtaMinUsd: number }): DeliveryAction {
-  if (p.hasAta) return p.creditUsd >= p.autoPushMinUsd ? "send" : "hold";
-  if (p.delivery === "push" && p.creditUsd >= p.pushNewAtaMinUsd) return "send_create_ata";
+export function deliveryAction(p: { delivery: "push" | "claim"; hasAta: boolean; creditUsd: number; autoPushMinUsd: number; pushNewAtaMinUsd: number; stale?: boolean }): DeliveryAction {
+  if (p.hasAta) return p.creditUsd >= p.autoPushMinUsd || p.stale ? "send" : "hold";
+  if (p.delivery === "push" && (p.creditUsd >= p.pushNewAtaMinUsd || p.stale)) return "send_create_ata";
   return "hold";
 }
 

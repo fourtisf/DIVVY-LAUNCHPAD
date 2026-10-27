@@ -18,7 +18,7 @@ const ParamsSchema = z.object({
   FEE_CREATOR_BPS: z.coerce.number().int().default(15),
   FEE_DIVVY_BPS: z.coerce.number().int().default(35),
   /**
-   * "<slot>:<holders bps>:<uspad bps>": trades before this slot paid the previous platform fee and are
+   * "<slot>:<holders bps>:<uspad bps>": trades up to this slot paid the previous platform fee and are
    * split at its weights. go-live.sh fee-rate sets it when the PlatformConfig's fee_rate changes.
    */
   FEE_SPLIT_BEFORE: z.string().regex(/^\d+:\d+:\d+$/, "FEE_SPLIT_BEFORE is <slot>:<holders bps>:<uspad bps>").optional(),
@@ -93,6 +93,7 @@ export function loadParams(src: Record<string, string | undefined> = process.env
   };
   assertSplit(fees);
   const before = e.FEE_SPLIT_BEFORE?.split(":");
+  if (before && Number(before[1]) + Number(before[2]) === 0) throw new Error("FEE_SPLIT_BEFORE must not split 0:0");
   const [poolHolders, poolCreator, poolDivvy] = e.POOL_FEE_SPLIT.split(":").map(Number) as [number, number, number];
   if (poolHolders + poolCreator + poolDivvy === 0) throw new Error("POOL_FEE_SPLIT must not be all zero");
   return {

@@ -78,6 +78,8 @@ export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, ne
 const INITIALIZE_WITH_TOKEN_2022 = Buffer.from("25be7ede2c9aab11", "hex");
 /** The Jito tip is a small transfer; anything bigger to an address the page can't check is refused. */
 const MAX_TIP_LAMPORTS = 1_000_000n;
+/** The most the create's priority fee (compute unit price × limit) may cost the creator (audit). */
+const MAX_PRIORITY_LAMPORTS = 1_000_000n;
 
 /**
  * The coin's create, which the creator's wallet signs and pays for (owner decision 2026-10-27). It may
@@ -99,10 +101,18 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
   let creates = 0;
   let fees = 0;
   let tips = 0;
+  // Without a limit instruction a transaction may use up to 1.4M compute units.
+  let cuPrice = 0n;
+  let cuLimit = 1_400_000n;
   for (const ix of msg.compiledInstructions) {
     const prog = keys[ix.programIdIndex]?.toBase58() ?? "";
     const data = Buffer.from(ix.data);
-    if (prog === ComputeBudgetProgram.programId.toBase58()) continue;
+    if (prog === ComputeBudgetProgram.programId.toBase58()) {
+      // SetComputeUnitLimit (2, u32) and SetComputeUnitPrice (3, u64 micro-lamports).
+      if (data[0] === 2 && data.length >= 5) cuLimit = BigInt(data.readUInt32LE(1));
+      else if (data[0] === 3 && data.length >= 9) cuPrice = data.readBigUInt64LE(1);
+      continue;
+    }
     if (prog === LAUNCHLAB[network]) {
       // Accounts: 0 payer, 1 creator, 6 the new mint (packages/solana createInstruction).
       if (!data.subarray(0, 8).equals(INITIALIZE_WITH_TOKEN_2022)) throw new UnsafeTransaction("a LaunchLab instruction that isn't a coin create");
@@ -125,4 +135,5 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
     throw new UnsafeTransaction(`unexpected program ${prog}`);
   }
   if (creates !== 1) throw new UnsafeTransaction("this isn't a coin create");
+  if ((cuPrice * cuLimit) / 1_000_000n > MAX_PRIORITY_LAMPORTS) throw new UnsafeTransaction("a priority fee above 0.001 SOL");
 }

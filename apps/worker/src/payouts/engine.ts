@@ -141,9 +141,14 @@ async function alertEmptyVault(d: WorkerDeps, indexedLamports: bigint) {
   await d.alerts.send("vault-empty", "critical", `The platform fee vault is empty, but indexed trades owe it ${indexedLamports} lamports since the last claim. Fees may not be reaching the vault (docs/AUDIT.md R2).`, 6 * 3600);
 }
 
-/** A live claim row left by a crash: find out whether its transaction landed. */
+/**
+ * A live claim row left by a crash: find out whether its transaction landed. A claim with no transaction
+ * and a place in the trade stream is a real zero (the vault was empty). One that was signed but has no
+ * amount was interrupted after sending, whether or not the indexer has placed it since: only the chain
+ * knows what it moved (audit: it used to be attributed as 0 and that hour's fees were lost).
+ */
 async function recoverClaim(d: WorkerDeps, chain: PayoutChain, row: Prisma.VaultClaimGetPayload<object>) {
-  if (row.dryRun || row.attributedAt || row.lamports > 0n || row.toTradeId !== null) return row;
+  if (row.dryRun || row.attributedAt || row.lamports > 0n || (!row.sig && row.toTradeId !== null)) return row;
   const o = row.sig ? await chain.outcome(row.sig, "vault") : ({ status: "failed" } as const);
   if (o.status === "landed") return d.prisma.vaultClaim.update({ where: { id: row.id }, data: { lamports: o.delta, toSlot: o.slot } });
   if (o.status === "failed" || Date.now() - row.createdAt.getTime() > 5 * 60_000) {
@@ -214,7 +219,8 @@ async function attributeVaultClaim(d: WorkerDeps, chain: PayoutChain, claimId: s
   const before = d.params.feeSplitBefore;
   const early = new Map<string, bigint>();
   if (before) {
-    const old = await d.prisma.trade.groupBy({ by: ["coinId"], where: { venue: "curve", id: range, slot: { lt: before.slot } }, _sum: { platformFee: true } });
+    // Trades in the change's own slot may have come before it: they count as before (holders' side; audit).
+    const old = await d.prisma.trade.groupBy({ by: ["coinId"], where: { venue: "curve", id: range, slot: { lte: before.slot } }, _sum: { platformFee: true } });
     for (const f of old) early.set(f.coinId, f._sum.platformFee ?? 0n);
   }
   const a = attributeClaim(claim.lamports, byCoin);
@@ -255,11 +261,11 @@ async function shrinkSwapLimit(d: WorkerDeps, assetId: string, dryRun: boolean, 
   await d.redis.set(limitKey(assetId, dryRun), next.toString(), "EX", 7 * 86_400);
 }
 
-/** A good swap: the limit grows back by half, up to SWAP_BATCH_MAX_LAMPORTS. */
-async function growSwapLimit(d: WorkerDeps, assetId: string, dryRun: boolean) {
+/** A good swap: the limit grows back by half (or `by` times), up to SWAP_BATCH_MAX_LAMPORTS. */
+async function growSwapLimit(d: WorkerDeps, assetId: string, dryRun: boolean, by: [bigint, bigint] = [3n, 2n]) {
   const v = await d.redis.get(limitKey(assetId, dryRun));
   if (!v) return;
-  const next = (BigInt(v) * 3n) / 2n;
+  const next = (BigInt(v) * by[0]) / by[1];
   if (next >= BigInt(d.env.SWAP_BATCH_MAX_LAMPORTS)) await d.redis.del(limitKey(assetId, dryRun));
   else await d.redis.set(limitKey(assetId, dryRun), next.toString(), "EX", 7 * 86_400);
 }
@@ -297,6 +303,12 @@ async function stepOpenRounds(d: WorkerDeps, hour: Date, dryRun: boolean, solUsd
     const total = [...coins.values()].reduce((a, b) => a + b, 0n);
     if (total > budget) {
       await d.alerts.send(`swap-budget-${assetId}-${hour.toISOString()}`, "warn", `Holders' money waiting for asset ${assetId} (${total} lamports) is over this hour's swap budget (${budget > 0n ? budget : 0n}); paying part now, the rest carries`);
+    }
+    // A size limit so small that every coin's part is under MIN_ROUND_USD would never swap, so it would
+    // never grow back: the stock would stop paying until the limit expired (audit). Double it instead.
+    const owed = [...coins.values()].some((h) => !shouldCarry(h, solUsd, d.params.minRoundUsd));
+    if (owed && room < capLeft && [...coins.keys()].every((c) => shouldCarry(takes.get(c) ?? 0n, solUsd, d.params.minRoundUsd))) {
+      await growSwapLimit(d, assetId, dryRun, [2n, 1n]);
     }
     for (const [coinId, holders] of coins) {
       const take = takes.get(coinId) ?? 0n;
@@ -423,6 +435,11 @@ async function stepSwaps(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: 
         continue;
       }
       const ref = { lamportsIn, assetDecimals: asset.decimals, solUsd: prices.solUsd, assetUsd, maxImpactBps: d.params.maxSwapImpactBps };
+      // No price to check the quote against says nothing about the swap's size: wait, without shrinking (audit).
+      if (assetUsd <= 0 || prices.solUsd <= 0) {
+        await refuse("there is no price to check the quote against", "critical");
+        continue;
+      }
       if (quoteLooksWrong({ ...ref, outAmount: q.outAmount })) {
         await shrinkSwapLimit(d, assetId, dryRun, lamportsIn);
         await refuse("the quote is off the reference price", "critical");
@@ -442,9 +459,11 @@ async function stepSwaps(d: WorkerDeps, chain: PayoutChain, hour: Date, dryRun: 
           continue;
         }
         if ((await chain.feeClaimerLamports()) < lamportsIn + 20_000_000n) {
+          // This swap waits for a top-up; the other stocks, snapshots and sends still run (audit).
+          await d.redis.decrby(capKey, Number(lamportsIn));
           await d.prisma.swapBatch.update({ where: { id: batch.id }, data: { status: "pending" } });
-          await d.alerts.send("fee-claimer-short", "critical", "Fee claimer holds less SOL than the holders' share it must swap");
-          throw new Error("fee claimer balance below the swap amount");
+          await d.alerts.send("fee-claimer-short", "critical", `Fee claimer holds less SOL than the holders' share it must swap for ${asset.symbol}; that swap waits`);
+          continue;
         }
         let signed = false;
         try {

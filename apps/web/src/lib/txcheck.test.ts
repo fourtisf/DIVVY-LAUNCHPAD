@@ -137,4 +137,13 @@ describe("checkCreate", () => {
     expect(() => checkCreate(build([cu!, create(me, me, mint, "faea0d7b9eb9d7d0"), f!, t!]), me, "mainnet-beta", fee)).toThrow(/isn't a coin create/);
     expect(() => checkCreate(build([cu!, f!, t!]), me, "mainnet-beta", fee)).toThrow(/a coin create|another signer/);
   });
+
+  it("refuses a priority fee that would cost more than 0.001 SOL (audit)", () => {
+    const [cu, c, f, t] = ok();
+    // 400k units at 2,000 micro-lamports = 800 lamports: fine. At 5,000,000 micro-lamports = 2 SOL: refused.
+    expect(() => checkCreate(build([cu!, ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 2_000 }), c!, f!, t!]), me, "mainnet-beta", fee)).not.toThrow();
+    expect(() => checkCreate(build([cu!, ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000_000_000 }), c!, f!, t!]), me, "mainnet-beta", fee)).toThrow(/priority fee/);
+    // No limit instruction: priced at the 1.4M-unit maximum.
+    expect(() => checkCreate(build([ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 }), c!, f!, t!]), me, "mainnet-beta", fee)).toThrow(/priority fee/);
+  });
 });

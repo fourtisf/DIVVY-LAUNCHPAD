@@ -27,7 +27,8 @@ const EnvSchema = z.object({
   /** Push delivery: create a holder's xStock ATA only once what we owe them is worth at least this. */
   PUSH_NEW_ATA_MIN_USD: z.coerce.number().positive().default(5),
   /** Transfers per push transaction (each may also create an ATA). */
-  PUSH_BATCH_SIZE: z.coerce.number().int().min(1).max(12).default(6),
+  // 9 sends that each create a token account still fit in 1,232 bytes; 10 don't (audit; ECONOMICS.md).
+  PUSH_BATCH_SIZE: z.coerce.number().int().min(1).max(9).default(6),
   /**
    * Collect the CPMM creator fee of graduated coins whose pool_creator is the fee claimer
    * (PlatformConfig.platform_cp_creator). Off until that update is made with the owner's approval.

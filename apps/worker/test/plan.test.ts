@@ -137,6 +137,10 @@ describe("deliveryAction", () => {
     expect(deliveryAction({ ...base, delivery: "push", hasAta: false, creditUsd: 4 })).toBe("hold");
     expect(deliveryAction({ ...base, delivery: "push", hasAta: false, creditUsd: 6 })).toBe("send_create_ata");
     expect(deliveryAction({ ...base, delivery: "claim", hasAta: false, creditUsd: 600 })).toBe("hold");
+    // A week without a new dividend: sent whatever its size (the charge check still applies; audit).
+    expect(deliveryAction({ ...base, delivery: "push", hasAta: true, creditUsd: 0.5, stale: true })).toBe("send");
+    expect(deliveryAction({ ...base, delivery: "push", hasAta: false, creditUsd: 2, stale: true })).toBe("send_create_ata");
+    expect(deliveryAction({ ...base, delivery: "claim", hasAta: false, creditUsd: 2, stale: true })).toBe("hold");
   });
 });
 

@@ -216,7 +216,11 @@ export function CreateForm() {
       <Link className="back" href="/"><Icon name="back" />Back to the board</Link>
       <div className="create-head">
         <h1>Create a coin</h1>
-        <p>It&apos;s free. uspad&apos;s launcher creates your coin in a private bundle and pays the rent. Nobody gets a dev buy, and your holders get the dividend.</p>
+        <p>
+          {feeSol || createSol
+            ? `Your wallet signs the create and pays ${feeSol ? `${feeSol} SOL to launch plus ` : ""}about ${createSol} SOL for the coin itself. It goes out in a private bundle, nobody gets a dev buy, and your holders get the dividend.`
+            : "It's free. uspad's launcher creates your coin in a private bundle and pays the rent. Nobody gets a dev buy, and your holders get the dividend."}
+        </p>
       </div>
       <div className="create-grid">
         <form id="frm" noValidate onSubmit={submit}>

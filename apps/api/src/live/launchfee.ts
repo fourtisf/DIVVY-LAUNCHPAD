@@ -27,13 +27,20 @@ const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
  */
 const MAX_AGE_SEC = 86_400;
 
-/** Why `tx` doesn't pay the launch fee, or null when it does: signed by `payer`, `lamports` or more to `to`. */
-export function feePaymentProblem(tx: VersionedTransactionResponse, payer: string, to: string, lamports: bigint, nowSec: number): string | null {
+/**
+ * Why `tx` doesn't pay the launch fee, or null when it does: signed by `payer`, `lamports` or more to `to`.
+ * A coin's create also sends the fee (since the creator signs it), but that fee paid for that coin: a
+ * transaction that calls LaunchLab is never a separate payment (audit).
+ */
+export function feePaymentProblem(tx: VersionedTransactionResponse, payer: string, to: string, lamports: bigint, nowSec: number, launchLab?: string): string | null {
   const meta = tx.meta;
   if (!meta || meta.err) return "The payment failed on chain. Nothing was charged but the network fee.";
   if (tx.blockTime && nowSec - tx.blockTime > MAX_AGE_SEC) return "That payment is more than a day old. Pay the launch fee again.";
   const keys = tx.transaction.message.getAccountKeys({ accountKeysFromLookups: meta.loadedAddresses });
   if (keys.get(0)?.toBase58() !== payer) return "The payment has to come from the wallet you're signed in with";
+  if (launchLab && tx.transaction.message.compiledInstructions.some((ix) => keys.get(ix.programIdIndex)?.toBase58() === launchLab)) {
+    return "That's a coin's create: its fee paid for that coin";
+  }
   let i = 0;
   while (i < keys.length && keys.get(i)!.toBase58() !== to) i++;
   if (i === keys.length) return "That payment didn't go to uspad's launch wallet";
@@ -55,7 +62,7 @@ export async function launchFee(d: LiveDeps, v: { userId: string; wallet: string
   if (await d.prisma.launchFee.findUnique({ where: { sig } })) return { fail: (r) => sendError(r, 409, "FEE_USED", "That payment already paid for a launch") };
   const tx = await getTransactionAnyVersion(d.conn, sig).catch(() => null);
   if (!tx) return { fail: (r) => sendError(r, 409, "FEE_NOT_FOUND", "The payment isn't confirmed yet. Try again in a few seconds.") };
-  const problem = feePaymentProblem(tx, v.wallet, d.env.LAUNCH_FEE_WALLET!, lamports, Math.floor(Date.now() / 1000));
+  const problem = feePaymentProblem(tx, v.wallet, d.env.LAUNCH_FEE_WALLET!, lamports, Math.floor(Date.now() / 1000), d.programs.launchLab.toBase58());
   if (problem) return { fail: (r) => sendError(r, 422, "BAD_FEE", problem) };
   try {
     const row = await d.prisma.launchFee.create({ data: { userId: v.userId, sig, lamports } });

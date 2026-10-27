@@ -27,6 +27,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class JitoClient {
   private id = 1;
   private lastCall = 0;
+  private gate: Promise<void> = Promise.resolve();
   private tipAccounts: { at: number; list: PublicKey[] } | null = null;
 
   constructor(
@@ -35,11 +36,20 @@ export class JitoClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
+  /** One request at a time, 1.1 s apart: concurrent launches queue instead of firing together (audit). */
+  private turn(): Promise<void> {
+    const next = this.gate.then(async () => {
+      const wait = this.lastCall + 1100 - Date.now();
+      if (wait > 0) await sleep(wait);
+      this.lastCall = Date.now();
+    });
+    this.gate = next.catch(() => {});
+    return next;
+  }
+
   private async call<T>(method: Method, params: unknown[]): Promise<T> {
     // Stay under the default 1 request per second per region.
-    const wait = this.lastCall + 1100 - Date.now();
-    if (wait > 0) await sleep(wait);
-    this.lastCall = Date.now();
+    await this.turn();
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.uuid) headers["x-jito-auth"] = this.uuid;
     const res = await this.fetchImpl(this.baseUrl.replace(/\/$/, "") + PATH[method], {

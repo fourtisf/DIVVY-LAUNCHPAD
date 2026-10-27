@@ -24,6 +24,12 @@ const STEPS = [
   "Live on chain",
   "On the board",
 ];
+/** Whether a wallet error means the person turned the request down (wallet-adapter wraps the wallet's own error). */
+const rejected = (e: unknown) => {
+  const x = e as { message?: string; code?: number; error?: { code?: number; message?: string } } | null;
+  return x?.code === 4001 || x?.error?.code === 4001 || /reject|declin|denied|cancel/i.test(`${x?.message ?? ""} ${x?.error?.message ?? ""}`);
+};
+
 const STEP_INDEX: Record<LaunchStep, number> = {
   checking: 0,
   signing: 1,
@@ -70,18 +76,45 @@ export function LaunchModal({
    * opens, then sent back signed for the worker to add the mint's signature. Turning it down, or a
    * create that fails the check, ends the launch with nothing charged.
    */
+  // One wallet prompt at a time: a create that arrives while one is open waits for it (audit).
+  const busy = useRef(false);
+  const queued = useRef<string | null>(null);
+  const sign = (body: object) => api(`/api/launch/${launchId}/sign`, { method: "POST", body: JSON.stringify(body) });
   const signCreate = async (b64: string) => {
+    if (busy.current) {
+      queued.current = b64;
+      return;
+    }
+    busy.current = true;
     try {
-      if (!wallet.publicKey || !wallet.signTransaction) throw new Error("This wallet can't sign the launch");
+      if (!wallet.publicKey || !wallet.signTransaction) throw new UnsafeTransaction("this wallet can't sign the launch");
       const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
       checkCreate(tx, wallet.publicKey, config.network, { to: config.launchFee.to, lamports: BigInt(config.launchFee.amount.raw) });
       const signed = await wallet.signTransaction(tx);
       let bin = "";
       for (const b of signed.serialize()) bin += String.fromCharCode(b);
-      await api(`/api/launch/${launchId}/sign`, { method: "POST", body: JSON.stringify({ signedTx: btoa(bin) }) });
+      // A lost answer is retried: the signature is worth more than a quick error.
+      for (let i = 0; ; i++) {
+        try {
+          await sign({ signedTx: btoa(bin) });
+          break;
+        } catch (e) {
+          if (i === 2) throw e;
+          await new Promise((r) => setTimeout(r, 800));
+        }
+      }
     } catch (e) {
-      if (e instanceof UnsafeTransaction) toast(e.message);
-      await api(`/api/launch/${launchId}/sign`, { method: "POST", body: JSON.stringify({ refused: true }) }).catch(() => {});
+      // Only a refusal ends the launch: the creator turned it down, or the create failed the page's
+      // check. Any other wallet error (a prompt still open, a dropped connection) waits for the next ask.
+      if (e instanceof UnsafeTransaction || rejected(e)) {
+        if (e instanceof UnsafeTransaction) toast(e.message);
+        await sign({ refused: true }).catch(() => {});
+      } else toast("Your wallet didn't sign the launch. It will ask again in a moment.");
+    } finally {
+      busy.current = false;
+      const next = queued.current;
+      queued.current = null;
+      if (next && next !== b64) void signCreate(next);
     }
   };
 

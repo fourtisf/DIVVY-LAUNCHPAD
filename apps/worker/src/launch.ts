@@ -16,6 +16,7 @@
 import { createPublicKey, verify } from "node:crypto";
 import BN from "bn.js";
 import { ComputeBudgetProgram, Keypair, PublicKey, TransactionMessage, VersionedTransaction, type Connection } from "@solana/web3.js";
+import { MINT_SIZE, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { publishLive, getLaunchSettings } from "@divvy/server";
 import { LAUNCHLAB_DEFAULT_CURVE } from "@divvy/solana";
 import { assertCanSend, createTransaction, decodePool, MainnetDisabledError, poolAddresses, poolPriceSol, signatureOf } from "@divvy/solana/live";
@@ -83,9 +84,16 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
     let sentAny = false;
     let lastError = "The create didn't land";
     let unapproved = 0;
+    // The last create sent: if the launch stops before it is known to have landed, the reconciler
+    // waits for this blockhash to expire before calling it failed.
+    let sentHeight: number | null = null;
+    /** Stops asking the wallet: an earlier create may still land, so the reconciler decides (audit). */
+    const handOff = async () => {
+      await d.prisma.launch.updateMany({ where: { id: launchId, step: "signing" }, data: { step: "bundling", lastValidBlockHeight: BigInt(sentHeight!), unsignedTx: null, creatorSigned: null } });
+    };
     for (let attempt = 1; attempt <= MAX_ATTEMPTS && !landedSig; ) {
       // A previous attempt may have landed late.
-      if (await d.conn.getAccountInfo(mint.publicKey, "confirmed")) {
+      if (await mintCreated(d.conn, mint.publicKey)) {
         landedSig = await createSignature(d.conn, mint.publicKey);
         break;
       }
@@ -114,20 +122,38 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
 
       // 4. The creator signs in their wallet.
       const signed = await creatorSigned(d, launchId, tx, mint, lastValidBlockHeight);
-      if (signed === "refused") throw new LaunchError("LAUNCH_CANCELLED", "You turned the launch down in your wallet. Nothing was charged.");
-      if (!signed) {
-        if (await d.conn.getAccountInfo(mint.publicKey, "confirmed")) continue; // an earlier attempt landed
-        if (++unapproved >= MAX_SIGN_ROUNDS) throw new LaunchError("LAUNCH_NOT_APPROVED", "The launch wasn't approved in your wallet in time. Nothing was charged. Try again.");
+      if (signed === "refused") {
+        // Turning down a later round doesn't stop a create already sent from landing (audit).
+        if (sentAny) {
+          await handOff();
+          break;
+        }
+        throw new LaunchError("LAUNCH_CANCELLED", "You turned the launch down in your wallet. Nothing was charged.");
+      }
+      // A signature that came back after the blockhash expired can't land: ask again (audit).
+      const late = signed && (await d.conn.getBlockHeight("confirmed")) > lastValidBlockHeight;
+      if (!signed || late) {
+        if (await mintCreated(d.conn, mint.publicKey)) continue; // an earlier attempt landed
+        if (++unapproved >= MAX_SIGN_ROUNDS) {
+          if (sentAny) {
+            await handOff();
+            break;
+          }
+          throw new LaunchError("LAUNCH_NOT_APPROVED", "The launch wasn't approved in your wallet in time. Nothing was charged. Try again.");
+        }
         continue; // asked again, with a fresh blockhash
       }
       const create = signed;
       const signature = signatureOf(create);
       await d.txlog({ purpose: "launch.create", signer: "creator", signature, coinId: coin.id });
-      await d.prisma.launch.update({
-        where: { id: launchId },
+      // Conditional: a launch the indexer or the reconciler already settled is never sent again (audit).
+      const moved = await d.prisma.launch.updateMany({
+        where: { id: launchId, step: "signing" },
         data: { step: "bundling", signature, lastValidBlockHeight: BigInt(lastValidBlockHeight), attempts: { increment: 1 }, unsignedTx: null, creatorSigned: null },
       });
+      if (moved.count !== 1) return d.log("launch: settled elsewhere while signing", { launchId });
       attempt++;
+      sentHeight = lastValidBlockHeight;
 
       // From here on the create may be on its way: only the chain can say it didn't land.
       sentAny = true;
@@ -194,22 +220,25 @@ export function signedBy(signer: PublicKey, message: Uint8Array, sig: Uint8Array
  */
 async function creatorSigned(d: WorkerDeps, launchId: string, tx: VersionedTransaction, mint: Keypair, lastValidBlockHeight: number): Promise<VersionedTransaction | "refused" | null> {
   const unsigned = Buffer.from(new VersionedTransaction(tx.message).serialize()).toString("base64");
-  await d.prisma.launch.update({
-    where: { id: launchId },
+  const asked = await d.prisma.launch.updateMany({
+    where: { id: launchId, step: { in: ["checking", "signing", "bundling"] } },
     data: { step: "signing", unsignedTx: unsigned, creatorSigned: null, signRefused: false, lastValidBlockHeight: BigInt(lastValidBlockHeight) },
   });
+  if (asked.count !== 1) return null; // settled elsewhere (landed or failed)
   const creator = tx.message.staticAccountKeys[0]!;
   const end = Date.now() + signing.waitMs;
   while (Date.now() < end) {
     const l = await d.prisma.launch.findUnique({ where: { id: launchId }, select: { step: true, creatorSigned: true, signRefused: true } });
     if (!l || l.step !== "signing") return null;
-    if (l.signRefused) return "refused";
+    // A signature wins over a refusal posted after it (a retried request whose answer was lost).
     if (l.creatorSigned) {
       const back = acceptSigned(l.creatorSigned, tx, creator, mint);
       if (back) return back;
       d.log("launch: the signed create isn't this create, or isn't signed by its creator", { launchId });
-      await d.prisma.launch.update({ where: { id: launchId }, data: { creatorSigned: null } });
+      // Only that one: a good signature posted meanwhile stays (audit).
+      await d.prisma.launch.updateMany({ where: { id: launchId, creatorSigned: l.creatorSigned }, data: { creatorSigned: null } });
     }
+    if (l.signRefused) return "refused";
     await new Promise((r) => setTimeout(r, signing.pollMs));
   }
   return null;
@@ -281,10 +310,20 @@ async function confirmed(conn: Connection, signature: string, ms = 30_000): Prom
   return false;
 }
 
+/**
+ * Whether the create landed: the mint exists as a Token-2022 mint. Anyone who knows the address (the
+ * creator does, from the create they sign) can send it lamports, which makes a bare system account
+ * there; that isn't a coin (audit).
+ */
+export async function mintCreated(conn: Connection, mint: PublicKey): Promise<boolean> {
+  const info = await conn.getAccountInfo(mint, "confirmed");
+  return !!info && info.owner.equals(TOKEN_2022_PROGRAM_ID) && info.data.length >= MINT_SIZE;
+}
+
 async function waitForMint(conn: Connection, mint: PublicKey, ms: number): Promise<boolean> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    if (await conn.getAccountInfo(mint, "confirmed").catch(() => null)) return true;
+    if (await mintCreated(conn, mint).catch(() => false)) return true;
     await new Promise((r) => setTimeout(r, 1000));
   }
   return false;
@@ -346,7 +385,7 @@ export async function reconcileLaunches(d: WorkerDeps, requeue: (launchId: strin
     const height = await d.conn.getBlockHeight("confirmed");
     for (const l of bundling) {
       const mint = l.coin?.mint ?? l.mintPubkey;
-      if (mint && (await d.conn.getAccountInfo(new PublicKey(mint), "confirmed"))) await markLanded(d, l.id, await createSignature(d.conn, new PublicKey(mint)));
+      if (mint && (await mintCreated(d.conn, new PublicKey(mint)))) await markLanded(d, l.id, await createSignature(d.conn, new PublicKey(mint)));
       else if (l.lastValidBlockHeight !== null && BigInt(height) > l.lastValidBlockHeight + 150n) await failLaunch(d, l.id, "LAUNCH_FAILED", "The launch didn't land on chain. Nothing was created. Try again.");
     }
   }
@@ -355,7 +394,7 @@ export async function reconcileLaunches(d: WorkerDeps, requeue: (launchId: strin
   const unsigned = await d.prisma.launch.findMany({ where: { step: "signing", updatedAt: { lt: new Date(Date.now() - 5 * 60_000) } }, include: { coin: true }, take: 50 });
   for (const l of unsigned) {
     const mint = l.coin?.mint ?? l.mintPubkey;
-    if (mint && (await d.conn.getAccountInfo(new PublicKey(mint), "confirmed"))) await markLanded(d, l.id, await createSignature(d.conn, new PublicKey(mint)));
+    if (mint && (await mintCreated(d.conn, new PublicKey(mint)))) await markLanded(d, l.id, await createSignature(d.conn, new PublicKey(mint)));
     else await failLaunch(d, l.id, "LAUNCH_FAILED", "The launch stopped before it was sent. Nothing was charged. Try again.");
   }
   const lost = await d.prisma.launch.findMany({ where: { step: "checking", createdAt: { lt: new Date(Date.now() - 5 * 60_000) } }, select: { id: true }, take: 50 });

@@ -11,7 +11,7 @@ import bs58 from "bs58";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { Keypair, PublicKey, SystemProgram, TransactionMessage, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
 import { Redis } from "ioredis";
 import { PrismaClient } from "@divvy/db";
 import { ApiErrorSchema, CheckResponseSchema, CoinDetailSchema, CoinListSchema, ConfigSchema, LaunchStatusSchema, MeSchema, StatsSchema, UploadResponseSchema } from "@divvy/shared";
@@ -52,11 +52,14 @@ const fakeConn = {
 } as unknown as Connection;
 
 /** A confirmed SOL transfer the way getTransaction returns it, for the launch-fee checks. */
-function transferTx(from: string, to: string, lamports: number, o: { err?: unknown; ageSec?: number } = {}): VersionedTransactionResponse {
+function transferTx(from: string, to: string, lamports: number, o: { err?: unknown; ageSec?: number; alsoCalls?: PublicKey } = {}): VersionedTransactionResponse {
   const message = new TransactionMessage({
     payerKey: new PublicKey(from),
     recentBlockhash: bs58.encode(Buffer.alloc(32, 3)),
-    instructions: [SystemProgram.transfer({ fromPubkey: new PublicKey(from), toPubkey: new PublicKey(to), lamports })],
+    instructions: [
+      SystemProgram.transfer({ fromPubkey: new PublicKey(from), toPubkey: new PublicKey(to), lamports }),
+      ...(o.alsoCalls ? [new TransactionInstruction({ programId: o.alsoCalls, keys: [], data: Buffer.alloc(8) })] : []),
+    ],
   }).compileToV0Message();
   return {
     slot: 1,
@@ -86,6 +89,13 @@ describe("launch fee payment check", () => {
     expect(check(transferTx(payer, wallet, 20_000_000, { ageSec: 7200 }))).toBeNull();
     expect(check(transferTx(other, wallet, 20_000_000))).toMatch(/signed in with/);
     expect(check(transferTx(payer, other, 20_000_000))).toMatch(/launch wallet/);
+  });
+
+  it("refuses a coin's own create as a payment for another launch (audit)", () => {
+    const launchLab = Keypair.generate().publicKey;
+    const create = transferTx(payer, wallet, 20_000_000, { alsoCalls: launchLab });
+    expect(feePaymentProblem(create, payer, wallet, 20_000_000n, now, launchLab.toBase58())).toMatch(/coin's create/);
+    expect(feePaymentProblem(transferTx(payer, wallet, 20_000_000), payer, wallet, 20_000_000n, now, launchLab.toBase58())).toBeNull();
   });
 });
 
@@ -294,6 +304,9 @@ describe.skipIf(!run)("live mode", () => {
         const r = await launch(await coin(name, ticker));
         expect(r.statusCode).toBe(201);
         ids.push((r.json() as { launchId: string }).launchId);
+        // One launch on its way per creator (audit): the next waits for the worker to finish this one.
+        if (ids.length === 1) expect((await launch(await coin("Cold Crab", "CCRAB"))).json()).toMatchObject({ code: "LAUNCH_IN_PROGRESS" });
+        await prisma.launch.update({ where: { id: ids[ids.length - 1] }, data: { step: "indexed" } });
       }
 
       // A fee paid on its own before the move (or left by a failed launch) is credit: it covers the next launch.

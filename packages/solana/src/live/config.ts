@@ -20,7 +20,9 @@ const Env = z.object({
   LAUNCHLAB_GLOBAL_CONFIG: z.string().min(32).optional(),
   JITO_BLOCK_ENGINE_URL: z.string().url().default("https://mainnet.block-engine.jito.wtf"),
   JITO_UUID: z.string().optional(),
-  JITO_TIP_LAMPORTS: z.coerce.number().int().min(1000).default(100_000),
+  // At most what the page lets a creator sign (apps/web/src/lib/txcheck.ts MAX_TIP_LAMPORTS): a higher tip
+  // would make every launch fail the page's check of the create (audit).
+  JITO_TIP_LAMPORTS: z.coerce.number().int().min(1000).max(1_000_000).default(100_000),
   JUP_BASE_URL: z.string().url().default("https://api.jup.ag"),
   JUP_API_KEY: z.string().optional(),
   /** Set to "true" only after the audit sign-off (docs/MAINNET_CHECKLIST.md). */

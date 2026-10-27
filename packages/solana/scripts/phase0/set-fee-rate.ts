@@ -13,7 +13,7 @@
  * Usage (send; updates are rate-limited per epoch, so the simulation may say to wait for the next one):
  *   RPC_URL=... PLATFORM_ADMIN_KEYPAIR=/path/admin.json FEE_RATE=8500 I_HAVE_OWNER_APPROVAL=yes npx tsx set-fee-rate.ts --send
  *
- * On landing it prints `FEE_RATE_SLOT=<slot>`: trades before that slot paid the old rate, and
+ * On landing it prints `FEE_RATE_SLOT=<slot>`: trades up to that slot are taken as paying the old rate, and
  * go-live.sh fee-rate turns it into FEE_SPLIT_BEFORE so the worker splits them at the old weights.
  *
  * SDK API used (raydium-sdk-V2@b69d02b, npm 0.2.75-alpha):

@@ -7,7 +7,7 @@ import { createPrivateKey, sign } from "node:crypto";
 import bs58 from "bs58";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Redis } from "ioredis";
-import { ComputeBudgetProgram, Keypair, MessageV0, SystemProgram, TransactionMessage, VersionedTransaction, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, MessageV0, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
 import { PrismaClient } from "@divvy/db";
 import { foldName, foldTicker, loadParams } from "@divvy/shared";
 import { prismaTxLogger, setLaunchSettings, type PriceCache } from "@divvy/server";
@@ -15,7 +15,8 @@ import { EVENT_IX_TAG_LE, POOL_CREATE_EVENT_DISC, programs, TRADE_EVENT_DISC, ty
 import type { WorkerDeps } from "../src/deps";
 import { loadWorkerEnv } from "../src/env";
 import { Indexer } from "../src/indexer";
-import { failLaunch, processLaunch, reconcileLaunches, signing } from "../src/launch";
+import { failLaunch, mintCreated, processLaunch, reconcileLaunches, signing } from "../src/launch";
+import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 
 const BASE_DB = process.env.DATABASE_URL;
 const REDIS = process.env.REDIS_URL;
@@ -32,6 +33,7 @@ const conn = {
   rpcEndpoint: "https://rpc.invalid",
   getAccountInfo: async () => null,
   getLatestBlockhash: async () => ({ blockhash: bs58.encode(Buffer.alloc(32, 7)), lastValidBlockHeight: 1000 }),
+  getBlockHeight: async () => 900,
   sendRawTransaction: async () => {
     rpcSends++;
     return "x";
@@ -85,12 +87,14 @@ let creatorKp = Keypair.generate();
  * the create (or turns it down, or another key signs it) and the page posts the signature. Returns a
  * stop function.
  */
-function wallet(launchId: string, act: "sign" | "refuse" | "wrong-key" | "priority-fee" | "other-tx" = "sign") {
+function wallet(launchId: string, how: "sign" | "refuse" | "wrong-key" | "priority-fee" | "other-tx" | "sign-then-refuse" = "sign") {
   let stop = false;
+  let rounds = 0;
   const loop = (async () => {
     while (!stop) {
       const l = await prisma.launch.findUnique({ where: { id: launchId } });
       if (l?.step === "signing" && l.unsignedTx && !l.creatorSigned && !l.signRefused) {
+        const act = how === "sign-then-refuse" ? (rounds++ === 0 ? "sign" : "refuse") : how;
         let tx = VersionedTransaction.deserialize(Buffer.from(l.unsignedTx, "base64"));
         // What the wallet gets carries no signature at all: the mint's stays in the worker.
         expect(tx.signatures.every((sig) => sig.every((b) => b === 0))).toBe(true);
@@ -288,6 +292,27 @@ describe.skipIf(!run)("launch pipeline", () => {
     // Each new attempt was signed again by the creator.
     expect(bundles).toHaveLength(3);
   }, 30_000);
+
+  it("turning down a later round leaves a create already sent to the reconciler (audit)", async () => {
+    const { launch } = await pendingLaunch("LATE");
+    const slowJito = { ...jito, waitForBundle: async () => ({ bundle_id: "b", status: "Invalid", landed_slot: null }) } as unknown as WorkerDeps["jito"];
+    const done = wallet(launch.id, "sign-then-refuse");
+    await processLaunch({ ...deps({ cluster: "mainnet-beta", mainnetEnabled: true }), jito: slowJito }, launch.id);
+    await done();
+    // The first create may still land until its blockhash expires: not failed, waiting on that blockhash.
+    const l = await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } });
+    expect(l.step).toBe("bundling");
+    expect(l.lastValidBlockHeight).toBe(1000n);
+    expect(bundles).toHaveLength(1);
+  }, 30_000);
+
+  it("a bare transfer to the mint's address isn't a landed create (audit)", async () => {
+    const mint = Keypair.generate().publicKey;
+    const at = (owner: PublicKey, len: number) => ({ getAccountInfo: async () => ({ owner, data: Buffer.alloc(len), lamports: 1, executable: false }) }) as unknown as Connection;
+    expect(await mintCreated(at(SystemProgram.programId, 0), mint)).toBe(false);
+    expect(await mintCreated(at(TOKEN_2022_PROGRAM_ID, 0), mint)).toBe(false);
+    expect(await mintCreated(at(TOKEN_2022_PROGRAM_ID, 82), mint)).toBe(true);
+  });
 
   it("while launches are paused, only an admin's launch goes out", async () => {
     await setLaunchSettings(prisma, { launchesOpen: false, reason: "Launches open soon." });

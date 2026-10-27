@@ -764,7 +764,7 @@ fee_rate() {
   pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
   restart_worker
   sleep 3
-  note "Trade sebelum slot $slot dibagi dengan pembagian lama (FEE_SPLIT_BEFORE)."
+  note "Trade sampai slot $slot dibagi dengan pembagian lama (FEE_SPLIT_BEFORE)."
   note "config: $(curl -fsS https://$DOMAIN/api/config 2>/dev/null | jq -c '.fees | del(.afterGraduation)' 2>/dev/null || echo '?')"
 }
 

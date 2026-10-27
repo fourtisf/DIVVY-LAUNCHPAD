@@ -149,7 +149,7 @@ export async function pendingHoldersLamports(d: LiveDeps, coinId?: string): Prom
   const [carried, accrued, early] = await Promise.all([
     d.prisma.feeAllocation.aggregate({ where: { roundId: null, dryRun: false, ...(coinId ? { coinId } : {}) }, _sum: { holdersLamports: true } }),
     d.prisma.trade.aggregate({ where: trades, _sum: { platformFee: true } }),
-    before ? d.prisma.trade.aggregate({ where: { ...trades, slot: { lt: before.slot } }, _sum: { platformFee: true } }) : null,
+    before ? d.prisma.trade.aggregate({ where: { ...trades, slot: { lte: before.slot } }, _sum: { platformFee: true } }) : null,
   ]);
   const total = accrued._sum.platformFee ?? 0n;
   const accruedHolders = splitPlatformFee(total, d.params.fees, before && { fees: early?._sum.platformFee ?? 0n, total, split: before }).holders;

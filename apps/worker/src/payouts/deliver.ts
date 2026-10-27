@@ -21,6 +21,8 @@ import type { WorkerDeps } from "../deps";
 import { deliveryAction, deliveryCharge } from "./plan";
 
 const MAX_CREDITS_PER_RUN = 5000;
+/** A credit with no new dividend for this long goes out below the thresholds. */
+const STALE_CREDIT_MS = 7 * 86_400_000;
 /** Blocks past lastValidBlockHeight before a missing transaction counts as expired (load-balanced RPCs lag). */
 export const EXPIRY_MARGIN = 150n;
 /**
@@ -74,7 +76,14 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
       await d.alerts.send(`asset-blocked-${asset.symbol}`, "critical", `${asset.symbol} is ${info.paused ? "paused by its issuer" : "using a transfer hook"}; deliveries wait`);
       continue;
     }
-    const credits = await d.prisma.credit.findMany({ where: { assetId: asset.id, amount: { gt: 0n } }, orderBy: { amount: "desc" }, take: MAX_CREDITS_PER_RUN });
+    // The largest credits, plus any that stopped growing a week ago: under push nothing else would ever
+    // send a credit below the thresholds, so it goes out once it covers its own delivery (audit).
+    const staleBefore = new Date(Date.now() - STALE_CREDIT_MS);
+    const [largest, stale] = await Promise.all([
+      d.prisma.credit.findMany({ where: { assetId: asset.id, amount: { gt: 0n } }, orderBy: { amount: "desc" }, take: MAX_CREDITS_PER_RUN }),
+      d.prisma.credit.findMany({ where: { assetId: asset.id, amount: { gt: 0n }, updatedAt: { lt: staleBefore } }, orderBy: { updatedAt: "asc" }, take: MAX_CREDITS_PER_RUN }),
+    ]);
+    const credits = [...new Map([...largest, ...stale].map((c) => [c.wallet, c])).values()];
     const [pendingT, pendingC, blocked] = await Promise.all([
       d.prisma.payoutTransfer.findMany({ where: { assetId: asset.id, status: "pending" }, select: { wallet: true, amount: true } }),
       d.prisma.claim.findMany({ where: { assetId: asset.id, status: "pending" }, select: { wallet: true, amount: true } }),
@@ -92,6 +101,7 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
         creditUsd: (Number(c.amount) / 10 ** asset.decimals) * usd,
         autoPushMinUsd: d.params.autoPushMinUsd,
         pushNewAtaMinUsd: d.env.PUSH_NEW_ATA_MIN_USD,
+        stale: c.updatedAt < staleBefore,
       });
       // Never pay rent for an account owned by a program (it can't claim or use it; audit).
       const go = action === "send" || (action === "send_create_ata" && PublicKey.isOnCurve(new PublicKey(c.wallet).toBytes()));

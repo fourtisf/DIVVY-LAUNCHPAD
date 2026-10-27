@@ -14,6 +14,7 @@ describe("loadParams fees", () => {
   it("reads the split of trades before a fee change", () => {
     expect(loadParams({ FEE_SPLIT_BEFORE: "419000123:50:10" }).feeSplitBefore).toEqual({ slot: 419_000_123n, holdersBps: 50, divvyBps: 10 });
     expect(() => loadParams({ FEE_SPLIT_BEFORE: "419000123" })).toThrow(/FEE_SPLIT_BEFORE/);
+    expect(() => loadParams({ FEE_SPLIT_BEFORE: "419000123:0:0" })).toThrow(/0:0/);
   });
 
   it("still loads the old 1% split from an env file that sets it", () => {
