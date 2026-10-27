@@ -75,13 +75,17 @@ const motionCss = `.scene{position:absolute;inset:0;opacity:0;animation:sc var(-
  * For WebGL: `args` go to Chromium, `prepare(page)` runs once the page is set up (e.g. to start a
  * three.js scene), and `frameHook` names a window function called with each frame's time in seconds
  * after the seek. `workers` render that many slices of the video at once, joined without re-encoding.
+ * `shutter` ({ samples, angle }) gives film motion blur: each frame is the average of `samples` renders
+ * spread over the time a shutter of that angle is open, centred on the frame.
  */
-async function renderVideo({ out, width, height, fps, duration, css, html, stills, args = [], prepare, frameHook, workers = 1, crf = 18 }) {
+async function renderVideo({ out, width, height, fps, duration, css, html, stills, args = [], prepare, frameHook, workers = 1, crf = 18, shutter }) {
   const { chromium } = require("playwright");
   const { spawn, spawnSync } = require("child_process");
   const open = async () => {
     const b = await chromium.launch({ args });
     const page = await b.newPage({ viewport: { width, height } });
+    // A software-WebGL frame can take far longer than Playwright's 30 s default while the workers start up together.
+    page.setDefaultTimeout(300_000);
     await page.setContent(`<!doctype html><meta charset="utf-8"><style>${baseCss}${motionCss}${css}</style>${html}`);
     await page.evaluate(() => document.fonts.ready);
     await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
@@ -106,6 +110,9 @@ async function renderVideo({ out, width, height, fps, duration, css, html, still
     return b.close();
   }
   const frames = Math.round(duration * fps);
+  const samples = shutter && shutter.samples > 1 ? shutter.samples : 1;
+  const shutterOpen = samples > 1 ? shutter.angle / 360 / fps : 0;
+  const blur = samples > 1 ? ["-vf", `tmix=frames=${samples}:weights=${Array(samples).fill(1).join(" ")},select=eq(mod(n\\,${samples})\\,${samples - 1}),setpts=N/(${fps}*TB)`, "-r", String(fps)] : [];
   const n = Math.max(1, workers);
   const per = Math.ceil(frames / n);
   const parts = Array.from({ length: n }, (_, w) => (n === 1 ? out : `${out}.part${w}.mp4`));
@@ -117,13 +124,16 @@ async function renderVideo({ out, width, height, fps, duration, css, html, still
       const { b, page, seek } = await open();
       const ff = spawn(
         "ffmpeg",
-        ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps), "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", String(crf), "-pix_fmt", "yuv420p", "-g", String(fps * 2), "-movflags", "+faststart", part],
+        ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps * samples), "-i", "-", ...blur, "-c:v", "libx264", "-preset", "slow", "-crf", String(crf), "-pix_fmt", "yuv420p", "-g", String(fps * 2), "-movflags", "+faststart", part],
         { stdio: ["pipe", "inherit", "inherit"] },
       );
       for (let f = from; f < to; f++) {
-        await seek((f / fps) * 1000);
-        const png = await page.screenshot({ type: "png" });
-        if (!ff.stdin.write(png)) await new Promise((r) => ff.stdin.once("drain", r));
+        for (let j = 0; j < samples; j++) {
+          const t = f / fps + (samples > 1 ? shutterOpen * (j / (samples - 1) - 0.5) : 0);
+          await seek(Math.max(0, t) * 1000);
+          const png = await page.screenshot({ type: "png" });
+          if (!ff.stdin.write(png)) await new Promise((r) => ff.stdin.once("drain", r));
+        }
         if (++done % (fps * 5) === 0) process.stdout.write(`${(done / fps).toFixed(0)}s `);
       }
       ff.stdin.end();

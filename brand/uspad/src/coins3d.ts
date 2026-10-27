@@ -2,6 +2,9 @@
  * The site's 3D coins (apps/web/src/three/scenes.ts) for launch-video.cjs, rendered frame by frame:
  * `frame(t)` poses everything for second t of the video and renders once, so every frame is exact
  * whatever the render speed. Bundled by launch-video.cjs with esbuild into the page.
+ *
+ * With `glow`, each frame is also drawn at half size into that 2D canvas, which the page blurs and
+ * screens over the coins: a soft bloom without the banding of 8-bit render targets.
  */
 import * as THREE from "three";
 import { buildCoin, logoFace, makeEnv, softDot, stockFace, type StockArt } from "../../../apps/web/src/three/scenes";
@@ -21,7 +24,8 @@ const outCubic = (x: number) => 1 - Math.pow(1 - x, 3);
 const inOutCubic = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 const outBack = (x: number) => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);
 
-async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline) {
+async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, { glow }: { glow?: HTMLCanvasElement } = {}) {
+  const glowCtx = glow?.getContext("2d") ?? null;
   await document.fonts.ready;
   const faces = await Promise.all(stocks.map(stockFace));
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -132,6 +136,11 @@ async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline) 
     if (alpha > 0) {
       renderer.toneMappingExposure = exposure;
       renderer.render(scene, cam);
+    }
+    if (glow && glowCtx) {
+      glow.style.opacity = String(alpha * 0.5);
+      glowCtx.clearRect(0, 0, glow.width, glow.height);
+      if (alpha > 0) glowCtx.drawImage(canvas, 0, 0, glow.width, glow.height);
     }
     return alpha;
   };
