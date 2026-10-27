@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import useSWR from "swr";
-import { minutesSince, num, usd, usdFull, type CoinList, type CoinSort, type CoinSummary, type Stats } from "@divvy/shared";
+import { num, usd, usdFull, type CoinList, type CoinSort, type CoinSummary, type Stats } from "@divvy/shared";
 import { coinsKey } from "@/lib/keys";
 import { useAssets, useConfig } from "@/lib/config";
 import { deliveryCopy } from "@/lib/copy";
 import { Chip } from "../Chip";
-import { CoinCard, type CardCoin } from "../CoinCard";
+import { CoinCard } from "../CoinCard";
 import { HeroStage } from "../Coin3D";
 import { Countdown, Ring } from "../Countdown";
 import { CountUp } from "../CountUp";
@@ -18,23 +18,8 @@ import { Icon } from "../Icon";
 import { TokenCa } from "../TokenCa";
 import { TelegramJoin, XFollow } from "../XFollow";
 import { coinHref } from "@/lib/links";
+import { toCard } from "@/lib/cards";
 
-export const toCard = (c: CoinSummary, now = Date.now()): CardCoin => ({
-  name: c.name,
-  ticker: c.ticker,
-  mint: c.mint,
-  imageUrl: c.imageUrl,
-  pays: c.dividendAsset,
-  mcap: c.marketCapUsd,
-  ch: c.change24hPct,
-  ageMin: minutesSince(c.createdAt, now),
-  creatorLabel: c.creator.label,
-  progress: c.progress,
-  graduated: c.status === "graduated",
-  paidUsd: c.paidUsd,
-  holders: c.holders,
-  spark: c.spark,
-});
 
 const SORTS: [CoinSort, string][] = [
   ["trending", "Trending"],
