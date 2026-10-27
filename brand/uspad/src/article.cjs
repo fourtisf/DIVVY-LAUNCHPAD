@@ -11,7 +11,7 @@ const H = 600;
 const CX = 1170;
 const CY = 300;
 
-const flow = ["Launch", "Trade 1%", "Paid hourly", "Graduate at 85 SOL"]
+const flow = ["Launch", "Trade 1.25%", "Paid hourly", "Graduate at 85 SOL"]
   .map((t, i) => `${i ? '<span class="arrow">→</span>' : ""}<span class="flow">${t}</span>`)
   .join("");
 

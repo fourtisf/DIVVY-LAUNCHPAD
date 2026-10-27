@@ -2,7 +2,7 @@
  * Pure dividend-engine math (HANDOFF §3.3). No I/O here, so every rule can be checked against hand
  * calculations in tests. All amounts are bigint base units; nothing rounds up.
  */
-import { proRata, splitByWeights, splitClaim, type DivvyParams } from "@divvy/shared";
+import { proRata, splitClaim, type DivvyParams } from "@divvy/shared";
 
 /* ---------- 1. attribute a vault claim to coins ---------- */
 
@@ -30,17 +30,15 @@ export function attributeClaim(claimed: bigint, feesByCoin: Map<string, bigint>)
 }
 
 /** Splits a coin's platform-fee lamports into the holders' and Divvy's buckets (remainder to Divvy). */
-export function splitPlatformFee(lamports: bigint, fees: DivvyParams["fees"]): { holders: bigint; divvy: bigint } {
-  return splitByWeights(lamports, { holders: fees.holdersBps, divvy: fees.divvyBps }, "divvy");
-}
+export { splitPlatformFee } from "@divvy/shared";
 
 /**
  * Splits fees collected after graduation (the CPMM creator fee, the locked LP's fees and memecoin
- * sales) into holders', creator's and Divvy's buckets in the curve fee's proportions, 50 : 15 : 10
- * by default (owner decision 2026-10-26; docs/ECONOMICS.md). Remainder to Divvy.
+ * sales) into holders', creator's and Divvy's buckets by POOL_FEE_SPLIT, 50 : 15 : 10 by default
+ * (owner decisions 2026-10-26 and 2026-10-27; docs/ECONOMICS.md). Remainder to Divvy.
  */
-export function splitPoolFee(lamports: bigint, fees: DivvyParams["fees"]): { holders: bigint; creator: bigint; divvy: bigint } {
-  return splitClaim(lamports, fees);
+export function splitPoolFee(lamports: bigint, split: DivvyParams["poolSplit"]): { holders: bigint; creator: bigint; divvy: bigint } {
+  return splitClaim(lamports, split);
 }
 
 /* ---------- 2. thresholds ---------- */

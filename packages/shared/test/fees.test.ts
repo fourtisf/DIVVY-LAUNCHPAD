@@ -14,6 +14,10 @@ describe("fee split", () => {
     expect(s.holders + s.creator + s.divvy).toBe(1_000_000_007n);
   });
 
+  it("accepts the 1.25% split (owner decision 2026-10-27)", () => {
+    expect(() => assertSplit({ tradeFeeBps: 125, protocolBps: 25, holdersBps: 50, creatorBps: 15, divvyBps: 35 })).not.toThrow();
+  });
+
   it("floors bps", () => {
     expect(applyBps(999n, 50)).toBe(4n);
     expect(bpsLabel(15)).toBe("0.15%");

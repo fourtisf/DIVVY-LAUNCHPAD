@@ -25,7 +25,7 @@ The details are in `docs/AUDIT.md`, "Open owner decisions".
       - Set `PAYOUT_DELIVERY`. The site's copy switches from "paid" to "credited" by itself.
 - [ ] **Fee split:**
       - `FEE_*` must equal the PlatformConfig you create. Payouts refuse to run if the on-chain rates differ.
-      - Default: 1% = 0.25% Raydium + 0.50% holders + 0.15% creator + 0.10% Divvy.
+      - Default: 1.25% = 0.25% Raydium + 0.50% holders + 0.15% creator + 0.35% uspad (owner decision 2026-10-27; was 1% with 0.10% for uspad). On a PlatformConfig made at `fee_rate` 6000, `go-live.sh fee-rate --send` moves it to 8500.
 - [ ] **After graduation:** decided, harvest still to build. Owner chose the CPMM creator fee to uspad (`platform_cp_creator` = fee claimer, `CPMM_CREATOR_FEES=true`) on 2026-10-26.
       - Set `platform_cp_creator` to the fee-claimer wallet (a second `updatePlatformConfig` transaction) and turn on `CPMM_CREATOR_FEES`, or leave the CPMM creator fee with the coin's creator.
       - Locked-LP harvesting is built (2026-10-26) but not exercised on chain. Leave `LOCKED_LP_FEES=false` until the first graduated coin's logged simulation matches Raydium's UI for that position, then turn it on. Fees wait in the lock until then; nothing is lost (docs/verified/launchlab.md §5b).
@@ -99,7 +99,7 @@ npx tsx scripts/phase0/jito-bundle.ts tip-accounts
 - [ ] The CPMM config the PlatformConfig will use (index 0 `D4FP…` or `CRRS5…`) and its rates.
 - [ ] **R1** TradeEvent layout:
       - `layoutErrors: 0` over at least 200 LaunchLab transactions.
-      - Each decoded fee field matches its own rate. Platform + creator + protocol ≈ 1% of the SOL leg for a 1% platform.
+      - Each decoded fee field matches its own rate. Platform + creator + protocol ≈ 1.25% of the SOL leg (1% before the 2026-10-27 change).
 - [ ] **R2** `PoolState.platform_fee` no longer grows on new trades, while the platform fee vault does.
 - [ ] **R3** A LaunchLab curve vault's token-account owner equals the authority PDA that `poolAddresses().auth` returns.
 - [ ] **R4** For each xStock, (Jupiter raw `outAmount` / 10^decimals) × Price API `usdPrice` matches the SOL in. If it is off by the Scaled UI multiplier, the prices must be converted first.

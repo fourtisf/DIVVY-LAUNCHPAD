@@ -32,6 +32,11 @@ const NVDA = pk();
 const SPY = pk();
 const USD: Record<string, number> = { [NVDA]: 180, [SPY]: 600 };
 const HOUR = new Date("2026-10-26T10:00:00Z");
+/**
+ * The hand calculations below use the 0.60% platform fee (0.50% holders, 0.10% uspad): every seeded
+ * trade is before a fee change at slot 1000, so it keeps that split (FEE_SPLIT_BEFORE).
+ */
+const params = (o: Record<string, string> = {}) => loadParams({ FEE_SPLIT_BEFORE: "1000:50:10", ...o });
 
 let prisma: PrismaClient;
 let redis: Redis;
@@ -204,7 +209,7 @@ describe.skipIf(!run)("dividend engine", () => {
   });
 
   it("dry-run: matches the hand calculation for 3 paying coins and carries the 4th", async () => {
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "true" }));
+    const d = deps(params({ PAYOUTS_DRY_RUN: "true" }));
     // Simulated claim = indexed fees = 0.273 SOL.
     const s = await runPayouts(d, stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
     expect(s).toMatchObject({ claimedLamports: "273000000", unattributedLamports: "0", rounds: { ok: 3, carried: 1 } });
@@ -245,14 +250,14 @@ describe.skipIf(!run)("dividend engine", () => {
   });
 
   it("dry-run is idempotent: a second run for the same hour changes nothing", async () => {
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "true" }));
+    const d = deps(params({ PAYOUTS_DRY_RUN: "true" }));
     const before = await Promise.all([prisma.feeAllocation.count(), prisma.payoutRound.count(), prisma.payoutItem.count(), prisma.swapBatch.count()]);
     await runPayouts(d, stubChain(0n), HOUR, true);
     expect(await Promise.all([prisma.feeAllocation.count(), prisma.payoutRound.count(), prisma.payoutItem.count(), prisma.swapBatch.count()])).toEqual(before);
   });
 
   it("live: claims, attributes, swaps, credits, auto-sends to existing accounts, and logs every signature", async () => {
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
+    const d = deps(params({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
     // The vault paid 1,000 lamports more than the indexed fees: kept unattributed, not given to holders.
     const s = await runPayouts(d, stubChain(273_001_000n), HOUR, false, () => new Date(HOUR.getTime() + 5 * 60_000));
     expect(s).toMatchObject({ claimedLamports: "273001000", unattributedLamports: "1000", rounds: { ok: 3, carried: 1 }, swaps: 2 });
@@ -274,7 +279,7 @@ describe.skipIf(!run)("dividend engine", () => {
   });
 
   it("claims: reserves the credit, then confirms or gives it back", async () => {
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
+    const d = deps(params({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
     const nvda = await prisma.dividendAsset.findUniqueOrThrow({ where: { symbol: "NVDAx" } });
     const spy = await prisma.dividendAsset.findUniqueOrThrow({ where: { symbol: "SPYx" } });
 
@@ -311,7 +316,7 @@ describe.skipIf(!run)("dividend engine", () => {
     return { claim: c, allocations: (await prisma.feeAllocation.findMany({ where: { vaultClaimId: c.id } })).map((a) => [a.coinId, a.lamports]) };
   };
   const at = (h: number) => new Date(HOUR.getTime() + h * 3_600_000);
-  const live = () => deps(loadParams({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
+  const live = () => deps(params({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "claim" }));
 
   it("a trade later in the claim's own slot belongs to the next claim, not this one (audit)", async () => {
     timing.pollMs = 1;
@@ -377,7 +382,7 @@ describe.skipIf(!run)("dividend engine", () => {
     const batch = await prisma.swapBatch.create({ data: { assetId: nvda.id, hour: h, dryRun: true, lamportsIn: 100_000_000n, status: "confirmed", assetOut: 8_000_000n } });
     const funded = await prisma.payoutRound.create({ data: { coinId: coins.A, hour: h, dryRun: true, status: "ok", step: "allocated", solIn: 100_000_000n, swapBatchId: batch.id } });
     const late = await prisma.payoutRound.create({ data: { coinId: coins.B, hour: h, dryRun: true, status: "ok", step: "allocated", solIn: 100_000_000n } });
-    await runPayouts(deps(loadParams({ PAYOUTS_DRY_RUN: "true" })), stubChain(0n), h, true, () => new Date(h.getTime() + 300_000), { resumeOnly: true });
+    await runPayouts(deps(params({ PAYOUTS_DRY_RUN: "true" })), stubChain(0n), h, true, () => new Date(h.getTime() + 300_000), { resumeOnly: true });
     expect(await prisma.payoutRound.findUniqueOrThrow({ where: { id: funded.id } })).toMatchObject({ assetOut: 8_000_000n });
     expect(await prisma.payoutRound.findUniqueOrThrow({ where: { id: late.id } })).toMatchObject({ status: "carried", assetOut: 0n, carriedOutLamports: 100_000_000n });
   });
@@ -397,13 +402,13 @@ describe.skipIf(!run)("dividend engine", () => {
     const mint = (await prisma.coin.findUniqueOrThrow({ where: { id: coins.C } })).mint!;
     const key = `divvy:presnap:${h.toISOString()}:${coins.C}`;
     await redis.hset(key, { _: "0", [W.alice]: (500_000n * 1_000_000n).toString() }); // erin held nothing mid-hour
-    const rows = await holdersForRound(deps(loadParams({})), stubChain(0n), coins.C, mint, h);
+    const rows = await holdersForRound(deps(params({})), stubChain(0n), coins.C, mint, h);
     await redis.del(key);
     expect(Object.fromEntries(rows.map((r) => [r.owner, r.amount]))).toEqual({ [W.alice]: 500_000n * 1_000_000n, [W.erin]: 0n });
   });
 
   it("refuses to pay when the on-chain fee rates don't match the configured split", async () => {
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "true" }));
+    const d = deps(params({ PAYOUTS_DRY_RUN: "true" }));
     const chain = { ...stubChain(0n), ratesMismatch: async () => "rates differ" };
     await expect(runPayouts(d, chain, new Date(HOUR.getTime() + 3_600_000), true)).rejects.toThrow("rates differ");
     expect(alerts.some((a) => a.includes("rates differ"))).toBe(true);
@@ -412,7 +417,7 @@ describe.skipIf(!run)("dividend engine", () => {
   it("pays a backlog over the swap budget in part, carries the rest, and halves the size after an impact refusal (audit)", async () => {
     await seed();
     // A $5 round minimum, so the part of B's share that fits the budget is under it.
-    const base = deps(loadParams({ PAYOUTS_DRY_RUN: "true", MIN_ROUND_USD: "5" }));
+    const base = deps(params({ PAYOUTS_DRY_RUN: "true", MIN_ROUND_USD: "5" }));
     const d = { ...base, env: { ...base.env, SWAP_BATCH_MAX_LAMPORTS: 75_000_000 } };
     await runPayouts(d, stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
     const rounds = Object.fromEntries((await prisma.payoutRound.findMany({ where: { dryRun: true, hour: HOUR } })).map((r) => [r.coinId, r]));
@@ -479,7 +484,7 @@ describe.skipIf(!run)("dividend engine", () => {
         return { sig: `FWD-${forwards.length - 1}` };
       },
     };
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false" }), { CPMM_CREATOR_FEES: "true", LOCKED_LP_FEES: "true", CREATOR_FORWARD_MIN_LAMPORTS: "5000000" });
+    const d = deps(params({ PAYOUTS_DRY_RUN: "false" }), { CPMM_CREATOR_FEES: "true", LOCKED_LP_FEES: "true", CREATOR_FORWARD_MIN_LAMPORTS: "5000000" });
     const h = new Date(HOUR.getTime() + 3 * 3_600_000);
     await runPayouts(d, chain, h, false, () => new Date(h.getTime() + 300_000));
 
@@ -511,7 +516,7 @@ describe.skipIf(!run)("dividend engine", () => {
   it("a creator forward a crash left unconfirmed is undone when it never landed, then sent again", async () => {
     const fc = await prisma.feeClaim.create({ data: { coinId: coins.B, kind: "cpmm_creator", sig: "CREATORFEE-2", lamports: 75_000_000n } });
     await prisma.feeAllocation.create({ data: { coinId: coins.B, feeClaimId: fc.id, lamports: 75_000_000n, holdersLamports: 50_000_000n, creatorLamports: 15_000_000n, divvyLamports: 10_000_000n } });
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false" }), { CREATOR_FORWARD_MIN_LAMPORTS: "5000000" });
+    const d = deps(params({ PAYOUTS_DRY_RUN: "false" }), { CREATOR_FORWARD_MIN_LAMPORTS: "5000000" });
     const h = new Date(HOUR.getTime() + 4 * 3_600_000);
 
     // Signed, then the process died before confirming.
@@ -545,7 +550,7 @@ describe.skipIf(!run)("dividend engine", () => {
     expect(await prisma.creatorTransfer.findUniqueOrThrow({ where: { sig: "FWD-AGAIN" } })).toMatchObject({ status: "landed", lamports: 15_000_000n });
   });
   it("push: a wallet's first send creates its account and pays the rent and fee from its dividend; an expired send gives it all back", async () => {
-    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "push" }));
+    const d = deps(params({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "push" }));
     const nvda = await prisma.dividendAsset.findUniqueOrThrow({ where: { symbol: "NVDAx" } });
     await prisma.credit.updateMany({ where: { assetId: nvda.id }, data: { amount: 0n } });
     await prisma.credit.upsert({ where: { wallet_assetId: { wallet: W.dave, assetId: nvda.id } }, create: { wallet: W.dave, assetId: nvda.id, amount: 5_000_000n }, update: { amount: 5_000_000n } });
@@ -577,10 +582,22 @@ describe.skipIf(!run)("dividend engine", () => {
     expect((await dave()).amount).toBe(5_000_000n);
   });
 
+  it("splits trades from before a fee change at the old weights and later ones at the new (owner decision 2026-10-27)", async () => {
+    await seed();
+    // Seeded slots: A 10 and 11, B 12, C 13, D 14. The change lands at slot 12.
+    await runPayouts(deps(loadParams({ PAYOUTS_DRY_RUN: "true", FEE_SPLIT_BEFORE: "12:50:10" })), stubChain(0n), HOUR, true, () => new Date(HOUR.getTime() + 5 * 60_000));
+    const alloc = Object.fromEntries((await prisma.feeAllocation.findMany({ where: { dryRun: true } })).map((a) => [a.coinId, [a.holdersLamports, a.divvyLamports]]));
+    // A paid 0.60%: 5/6 to holders. B, C and D paid 0.85%: 50/85 to holders, the remainder to uspad.
+    expect(alloc[coins.A]).toEqual([100_000_000n, 20_000_000n]);
+    expect(alloc[coins.B]).toEqual([35_294_117n, 24_705_883n]);
+    expect(alloc[coins.C]).toEqual([52_941_176n, 37_058_824n]);
+    expect(alloc[coins.D]).toEqual([1_764_705n, 1_235_295n]);
+  });
+
   it("counts each coin's holders from the chain for the board, without the curve, in dry-run too", async () => {
     await prisma.coinStats.updateMany({ data: { holders: 0 } });
     const later = new Date(HOUR.getTime() + 30 * 86_400_000);
-    expect(await refreshHolderCounts(deps(loadParams({ PAYOUTS_DRY_RUN: "true" })), stubChain(0n), later)).toBeGreaterThanOrEqual(4);
+    expect(await refreshHolderCounts(deps(params({ PAYOUTS_DRY_RUN: "true" })), stubChain(0n), later)).toBeGreaterThanOrEqual(4);
     const holders = Object.fromEntries((await prisma.coinStats.findMany({ include: { coin: true } })).map((s) => [s.coin.ticker, s.holders]));
     // AAA: alice, bob and carol (small holders count too), not the curve vault. DDD has none.
     expect(holders).toMatchObject({ AAA: 3, BBB: 1, CCC: 2, DDD: 0 });

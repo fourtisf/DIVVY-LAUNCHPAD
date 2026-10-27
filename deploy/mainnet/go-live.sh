@@ -20,6 +20,11 @@
 #                                 admins only, for the owner's test launch.
 #   go-live.sh launches open|pause [reason]
 #                                 opens launches to everyone, or pauses them (admins can still launch).
+#   go-live.sh fee-rate           dry run: uspad's share of every curve trade from 0.10% to 0.35%
+#                                 (PlatformConfig fee_rate 8500). Holders keep 0.50%, the creator 0.15%;
+#                                 a trade pays 1.25% with Raydium's 0.25%.
+#   I_HAVE_OWNER_APPROVAL=yes go-live.sh fee-rate --send
+#                                 💰 sets it (about 0.0001 SOL), then the split in api.env and worker.env.
 #   go-live.sh launch-fee <SOL>   what a creator pays per launch (e.g. 0.02), to the operations wallet
 #                                 that pays the create. With a fee there is no daily limit per wallet
 #                                 and a failed launch keeps its fee as credit. 0 = free launches.
@@ -297,11 +302,11 @@ EOF
   local business
   business=$(cat <<EOF
 # Business parameters: identical in api.env and worker.env (envcheck).
-FEE_TRADE_BPS=100
+FEE_TRADE_BPS=125
 FEE_PROTOCOL_BPS=25
 FEE_HOLDERS_BPS=50
 FEE_CREATOR_BPS=15
-FEE_DIVVY_BPS=10
+FEE_DIVVY_BPS=35
 PAYOUT_DELIVERY=push
 PAYOUTS_DRY_RUN=true
 MIN_ROUND_USD=1
@@ -707,6 +712,51 @@ launch_fee() {
 }
 
 # --------------------------------------------------------------------------------------------------
+# uspad's share of every curve trade (owner decision 2026-10-27): PlatformConfig fee_rate 6000 → 8500,
+# so uspad gets 0.35% instead of 0.10% and a trade pays 1.25%. Every coin still on its curve pays the
+# new rate from the next trade (docs/VERIFIED.md item 28). Trades from before the change keep the old
+# split through FEE_SPLIT_BEFORE, so holders get exactly what those trades paid them.
+FEE_RATE_NEW=8500
+fee_rate() {
+  load_secrets
+  [ -L "$CUR" ] && [ -f "$ADMIN_KEY" ] || die "jalankan 'go-live.sh prepare' dulu"
+  [ -f "$CUR/packages/solana/scripts/phase0/set-fee-rate.ts" ] || die "kode di server masih lama: jalankan 'go-live.sh update' dulu"
+  local send=() log slot holders divvy creator protocol want
+  holders=$(env_get $ENV_DIR/worker.env FEE_HOLDERS_BPS)
+  divvy=$(env_get $ENV_DIR/worker.env FEE_DIVVY_BPS)
+  creator=$(env_get $ENV_DIR/worker.env FEE_CREATOR_BPS)
+  protocol=$(env_get $ENV_DIR/worker.env FEE_PROTOCOL_BPS)
+  [[ $holders$divvy$creator$protocol =~ ^[0-9]+$ ]] || die "FEE_*_BPS tidak lengkap di worker.env"
+  want=$((FEE_RATE_NEW / 100 - holders))
+  if [ "${1:-}" = "--send" ]; then
+    [ "${I_HAVE_OWNER_APPROVAL:-}" = yes ] || die "--send butuh I_HAVE_OWNER_APPROVAL=yes (persetujuan owner di chat)"
+    [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
+    send=(--send)
+  fi
+  say "Fee per trade: holder 0.$(printf %02d "$holders")%, creator 0.$(printf %02d "$creator")%, uspad 0.$(printf %02d "$divvy")% → 0.$(printf %02d "$want")%, Raydium 0.$(printf %02d "$protocol")% ${send[*]:-(dry run)}"
+  log=$(mktemp)
+  (cd "$CUR/packages/solana" && env RPC_URL="$RPC" PLATFORM_ADMIN_KEYPAIR="$ADMIN_KEY" FEE_RATE=$FEE_RATE_NEW I_HAVE_OWNER_APPROVAL="${I_HAVE_OWNER_APPROVAL:-}" \
+    ./node_modules/.bin/tsx scripts/phase0/set-fee-rate.ts "${send[@]}" 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g' | tee "$log"
+  slot=$(sed -n 's/^FEE_RATE_SLOT=//p' "$log"); rm -f "$log"
+  [ ${#send[@]} = 0 ] && return 0
+  if [ "$divvy" = "$want" ]; then note "api.env dan worker.env sudah memakai pembagian baru"; return 0; fi
+  # Already on chain from a run that stopped before this point: from now on is a safe bound (the trades
+  # in between get the old split, which only gives holders more).
+  [ -n "$slot" ] || slot=$(curl -fsS "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getSlot"}' | jq -r .result)
+  [[ $slot =~ ^[0-9]+$ ]] || die "slot perubahan tidak terbaca; payout berhenti sampai env diisi (FEE_SPLIT_BEFORE)"
+  for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do
+    set_env "$f" FEE_SPLIT_BEFORE "$slot:$holders:$divvy"
+    set_env "$f" FEE_DIVVY_BPS "$want"
+    set_env "$f" FEE_TRADE_BPS "$((protocol + holders + creator + want))"
+  done
+  pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+  restart_worker
+  sleep 3
+  note "Trade sebelum slot $slot dibagi dengan pembagian lama (FEE_SPLIT_BEFORE)."
+  note "config: $(curl -fsS https://$DOMAIN/api/config 2>/dev/null | jq -c '.fees | del(.afterGraduation)' 2>/dev/null || echo '?')"
+}
+
+# --------------------------------------------------------------------------------------------------
 # Dividends: dry-run computes every round without signing; live claims, swaps and sends (RUNBOOK
 # "Switching dry-run to live").
 dbq() { sudo -u postgres psql -X -P pager=off -d divvy "$@"; }
@@ -843,8 +893,9 @@ case "${1:-}" in
   open-launches) open_launches ;;
   launches) launches "${2:-}" "${3:-}" ;;
   launch-fee) launch_fee "${2:-}" ;;
+  fee-rate) fee_rate "${2:-}" ;;
   payouts) payouts "${2:-}" "${3:-}" ;;
   token-ca) token_ca "${2:-}" ;;
   status) status ;;
-  *) sed -n '2,40p' "$0"; exit 1 ;;
+  *) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 1 ;;
 esac

@@ -11,7 +11,7 @@
  *   RPC_URL=... PLATFORM_ADMIN_KEYPAIR=/path/admin.json I_HAVE_OWNER_APPROVAL=yes npx tsx create-platform-config.ts --send
  *
  * Env (defaults in brackets):
- *   FEE_RATE [6000 = 0.60%]           platform fee_rate, 1/1_000_000; docs cap 50000 (500 bps)
+ *   FEE_RATE [8500 = 0.85%]           platform fee_rate, 1/1_000_000 (0.50% holders + 0.35% uspad); docs cap 50000
  *   CREATOR_FEE_RATE [1500 = 0.15%]   creator_fee_rate; docs cap MAX_CREATOR_FEE_RATE = 5000
  *   PLATFORM_SCALE [1000000] BURN_SCALE [0]   LP split at graduation; creator_scale is forced to 0
  *   CP_CONFIG_ID [D4FPEru…BvC2 = CPMM AmmConfig index 0, the 0.25% tier per docs]
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   const adminPk = admin?.publicKey ?? new PublicKey(env("PLATFORM_ADMIN_PUBKEY"));
   if (wantSend && !admin) throw new Error("--send needs PLATFORM_ADMIN_KEYPAIR");
 
-  const feeRate = new BN(env("FEE_RATE", "6000"));
+  const feeRate = new BN(env("FEE_RATE", "8500"));
   const creatorFeeRate = new BN(env("CREATOR_FEE_RATE", "1500"));
   const platformScale = new BN(env("PLATFORM_SCALE", "1000000"));
   const burnScale = new BN(env("BURN_SCALE", "0"));

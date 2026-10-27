@@ -13,7 +13,7 @@ The shots are the real interface with the demo's sample data, and the video says
 page. Post it once launches are open to everyone (`go-live.sh launches open`).
 
 Scenes: the logo and "uspad is live." → launching a coin → "$MOONCAT is live" → the candlestick chart
-and the trade box → hourly payouts in stock tokens → the 1% split and graduation → "Launchpad open to
+and the trade box → hourly payouts in stock tokens → the 1.25% split and graduation → "Launchpad open to
 the public."
 
 ## Post (under 280 characters)
@@ -38,7 +38,7 @@ The launchpad is open to the public. Launch a memecoin, pick the stock it pays, 
 • NVDAx, SPYx, TSLAx and more
 • Private launch: no snipers, no dev buy
 • Live candlestick chart, buy and sell on uspad
-• 1% per trade, half of it to holders
+• 1.25% per trade, 0.50% of it to holders
 • Liquidity locked forever at graduation
 
 Launch yours → uspad.fun

@@ -69,6 +69,8 @@ export const ConfigSchema = z.object({
     holdersBps: z.number().int(),
     creatorBps: z.number().int(),
     divvyBps: z.number().int(),
+    /** Weights for fees collected after graduation (POOL_FEE_SPLIT), holders : creator : uspad. */
+    afterGraduation: z.object({ holders: z.number().int(), creator: z.number().int(), divvy: z.number().int() }),
   }),
   graduation: z.object({
     targetUsd: z.number(),

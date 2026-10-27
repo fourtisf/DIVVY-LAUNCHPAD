@@ -13,7 +13,7 @@ It rides the #BOYCOTTPUMPFUN timeline (2026-10-27). Pump.fun appears only as tha
 theirs and no claim about them. Every uspad fact matches the site's How it works page.
 
 Scenes: the hashtag typed out → "Holding a memecoin pays you nothing. Until now." → Meet uspad with
-the six stocks → the 1% split (0.50 / 0.15 / 0.10 / 0.25) → paid every hour (wallet marked
+the six stocks → the 1.25% split (0.50 / 0.15 / 0.35 / 0.25) → paid every hour (wallet marked
 "Example", no amounts) → no snipers, no dev buy, locked forever → uspad.fun, @uspadfun, launching
 soon, and the xStocks line.
 

@@ -39,7 +39,7 @@ const orbit = ["NVDAx", "SPYx", "TSLAx", "AAPLx", "QQQx", "MSTRx"]
 
 const steps = [
   ["1", "Launch", "Private bundle. No snipers, no dev buy."],
-  ["2", "Trade", "1% fee per trade. Half goes to holders."],
+  ["2", "Trade", "1.25% fee per trade. 0.50% to holders."],
   ["3", "Get paid", "Real stock tokens, every hour."],
 ]
   .map(([n, t, d]) => `<div class="step"><span class="n">${n}</span><div><b>${t}</b><p>${d}</p></div></div>`)

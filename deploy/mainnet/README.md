@@ -15,6 +15,8 @@ I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-config --send
 I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh cp-creator --send
 I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh open-launches   # gate on, launches for admins only (the owner's test launch)
 /root/go-live.sh launch-fee 0.02         # creators pay 0.02 SOL per launch, no daily limit (0 = free again)
+/root/go-live.sh fee-rate                # dry run: uspad 0.10% → 0.35% of every curve trade (1.25% in all); then, with the owner's OK:
+I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh fee-rate --send
 /root/go-live.sh launches open           # then for everyone; `launches pause "reason"` to stop them again
 /root/go-live.sh update                  # every later deploy
 /root/go-live.sh status
@@ -44,7 +46,7 @@ pnpm tsx scripts/phase0/jupiter-quote-xstock.ts --mint Xsc9qvGR1efVDFGLrVsmkzv3q
 exit
 ```
 
-Go only if: the SOL GlobalConfig's `trade_fee_rate` is 2500 (otherwise the 1% split changes), the trade decoder reports `layoutErrors: 0`, and every xStock you want routes through Jupiter. The rest of docs/MAINNET_CHECKLIST.md §3 follows the same way, with the commands listed there.
+Go only if: the SOL GlobalConfig's `trade_fee_rate` is 2500 (otherwise the 1.25% split changes), the trade decoder reports `layoutErrors: 0`, and every xStock you want routes through Jupiter. The rest of docs/MAINNET_CHECKLIST.md §3 follows the same way, with the commands listed there.
 
 ## Phase 1. Production layout on the same server (no SOL)
 

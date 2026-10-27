@@ -14,7 +14,7 @@ Checked on 2026-10-26.
 
 ## How the money flows
 
-Every curve trade pays 1%. Raydium takes 0.25%, the creator gets 0.15% directly, and 0.60% lands in Divvy's platform vault. Divvy splits that 0.60% into 0.50% for holders and 0.10% for itself. All coins share one vault, so Divvy can claim once an hour for everyone and still know each coin's exact share from the trade records.
+Every curve trade pays 1.25% (1% until the owner's decision of 2026-10-27). Raydium takes 0.25%, the creator gets 0.15% directly, and 0.85% lands in Divvy's platform vault. Divvy splits that 0.85% into 0.50% for holders and 0.35% for itself. The model below was worked out at the old 0.60% platform fee (0.10% for Divvy); the holders' side is unchanged, and Divvy's own income on the curve is 3.5 times the figures shown. All coins share one vault, so Divvy can claim once an hour for everyone and still know each coin's exact share from the trade records.
 
 After graduation the coin trades in a Raydium CPMM pool with a 0.25% fee plus a 0.05% creator fee. Divvy's locked LP position keeps 84% of the 0.25%. Half of that arrives as the memecoin and has to be sold. If Divvy is set as the pool's "creator" (`platform_cp_creator`), it also gets the 0.05%. Divvy then splits the total 50 : 15 : 10 between holders, creator and itself.
 
@@ -49,7 +49,7 @@ Rent is nearly 4,000 times the cost of a transfer, so the whole choice comes dow
 
 ## Break-even volume per coin
 
-Break-even means Divvy's own 0.10% (0.035% after graduation) pays all of that coin's payout costs, so holders keep their full share.
+Break-even means Divvy's own 0.10% (0.035% after graduation) pays all of that coin's payout costs, so holders keep their full share. At 0.35% on the curve since 2026-10-27, the curve break-even volumes below are 0.10/0.35 of those shown.
 
 | Coin | (a) per-coin + push | (b) per-coin + credit | (c) batched + push | (d) batched + credit |
 |---|---:|---:|---:|---:|
@@ -158,8 +158,8 @@ To check on-chain before relying on this (read-only scripts already exist in `pa
 
 | Input | Value used | Status | Source |
 |---|---|---|---|
-| Curve fees | 0.25% protocol + 0.60% platform + 0.15% creator, added together | Verified (source); 0.25% needs on-chain check | sdk `curve.ts:466-515`; `docs/verified/launchlab.md` §2c |
-| Holders / Divvy split of the 0.60% | 0.50% / 0.10% | Divvy's choice | HANDOFF §3.2 |
+| Curve fees | 0.25% protocol + 0.85% platform + 0.15% creator, added together (0.60% platform until 2026-10-27) | Verified (source); 0.25% needs on-chain check | sdk `curve.ts:466-515`; `docs/verified/launchlab.md` §2c |
+| Holders / Divvy split of the 0.85% | 0.50% / 0.35% (0.50% / 0.10% of 0.60% until 2026-10-27) | Owner's choice, 2026-10-27 | HANDOFF §3.2; docs/AUDIT.md |
 | Curve size | 1B supply, 793.1M sold, 85 SOL raised; graduation ≈ 410.8 SOL | Verified (source) | sdk `launchpad.ts:100-111`, `constantProductCurve.ts:88-126` |
 | One platform vault for all coins | One claim per hour | Verified (source) | IDL `claim_platform_fee_from_vault`; `launchlab.md` §4 |
 | CPMM fee tier (index 0) | 0.25% trade; 12% protocol and 4% fund (of the fee); 0.05% creator | Docs; needs on-chain check | raydium-docs-v1@3682384 `reference/program-addresses.mdx:177-185`, `reference/fee-comparison.mdx:17,38-39,181-188` |

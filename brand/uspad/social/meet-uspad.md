@@ -11,7 +11,7 @@ below matches the site (How it works) and docs/VERIFIED.md.
 >
 > Memecoins that pay you in US stocks.
 >
-> Launch a coin on Solana. Every trade pays 1%, and half of it buys real stock tokens (NVDAx, SPYx, TSLAx…) for the coin's holders, every hour.
+> Launch a coin on Solana. Every trade pays 1.25%, and 0.50% of it buys real stock tokens (NVDAx, SPYx, TSLAx…) for the coin's holders, every hour.
 >
 > No snipers. No dev buy. Liquidity locked forever at graduation.
 >
@@ -29,11 +29,11 @@ below matches the site (How it works) and docs/VERIFIED.md.
 > Launching soon 🧵
 
 **2/**
-> Every trade on a uspad coin pays a 1% fee:
+> Every trade on a uspad coin pays a 1.25% fee:
 >
 > • 0.50% to holders
 > • 0.15% to the creator
-> • 0.10% to uspad
+> • 0.35% to uspad
 > • 0.25% to Raydium
 >
 > Every hour, the holders' share buys the coin's stock token and sends it to every wallet holding $10 or more, in proportion to its bag.
@@ -68,7 +68,7 @@ below matches the site (How it works) and docs/VERIFIED.md.
 >
 > Memecoin yang membayar holder-nya dengan saham Amerika.
 >
-> Launch koin di Solana. Setiap trade membayar fee 1%, dan setengahnya dipakai membeli token saham asli (NVDAx, SPYx, TSLAx…) untuk holder koin itu, setiap jam.
+> Launch koin di Solana. Setiap trade membayar fee 1,25%, dan 0,50% darinya dipakai membeli token saham asli (NVDAx, SPYx, TSLAx…) untuk holder koin itu, setiap jam.
 >
 > Tanpa sniper. Tanpa dev buy. Likuiditas dikunci selamanya saat graduation.
 >

@@ -31,7 +31,7 @@ async function forCoin(d: WorkerDeps, step: string, c: { id: string; ticker?: st
 
 /** FeeClaim lamports + the coin's FeeAllocation, in one transaction. */
 async function recordPoolFee(d: WorkerDeps, feeClaimId: string, coinId: string, lamports: bigint, memecoinAmount?: bigint) {
-  const s = splitPoolFee(lamports, d.params.fees);
+  const s = splitPoolFee(lamports, d.params.poolSplit);
   await d.prisma.$transaction([
     d.prisma.feeClaim.update({ where: { id: feeClaimId }, data: { lamports, ...(memecoinAmount !== undefined ? { memecoinAmount } : {}) } }),
     d.prisma.feeAllocation.create({ data: { coinId, feeClaimId, lamports, holdersLamports: s.holders, creatorLamports: s.creator, divvyLamports: s.divvy } }),

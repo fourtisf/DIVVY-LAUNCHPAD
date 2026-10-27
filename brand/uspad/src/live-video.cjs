@@ -45,13 +45,13 @@ const dust = Array.from({ length: 46 }, (_, i) => {
   return `<i class="dust" style="left:${x}px;top:${y}px;width:${s}px;height:${s}px;opacity:${0.12 + (i % 5) * 0.05};animation-duration:${DURATION}s;--dy:${-160 - (i % 7) * 40}px"></i>`;
 }).join("");
 
-// The 1% split, out of 1400 px (same as the intro and the How it works page).
+// The 1.25% split, out of 1400 px (same as the intro and the How it works page).
 let x = 0;
 const split = [
-  ["0.50%", "holders", 700, "linear-gradient(100deg,#86EFAC,#4ADE80)"],
-  ["0.15%", "creator", 210, "#2E7D52"],
-  ["0.10%", "uspad", 140, "#D9F99D"],
-  ["0.25%", "Raydium", 350, "#1B2621"],
+  ["0.50%", "holders", 560, "linear-gradient(100deg,#86EFAC,#4ADE80)"],
+  ["0.15%", "creator", 168, "#2E7D52"],
+  ["0.35%", "uspad", 392, "#D9F99D"],
+  ["0.25%", "Raydium", 280, "#1B2621"],
 ];
 const segs = split.map(([, , w, bg], i) => `<div class="seg" style="left:${(x += w) - w}px;width:${w}px;background:${bg};${at(0.6 + i * 0.3)}"></div>`).join("");
 x = 0;
@@ -151,7 +151,7 @@ const html = `<div class="stage">
   ${scene(
     "chart",
     `<div class="cap a" style="top:40px"><p class="h2">A live candlestick chart.</p>${tags(["1m to 1D candles", "Price or market cap", "A dot for every payout"], 0.5)}</div>
-     <div class="cap b" style="top:40px"><p class="h2">Buy and sell right on uspad.</p><div class="tags"><span class="tag">1% fee, half of it to holders</span><span class="tag">Balances update live</span></div></div>
+     <div class="cap b" style="top:40px"><p class="h2">Buy and sell right on uspad.</p><div class="tags"><span class="tag">1.25% fee, 0.50% to holders</span><span class="tag">Balances update live</span></div></div>
      ${browser({ x: 310, y: 205, w: 1300, url: "uspad.fun/coin/CHIPDOG", img: shot("coin"), cam: "camCoin", o: 0.1 })}`,
   )}
 
@@ -168,7 +168,7 @@ const html = `<div class="stage">
 
   ${scene(
     "split",
-    `<p class="center h2 in" style="top:200px;${at(0.1)}">Every trade pays 1%. Half goes to holders.</p>
+    `<p class="center h2 in" style="top:200px;${at(0.1)}">Every trade pays 1.25%. 0.50% goes to holders.</p>
      <div class="bar1">${segs}</div>
      <div class="labels">${segLabels}</div>
      <p class="center lede in" style="top:800px;${at(1.8)}">Graduates to Raydium at 85 SOL. Its liquidity is locked forever.</p>`,

@@ -44,6 +44,20 @@ describe("splitPlatformFee", () => {
   it("sends the rounding remainder to Divvy, never to holders", () => {
     expect(splitPlatformFee(7n, fees)).toEqual({ holders: 5n, divvy: 2n });
   });
+  it("splits 0.85% as 0.50% holders and 0.35% uspad (owner decision 2026-10-27)", () => {
+    // A 1 SOL buy at fee_rate 8500 pays 8,500,000 lamports of platform fee.
+    expect(splitPlatformFee(8_500_000n, { holdersBps: 50, divvyBps: 35 })).toEqual({ holders: 5_000_000n, divvy: 3_500_000n });
+  });
+  it("keeps the old split for the fees of trades made before the fee change", () => {
+    // One 1 SOL buy at 0.60% before the change, one at 0.85% after: holders get 0.50% of both.
+    const now = { holdersBps: 50, divvyBps: 35 };
+    const early = { fees: 6_000_000n, total: 14_500_000n, split: { holdersBps: 50, divvyBps: 10 } };
+    expect(splitPlatformFee(14_500_000n, now, early)).toEqual({ holders: 10_000_000n, divvy: 4_500_000n });
+    // A short claim scales both parts down alike.
+    expect(splitPlatformFee(7_250_000n, now, early)).toEqual({ holders: 5_000_000n, divvy: 2_250_000n });
+    // Nothing from before the change: the current split.
+    expect(splitPlatformFee(8_500_000n, now, { ...early, fees: 0n, total: 8_500_000n })).toEqual({ holders: 5_000_000n, divvy: 3_500_000n });
+  });
 });
 
 describe("thresholds and SLA", () => {

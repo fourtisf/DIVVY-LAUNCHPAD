@@ -311,6 +311,8 @@ The 0.60% platform fee is then split off-chain into 0.50% for holders and 0.10% 
 - That the program uses the same rounding is DOCS ONLY. The docs formula computes each fee separately, so the rounding may differ by a lamport.
 - The GlobalConfig `trade_fee_rate` actually being 2500 on the SOL config Divvy uses is NEEDS ON-CHAIN CHECK. No source pins it; a docs page uses "trade fee is 1%" only as an illustration (`platform-config.mdx:7`).
 
+**Update 2026-10-27:** the owner raised Divvy's share to 0.35%: `fee_rate = 8500`, total 2500 + 8500 + 1500 = **12 500 = 1.25%** (VERIFIED item 28 for the update path).
+
 **Implication for Divvy:** set `fee_rate = 1% − trade_fee_rate − creator_fee_rate`. Read `trade_fee_rate` from the chosen GlobalConfig before creating the PlatformConfig; `create-platform-config.ts` prints it. If `trade_fee_rate ≠ 2500`, the 1% total and 0.50% holder share need adjusting. Holders can still be kept as the largest slice.
 
 ### 2d. `requires_platform_auth`

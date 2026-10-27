@@ -3,7 +3,7 @@ import type { Prisma } from "@divvy/db";
 import {
   foldTicker,
   short,
-  splitByWeights,
+  splitPlatformFee,
   type Amount,
   type CoinDetail,
   type CoinSummary,
@@ -144,11 +144,14 @@ export async function coinByMint(d: LiveDeps, mint: string): Promise<CoinRow | n
  */
 export async function pendingHoldersLamports(d: LiveDeps, coinId?: string): Promise<bigint> {
   const last = await d.prisma.vaultClaim.findFirst({ where: { dryRun: false, attributedAt: { not: null }, toTradeId: { not: null } }, orderBy: { toTradeId: "desc" }, select: { toTradeId: true } });
-  const [carried, accrued] = await Promise.all([
+  const trades: Prisma.TradeWhereInput = { venue: "curve", id: { gt: last?.toTradeId ?? 0n }, ...(coinId ? { coinId } : {}) };
+  const before = d.params.feeSplitBefore;
+  const [carried, accrued, early] = await Promise.all([
     d.prisma.feeAllocation.aggregate({ where: { roundId: null, dryRun: false, ...(coinId ? { coinId } : {}) }, _sum: { holdersLamports: true } }),
-    d.prisma.trade.aggregate({ where: { venue: "curve", id: { gt: last?.toTradeId ?? 0n }, ...(coinId ? { coinId } : {}) }, _sum: { platformFee: true } }),
+    d.prisma.trade.aggregate({ where: trades, _sum: { platformFee: true } }),
+    before ? d.prisma.trade.aggregate({ where: { ...trades, slot: { lt: before.slot } }, _sum: { platformFee: true } }) : null,
   ]);
-  const f = d.params.fees;
-  const accruedHolders = splitByWeights(accrued._sum.platformFee ?? 0n, { holders: f.holdersBps, divvy: f.divvyBps }, "divvy").holders;
+  const total = accrued._sum.platformFee ?? 0n;
+  const accruedHolders = splitPlatformFee(total, d.params.fees, before && { fees: early?._sum.platformFee ?? 0n, total, split: before }).holders;
   return (carried._sum.holdersLamports ?? 0n) + accruedHolders;
 }

@@ -50,7 +50,7 @@ $USPAD is live on Solana. 🟢
 The uspad token launched the way every coin on uspad does:
 • A private bundle, so nobody bought in its first block
 • No presale, no dev buy, no team tokens: the whole supply went to the curve
-• 1% per trade, and half of it buys [STOCK] for holders, every hour
+• 1.25% per trade, and 0.50% of it buys [STOCK] for holders, every hour
 • At 85 SOL it graduates to Raydium, with its liquidity locked forever
 
 CA: [CA]

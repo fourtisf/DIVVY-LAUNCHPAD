@@ -24,16 +24,18 @@ export default async function HowPage() {
   const g = c.graduation;
   const raiseSol = +g.quoteFundRaising.ui.toFixed(1);
 
-  // After graduation the locked liquidity's fees and the pool's creator fee are split in the same
-  // proportions as the 1% on the curve.
+  // After graduation the locked liquidity's fees and the pool's creator fee are split by
+  // fees.afterGraduation (50 : 15 : 10, the curve's split before uspad's share went up).
   const lpBps = POOL_FEE_BPS * (1 - POOL_RAYDIUM_SHARE);
   const potBps = lpBps + POOL_CREATOR_FEE_BPS * (1 - POOL_CREATOR_RAYDIUM_SHARE);
-  const shared = f.holdersBps + f.creatorBps + f.divvyBps;
+  const w = f.afterGraduation;
+  const shared = w.holders + w.creator + w.divvy;
+  const share = (v: number) => `${Math.round((v / shared) * 100)}%`;
   const after = {
     total: POOL_FEE_BPS + POOL_CREATOR_FEE_BPS,
-    holders: (potBps * f.holdersBps) / shared,
-    creator: (potBps * f.creatorBps) / shared,
-    divvy: (potBps * f.divvyBps) / shared,
+    holders: (potBps * w.holders) / shared,
+    creator: (potBps * w.creator) / shared,
+    divvy: (potBps * w.divvy) / shared,
     raydium: POOL_FEE_BPS * POOL_RAYDIUM_SHARE + POOL_CREATOR_FEE_BPS * POOL_CREATOR_RAYDIUM_SHARE,
   };
 
@@ -111,7 +113,7 @@ export default async function HowPage() {
           <div>
             <h3>After graduation the fee drops to {bpsLabel(after.total)}</h3>
             <p>
-              A trade in the Raydium pool pays {bpsLabel(after.total)} instead of {pctLabel(f.tradeFeeBps)}: the pool&apos;s {pctLabel(POOL_FEE_BPS)} trading fee plus a {pctLabel(POOL_CREATOR_FEE_BPS)} creator fee. Raydium keeps {Math.round(POOL_RAYDIUM_SHARE * 100)}% of the {pctLabel(POOL_FEE_BPS)} and {Math.round(POOL_CREATOR_RAYDIUM_SHARE * 100)}% of the creator fee, and the locked liquidity earns the rest. uspad collects that along with the rest of the creator fee and splits it the same way as on the curve. Dividends keep coming every hour, just smaller per dollar traded.
+              A trade in the Raydium pool pays {bpsLabel(after.total)} instead of {pctLabel(f.tradeFeeBps)}: the pool&apos;s {pctLabel(POOL_FEE_BPS)} trading fee plus a {pctLabel(POOL_CREATOR_FEE_BPS)} creator fee. Raydium keeps {Math.round(POOL_RAYDIUM_SHARE * 100)}% of the {pctLabel(POOL_FEE_BPS)} and {Math.round(POOL_CREATOR_RAYDIUM_SHARE * 100)}% of the creator fee, and the locked liquidity earns the rest. uspad collects that along with the rest of the creator fee and splits it: {share(w.holders)} to holders, {share(w.creator)} to the creator and {share(w.divvy)} to uspad. Dividends keep coming every hour, just smaller per dollar traded.
             </p>
           </div>
         </li>

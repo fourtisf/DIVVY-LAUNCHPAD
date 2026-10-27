@@ -5,7 +5,7 @@ import { useSWRConfig } from "swr";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
-import { num, sol, type CoinDetail, type TradeBuildResponse } from "@divvy/shared";
+import { bpsLabel, num, sol, type CoinDetail, type TradeBuildResponse } from "@divvy/shared";
 import { api } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { errorText } from "@/lib/session";
@@ -58,11 +58,12 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   }, [publicKey, connection, coin.mint, balTick]);
 
   const v = parseAmount(amt);
-  const recv =
-    side === "buy" ? num(((v * solUsd * 0.99) / price) * (1 - Math.min(0.25, v / 40))) + " $" + coin.ticker : sol((v * price * 0.99) / solUsd);
-  const balLabel = wallet ? (side === "buy" ? (bal.sol != null ? `Balance ${bal.sol.toFixed(3)} SOL` : "") : bal.tokens != null ? `Balance ${num(bal.tokens)} $${coin.ticker}` : "") : "";
   const f = config.fees;
-  const feeLabel = `${f.tradeFeeBps / 100}%, ${f.holdersBps * 2 === f.tradeFeeBps ? "half of it" : `${f.holdersBps / 100}% of it`} to holders`;
+  const keep = 1 - f.tradeFeeBps / 10_000;
+  const recv =
+    side === "buy" ? num(((v * solUsd * keep) / price) * (1 - Math.min(0.25, v / 40))) + " $" + coin.ticker : sol((v * price * keep) / solUsd);
+  const balLabel = wallet ? (side === "buy" ? (bal.sol != null ? `Balance ${bal.sol.toFixed(3)} SOL` : "") : bal.tokens != null ? `Balance ${num(bal.tokens)} $${coin.ticker}` : "") : "";
+  const feeLabel = `${+(f.tradeFeeBps / 100).toFixed(2)}%, ${f.holdersBps * 2 === f.tradeFeeBps ? "half of it" : `${bpsLabel(f.holdersBps)} of it`} to holders`;
 
   const pick = (s: "buy" | "sell") => {
     setSide(s);

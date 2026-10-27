@@ -1,5 +1,5 @@
 // "How uspad works" banners: the path from a launch to an hourly stock dividend, and where each trade's
-// 1% goes. 16:9 for X posts (1600 x 900) and 4:5 for mobile feeds and Telegram (1080 x 1350), at 2x.
+// 1.25% goes. 16:9 for X posts (1600 x 900) and 4:5 for mobile feeds and Telegram (1080 x 1350), at 2x.
 // Usage (repo root): node brand/uspad/src/how.cjs brand/uspad
 // Figures are the site's (packages/shared/src/params.ts fee split, MIN_HOLDER_USD; LaunchLab's 85 SOL raise).
 const fs = require("fs");
@@ -16,8 +16,8 @@ const stocks = (n, size) =>
 
 const STEPS = [
   { t: "Launch", d: "Pick a name, a ticker and the stock your holders earn. Your wallet signs the create, sent in a private bundle.", tag: "No snipers · no dev buy" },
-  { t: "Trade", d: "Anyone buys and sells with SOL on the bonding curve. Every trade pays a 1% fee.", tag: "1% per trade" },
-  { t: "Buy the stock", d: "Every hour, the holders' half of the fees buys the stock token the creator picked.", tag: "stocks" },
+  { t: "Trade", d: "Anyone buys and sells with SOL on the bonding curve. Every trade pays a 1.25% fee.", tag: "1.25% per trade" },
+  { t: "Buy the stock", d: "Every hour, the holders' 0.50% of every trade buys the stock token the creator picked.", tag: "stocks" },
   { t: "Paid every hour", d: "The stock goes to every wallet holding $10 or more of the coin, in proportion to what it holds.", tag: "On chain receipts" },
 ];
 const step = (s, i) => `<div class="step">
@@ -26,16 +26,16 @@ const step = (s, i) => `<div class="step">
   <div class="tag">${s.tag === "stocks" ? `<span class="row">${stocks(5, 26)}</span>NVDAx, SPYx, TSLAx…` : `<i></i>${s.tag}`}</div>
 </div>`;
 
-// Where 1% of every trade on the curve goes (FEE_*_BPS).
+// Where 1.25% of every trade on the curve goes (FEE_*_BPS, owner decision 2026-10-27).
 const SPLIT = [
   ["Holders, in stock", 0.5, "#4ADE80"],
+  ["uspad", 0.35, "#D9F99D"],
   ["Raydium", 0.25, "#3A4A42"],
   ["Creator", 0.15, "#5EEAD4"],
-  ["uspad", 0.1, "#D9F99D"],
 ];
 // The legend sits under its segments when there's room (16:9), spread evenly otherwise (4:5).
 const split = (w, aligned = true) => `<div class="split">
-  <div class="split-h"><b>Every trade: 1%</b><span>Buys and sells on the bonding curve, split four ways.</span></div>
+  <div class="split-h"><b>Every trade: 1.25%</b><span>Buys and sells on the bonding curve, split four ways.</span></div>
   <div class="bar" style="width:${w}px">${SPLIT.map(([, p, c]) => `<i style="flex:${p};background:${c}"></i>`).join("")}</div>
   <div class="legend" style="width:${w}px;justify-content:${aligned ? "flex-start" : "space-between"}">${SPLIT.map(([l, p, c]) => `<span style="flex:${aligned ? p : "none"}"><em style="background:${c}"></em><b>${p.toFixed(2)}%</b>${l}</span>`).join("")}</div>
 </div>`;

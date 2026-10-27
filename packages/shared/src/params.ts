@@ -3,7 +3,7 @@
  * The fee split must match the on-chain PlatformConfig; the worker refuses to run payouts if it doesn't.
  */
 import { z } from "zod";
-import { assertSplit, type FeeSplitBps } from "./fees";
+import { assertSplit, type FeeSplitBps, type PlatformSplit } from "./fees";
 
 const csv = z
   .string()
@@ -11,11 +11,23 @@ const csv = z
   .transform((s) => s.split(",").map((x) => x.trim()).filter(Boolean));
 
 const ParamsSchema = z.object({
-  FEE_TRADE_BPS: z.coerce.number().int().default(100),
+  /** 1.25% = 0.25% Raydium + 0.50% holders + 0.15% creator + 0.35% uspad (owner decision 2026-10-27). */
+  FEE_TRADE_BPS: z.coerce.number().int().default(125),
   FEE_PROTOCOL_BPS: z.coerce.number().int().default(25),
   FEE_HOLDERS_BPS: z.coerce.number().int().default(50),
   FEE_CREATOR_BPS: z.coerce.number().int().default(15),
-  FEE_DIVVY_BPS: z.coerce.number().int().default(10),
+  FEE_DIVVY_BPS: z.coerce.number().int().default(35),
+  /**
+   * "<slot>:<holders bps>:<uspad bps>": trades before this slot paid the previous platform fee and are
+   * split at its weights. go-live.sh fee-rate sets it when the PlatformConfig's fee_rate changes.
+   */
+  FEE_SPLIT_BEFORE: z.string().regex(/^\d+:\d+:\d+$/, "FEE_SPLIT_BEFORE is <slot>:<holders bps>:<uspad bps>").optional(),
+  /**
+   * Fees collected after graduation (the pool's creator fee, the locked LP's fees), split
+   * holders : creator : uspad. 50 : 15 : 10 is the curve's old split, kept when the curve's uspad share
+   * went to 0.35% so holders of graduated coins get the same (owner decision 2026-10-27).
+   */
+  POOL_FEE_SPLIT: z.string().regex(/^\d+:\d+:\d+$/, "POOL_FEE_SPLIT is <holders>:<creator>:<uspad>").default("50:15:10"),
   /** "push" sends every round; "claim" credits a ledger (HANDOFF §3.4). Copy follows this switch. */
   PAYOUT_DELIVERY: z.enum(["push", "claim"]).default("push"),
   PAYOUTS_DRY_RUN: z.enum(["true", "false"]).default("true"),
@@ -48,6 +60,9 @@ const ParamsSchema = z.object({
 
 export interface DivvyParams {
   fees: FeeSplitBps;
+  /** The split of trades made before the last platform fee change (FEE_SPLIT_BEFORE), or null. */
+  feeSplitBefore: ({ slot: bigint } & PlatformSplit) | null;
+  poolSplit: Pick<FeeSplitBps, "holdersBps" | "creatorBps" | "divvyBps">;
   delivery: "push" | "claim";
   dryRun: boolean;
   minRoundUsd: number;
@@ -77,8 +92,13 @@ export function loadParams(src: Record<string, string | undefined> = process.env
     divvyBps: e.FEE_DIVVY_BPS,
   };
   assertSplit(fees);
+  const before = e.FEE_SPLIT_BEFORE?.split(":");
+  const [poolHolders, poolCreator, poolDivvy] = e.POOL_FEE_SPLIT.split(":").map(Number) as [number, number, number];
+  if (poolHolders + poolCreator + poolDivvy === 0) throw new Error("POOL_FEE_SPLIT must not be all zero");
   return {
     fees,
+    feeSplitBefore: before ? { slot: BigInt(before[0]!), holdersBps: Number(before[1]), divvyBps: Number(before[2]) } : null,
+    poolSplit: { holdersBps: poolHolders, creatorBps: poolCreator, divvyBps: poolDivvy },
     delivery: e.PAYOUT_DELIVERY,
     dryRun: e.PAYOUTS_DRY_RUN !== "false",
     minRoundUsd: e.MIN_ROUND_USD,

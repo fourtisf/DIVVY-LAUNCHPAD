@@ -21,11 +21,11 @@ Memecoins are fun to trade, but holding one pays nothing. On uspad, every trade 
 
 ## 2. Where the trading fee goes
 
-Every buy and sell on the bonding curve pays 1%:
+Every buy and sell on the bonding curve pays 1.25%:
 
 - 0.50% to the coin's holders, as their dividend
 - 0.15% to the coin's creator
-- 0.10% to uspad
+- 0.35% to uspad
 - 0.25% to Raydium, whose LaunchLab program runs the curve
 
 Each coin's share is counted from its own on-chain trades, so a coin's dividend is exactly what its own trading paid.
@@ -47,7 +47,7 @@ The pool's liquidity is locked forever with Raydium Burn & Earn. There is no way
 
 ## 5. After graduation
 
-A trade in the Raydium pool pays 0.30% instead of 1%: the pool's 0.25% fee plus a 0.05% creator fee. Raydium keeps 16% of the pool fee and 5% of the creator fee. The rest goes to uspad and is split the same way as on the curve: 50 : 15 : 10 between holders, the creator and uspad.
+A trade in the Raydium pool pays 0.30% instead of 1.25%: the pool's 0.25% fee plus a 0.05% creator fee. Raydium keeps 16% of the pool fee and 5% of the creator fee. The rest goes to uspad and is split 50 : 15 : 10 between holders, the creator and uspad.
 
 Per $1,000 traded after graduation: holders $1.72, creator $0.52, uspad $0.34, Raydium $0.42. Dividends keep coming every hour, just smaller per dollar traded.
 

@@ -121,6 +121,8 @@ Every curve trade pays a **1% fee**. Target split:
 
 If the exact split cannot be reached, keep the holders' share as the largest slice, update `/api/config`, and let the UI read percentages from config.
 
+**Owner decision 2026-10-27:** Divvy's (uspad's) share is **0.35%**, so a trade pays **1.25%**: 0.25% Raydium, 0.50% holders, 0.15% creator, 0.35% uspad (PlatformConfig `fee_rate` 8500). Fees collected after graduation keep the 50 : 15 : 10 split. See docs/AUDIT.md "Open owner decisions" and docs/VERIFIED.md item 28.
+
 **After graduation:** the CPMM pool runs on the 0.25% tier. With post-migration fee sharing, the LP is locked and a **Fee Key NFT** goes to `platform_nft_wallet` (behaviour after the 2026-08-17 upgrade). Fees claimed from that position fund the dividend, the creator and Divvy in the same proportions. **VERIFY** the claim instruction for locked-LP fees and whether CPMM creator fees apply.
 
 ### 3.3 Dividend engine (the core feature)

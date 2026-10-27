@@ -39,12 +39,12 @@ const chips = ["NVDAx", "SPYx", "TSLAx", "AAPLx", "QQQx", "MSTRx"]
   .join("");
 const ring = (d, o, delay) => `<div class="ring grow" style="left:${CX}px;top:${CY}px;width:${d}px;height:${d}px;border:1px solid rgba(134,239,172,${o});${at(delay)}"></div>`;
 
-// The 1% on the curve (fee split from the site): widths out of 1400 px.
+// The 1.25% on the curve (fee split from the site): widths out of 1400 px.
 const split = [
-  ["0.50%", "holders", 700, "linear-gradient(100deg,#86EFAC,#4ADE80)"],
-  ["0.15%", "creator", 210, "#2E7D52"],
-  ["0.10%", "uspad", 140, "#D9F99D"],
-  ["0.25%", "Raydium", 350, "#1B2621"],
+  ["0.50%", "holders", 560, "linear-gradient(100deg,#86EFAC,#4ADE80)"],
+  ["0.15%", "creator", 168, "#2E7D52"],
+  ["0.35%", "uspad", 392, "#D9F99D"],
+  ["0.25%", "Raydium", 280, "#1B2621"],
 ];
 let x = 0;
 const bar = split
@@ -156,8 +156,8 @@ const html = `<div class="stage">
 
   ${scene(
     "fee",
-    `<p class="center h2 in" style="top:220px;${at(0.1)}">Every trade pays 1%.</p>
-     <p class="center lede in" style="top:330px;${at(0.4)}">Half of it goes to the coin's holders.</p>
+    `<p class="center h2 in" style="top:220px;${at(0.1)}">Every trade pays 1.25%.</p>
+     <p class="center lede in" style="top:330px;${at(0.4)}">0.50% of every trade goes to the coin's holders.</p>
      <div class="bar">${bar.replace(/<div class="segl[\s\S]*?<\/div>/g, "")}</div>
      <div class="labels">${[...bar.matchAll(/<div class="segl[\s\S]*?<\/div>/g)].map((m) => m[0]).join("")}</div>`,
   )}

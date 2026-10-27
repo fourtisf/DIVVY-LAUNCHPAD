@@ -47,6 +47,27 @@ export function splitByWeights<K extends string>(
   return out;
 }
 
+/** The holders' and uspad's weights in the platform fee. */
+export type PlatformSplit = Pick<FeeSplitBps, "holdersBps" | "divvyBps">;
+
+/**
+ * Splits a coin's platform-fee lamports into the holders' and uspad's buckets (remainder to uspad).
+ * `early` covers a platform fee change: `fees` of the coin's `total` indexed fees came from trades
+ * before it, and that share is split at the old weights, the rest at the current ones.
+ */
+export function splitPlatformFee(
+  lamports: bigint,
+  s: PlatformSplit,
+  early?: { fees: bigint; total: bigint; split: PlatformSplit } | null,
+): { holders: bigint; divvy: bigint } {
+  const now = splitByWeights(lamports, { holders: s.holdersBps, divvy: s.divvyBps }, "divvy");
+  if (!early || early.fees <= 0n || early.total <= 0n) return now;
+  const old = (lamports * (early.fees < early.total ? early.fees : early.total)) / early.total;
+  const a = splitByWeights(old, { holders: early.split.holdersBps, divvy: early.split.divvyBps }, "divvy");
+  const b = splitByWeights(lamports - old, { holders: s.holdersBps, divvy: s.divvyBps }, "divvy");
+  return { holders: a.holders + b.holders, divvy: a.divvy + b.divvy };
+}
+
 /** Splits a claimed fee into Divvy's buckets in proportion to the configured bps (protocol excluded). */
 export function splitClaim(
   lamports: bigint,

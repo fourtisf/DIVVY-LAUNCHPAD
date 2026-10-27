@@ -210,6 +210,13 @@ async function attributeVaultClaim(d: WorkerDeps, chain: PayoutChain, claimId: s
 
   const fees = await d.prisma.trade.groupBy({ by: ["coinId"], where: { venue: "curve", id: range }, _sum: { platformFee: true } });
   const byCoin = new Map(fees.map((f) => [f.coinId, f._sum.platformFee ?? 0n]).filter(([, v]) => (v as bigint) > 0n) as [string, bigint][]);
+  // Trades from before the last platform fee change paid the old rate and keep its split.
+  const before = d.params.feeSplitBefore;
+  const early = new Map<string, bigint>();
+  if (before) {
+    const old = await d.prisma.trade.groupBy({ by: ["coinId"], where: { venue: "curve", id: range, slot: { lt: before.slot } }, _sum: { platformFee: true } });
+    for (const f of old) early.set(f.coinId, f._sum.platformFee ?? 0n);
+  }
   const a = attributeClaim(claim.lamports, byCoin);
   const tolerance = claim.lamports / 100n > 10_000_000n ? claim.lamports / 100n : 10_000_000n;
   if (a.shortfall || a.unattributed > tolerance) {
@@ -217,7 +224,7 @@ async function attributeVaultClaim(d: WorkerDeps, chain: PayoutChain, claimId: s
   }
   await d.prisma.$transaction(async (tx) => {
     for (const [coinId, lamports] of a.perCoin) {
-      const s = splitPlatformFee(lamports, d.params.fees);
+      const s = splitPlatformFee(lamports, d.params.fees, before && { fees: early.get(coinId) ?? 0n, total: byCoin.get(coinId) ?? 0n, split: before });
       await tx.feeAllocation.create({ data: { coinId, vaultClaimId: claim.id, lamports, holdersLamports: s.holders, divvyLamports: s.divvy, dryRun: claim.dryRun } });
     }
     await tx.vaultClaim.update({ where: { id: claim.id }, data: { unattributedLamports: a.unattributed, attributedAt: new Date() } });

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { Config } from "@divvy/shared";
+import { bpsLabel, type Config } from "@divvy/shared";
 import { sharedApi } from "@/lib/server-api";
 
 export const metadata: Metadata = { title: "Terms · uspad" };
@@ -29,7 +29,7 @@ export default async function TermsPage() {
       </p>
       <h3>Fees</h3>
       <p>
-        Trades pay {c.fees.tradeFeeBps / 100}% on the bonding curve: {c.fees.holdersBps / 100}% for holders, {c.fees.creatorBps / 100}% for the coin&apos;s creator, {c.fees.divvyBps / 100}% for uspad and {c.fees.protocolBps / 100}% for Raydium. After a coin graduates it trades in a Raydium pool with that pool&apos;s fees.
+        Trades pay {c.fees.tradeFeeBps / 100}% on the bonding curve: {bpsLabel(c.fees.holdersBps)} for holders, {bpsLabel(c.fees.creatorBps)} for the coin&apos;s creator, {bpsLabel(c.fees.divvyBps)} for uspad and {bpsLabel(c.fees.protocolBps)} for Raydium. After a coin graduates it trades in a Raydium pool with that pool&apos;s fees.
       </p>
       <h3>Moderation</h3>
       <p>uspad can pause launches and hide coins from its pages, for example coins that copy another coin, scams or illegal content. Hidden coins stay on chain and their holders keep getting their payouts.</p>
