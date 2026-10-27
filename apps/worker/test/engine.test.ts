@@ -18,7 +18,7 @@ import { loadWorkerEnv } from "../src/env";
 import { buildClaim, reconcileClaims } from "../src/claims";
 import type { OnSigned, PayoutChain } from "../src/payouts/chain";
 import { holdersForRound, runPayouts, timing } from "../src/payouts/engine";
-import { settleTransfers } from "../src/payouts/deliver";
+import { deliverCredits, settleTransfers } from "../src/payouts/deliver";
 
 const BASE_DB = process.env.DATABASE_URL;
 const REDIS = process.env.REDIS_URL;
@@ -63,6 +63,8 @@ const conn = {
   confirmTransaction: async () => ({ value: { err: null } }),
   getSignatureStatuses: async () => ({ value: statuses }),
   getBalance: async () => 10_000_000_000,
+  // Rent-exempt minimum: (128 + bytes) × 6,960 lamports.
+  getMinimumBalanceForRentExemption: async (len: number) => (128 + len) * 6_960,
 } as unknown as Connection;
 
 /** Quote: lamports → USD at $150/SOL → asset at its USD price, minus 0.5% impact. */
@@ -260,7 +262,10 @@ describe.skipIf(!run)("dividend engine", () => {
     expect(credits).toEqual({ "NVDAx:alice": 0n, "NVDAx:bob": 2_072_916n, "NVDAx:dave": 4_145_833n, "SPYx:alice": 932_812n, "SPYx:erin": 932_812n });
     const aliceNvda = await prisma.payoutItem.findFirst({ where: { wallet: W.alice, round: { dryRun: false, coinId: coins.A } } });
     expect(aliceNvda?.status).toBe("sent");
-    expect(await prisma.payoutTransfer.findMany({ select: { wallet: true, amount: true, status: true } })).toEqual([{ wallet: W.alice, amount: 6_218_750n, status: "confirmed" }]);
+    // alice pays her own delivery: the $0.02 fee is 11,112 NVDAx units ($0.02 / $180, rounded up), kept by uspad.
+    expect(await prisma.payoutTransfer.findMany({ select: { wallet: true, amount: true, feeAmount: true, status: true } })).toEqual([
+      { wallet: W.alice, amount: 6_207_638n, feeAmount: 11_112n, status: "confirmed" },
+    ]);
     // The push was logged with its purpose before sending (claim and swap signing is stubbed here).
     expect(sent).toEqual(["payout.send"]);
     expect(await prisma.swapBatch.findMany({ where: { dryRun: false }, select: { status: true } })).toEqual([{ status: "confirmed" }, { status: "confirmed" }]);
@@ -536,5 +541,37 @@ describe.skipIf(!run)("dividend engine", () => {
     expect(await prisma.creatorTransfer.findUnique({ where: { sig: "FWD-LOST" } })).toBeNull();
     expect(sentNow).toEqual([15_000_000n]);
     expect(await prisma.creatorTransfer.findUniqueOrThrow({ where: { sig: "FWD-AGAIN" } })).toMatchObject({ status: "landed", lamports: 15_000_000n });
+  });
+  it("push: a wallet's first send creates its account and pays the rent and fee from its dividend; an expired send gives it all back", async () => {
+    const d = deps(loadParams({ PAYOUTS_DRY_RUN: "false", PAYOUT_DELIVERY: "push" }));
+    const nvda = await prisma.dividendAsset.findUniqueOrThrow({ where: { symbol: "NVDAx" } });
+    await prisma.credit.updateMany({ where: { assetId: nvda.id }, data: { amount: 0n } });
+    await prisma.credit.upsert({ where: { wallet_assetId: { wallet: W.dave, assetId: nvda.id } }, create: { wallet: W.dave, assetId: nvda.id, amount: 5_000_000n }, update: { amount: 5_000_000n } });
+    const dave = () => prisma.credit.findUniqueOrThrow({ where: { wallet_assetId: { wallet: W.dave, assetId: nvda.id } } });
+
+    // dave has no NVDAx account and is owed $9 (≥ PUSH_NEW_ATA_MIN_USD $5): the send creates it.
+    // A Token-2022 account with ImmutableOwner is 170 bytes → rent 2,074,080 lamports = $0.311112 at
+    // SOL $150 = 172,840 NVDAx units; plus the $0.02 fee (11,112) = 183,952 kept from his 5,000,000.
+    await deliverCredits(d);
+    expect(await prisma.payoutTransfer.findFirstOrThrow({ where: { wallet: W.dave }, orderBy: { createdAt: "desc" }, select: { amount: true, feeAmount: true, createdAta: true, rentLamports: true, status: true } })).toEqual({
+      amount: 4_816_048n, feeAmount: 183_952n, createdAta: true, rentLamports: 2_074_080n, status: "confirmed",
+    });
+    expect((await dave()).amount).toBe(0n);
+
+    // A send whose outcome is unknown stays pending; once expired, the whole debit comes back.
+    await prisma.credit.update({ where: { wallet_assetId: { wallet: W.dave, assetId: nvda.id } }, data: { amount: 5_000_000n } });
+    const send = (conn as unknown as { sendRawTransaction: () => Promise<string> }).sendRawTransaction;
+    (conn as unknown as { sendRawTransaction: () => Promise<string> }).sendRawTransaction = async () => {
+      throw new Error("network timeout");
+    };
+    try {
+      await deliverCredits(d);
+    } finally {
+      (conn as unknown as { sendRawTransaction: () => Promise<string> }).sendRawTransaction = send;
+    }
+    const pending = await prisma.payoutTransfer.findFirstOrThrow({ where: { wallet: W.dave, status: "pending" } });
+    expect((await dave()).amount).toBe(0n);
+    await settleTransfers(d, pending.sig, "expired");
+    expect((await dave()).amount).toBe(5_000_000n);
   });
 });

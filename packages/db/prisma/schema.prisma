@@ -579,9 +579,14 @@ model PayoutTransfer {
   wallet               String
   assetId              String
   asset                DividendAsset  @relation(fields: [assetId], references: [id])
+  /// Sent to the wallet: its credit minus feeAmount.
   amount               BigInt
-  /// The payout vault paid this wallet's ATA rent.
+  /// Kept by uspad from the credit, in stock base units: the delivery fee, plus the new account's
+  /// rent when createdAta (owner decision 2026-10-27). Stays in the payout vault.
+  feeAmount            BigInt         @default(0)
+  /// The payout vault paid this wallet's ATA rent (lamports), repaid from the credit in feeAmount.
   createdAta           Boolean        @default(false)
+  rentLamports         BigInt         @default(0)
   status               TransferStatus @default(pending)
   lastValidBlockHeight BigInt
   createdAt            DateTime       @default(now())

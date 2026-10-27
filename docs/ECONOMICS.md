@@ -69,6 +69,17 @@ With credit, the floor is how often a coin can pay, not cost. A round runs once 
 | $1 | $200/day | $4.8k/day | $580/day | $13.9k/day |
 | $5 (HANDOFF default) | $1k/day | $24k/day | $2.9k/day | $69k/day |
 
+## Design (e): push, paid by the holder (chosen 2026-10-27)
+
+The owner's choice: stocks are still sent to every eligible holder every hour, but each send pays for itself out of the dividend, in the stock:
+
+- a delivery fee, `DELIVERY_FEE_USD` ($0.02), kept by uspad. It also covers the network fee, which is about $0.0001 per transfer;
+- on a wallet's first send of a stock, the rent of its new token account (about 0.0021 SOL, $0.32 at SOL $150). The payout vault pays the rent in SOL and keeps the same value in stock. The holder gets the rent back if they ever close the account.
+
+A first send waits until the wallet is owed `PUSH_NEW_ATA_MIN_USD` ($5), so the rent is at most about 6% of it; later sends wait for `AUTO_PUSH_MIN_USD` ($1), so the fee is at most 2%. What uspad keeps stays in the payout vault (`PayoutTransfer."feeAmount"`); the vault's SOL needs topping up from the fee claimer as it pays rent.
+
+Compared with (a)/(c), uspad no longer pays rent, so push doesn't lose money and rent farming only costs the farmer. Compared with (d), holders get the stock without clicking, and small holders pay a fee per send instead of a one-off claim cost.
+
 ## What a holder receives
 
 Holders are paid pro rata among everyone holding at least $10. These are after the swap's route fee and price impact, at SOL $150. On the curve the coin is assumed half-way to graduation (about $10.6k market cap).

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { ExtensionType, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, type Mint } from "@solana/spl-token";
 import {
   ata,
   collectLockedLpFeeInstruction,
@@ -10,6 +10,7 @@ import {
   lockedLiquidityPda,
   lockNamesPool,
   lpFeeCandidates,
+  newAtaLen,
   programs,
   type CpmmPool,
 } from "../src/live";
@@ -107,5 +108,25 @@ describe("instructions", () => {
     const keys = ix.keys.map((k) => k.pubkey.toBase58());
     // input account, output account, input vault, output vault (cp-swap swap_base_input order)
     expect(keys.slice(4, 8)).toEqual([ata(owner, coin, TOKEN_2022_PROGRAM_ID), ata(owner, NATIVE_MINT, TOKEN_PROGRAM_ID), pool.vaultB, pool.vaultA].map((k) => k.toBase58()));
+  });
+});
+
+describe("newAtaLen (rent of a holder's new stock account)", () => {
+  const tlv = (types: ExtensionType[]) => Buffer.concat(types.map((t) => { const b = Buffer.alloc(4); b.writeUInt16LE(t, 0); return b; }));
+  const info = (programId: PublicKey, types: ExtensionType[]) => ({ programId, mint: { tlvData: tlv(types) } as unknown as Mint });
+
+  it("is 165 bytes for an SPL Token mint", () => {
+    expect(newAtaLen(info(TOKEN_PROGRAM_ID, []))).toBe(165);
+  });
+
+  it("adds the account type and ImmutableOwner for a Token-2022 mint (the ATA program always sets it)", () => {
+    expect(newAtaLen(info(TOKEN_2022_PROGRAM_ID, []))).toBe(170);
+  });
+
+  it("adds the account extensions an xStock's mint requires, and nothing for mint-only ones", () => {
+    // Pausable → PausableAccount (0 bytes), TransferHook → TransferHookAccount (1 byte); scaled UI,
+    // permanent delegate, default state and metadata need nothing on the account.
+    const xstock = [ExtensionType.PausableConfig, ExtensionType.TransferHook, ExtensionType.ScaledUiAmountConfig, ExtensionType.PermanentDelegate, ExtensionType.DefaultAccountState, ExtensionType.MetadataPointer];
+    expect(newAtaLen(info(TOKEN_2022_PROGRAM_ID, xstock))).toBe(165 + 1 + 4 + 4 + 5);
   });
 });

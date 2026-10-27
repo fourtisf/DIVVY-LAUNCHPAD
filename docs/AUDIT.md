@@ -317,7 +317,7 @@ None of these can be checked here, because this environment has no mainnet RPC. 
 **Decided by the owner on 2026-10-26** (in chat, after the trade-offs below were put to them):
 
 - **Go straight to mainnet, without the devnet rehearsal** (checklist section 4). Mitigation: payouts start in dry-run with small caps, and every spend still needs the owner's OK in chat.
-- **Delivery model: push** (item 1). `PAYOUT_DELIVERY=push`. ECONOMICS.md's warning stands: push pays a token-account rent per new holder, and at a $10 minimum holding it can be farmed. The threshold (`MIN_HOLDER_USD`, item 6) is still open.
+- **Delivery model: push, paid by the holder** (item 1; changed 2026-10-27). `PAYOUT_DELIVERY=push`. Each send keeps `DELIVERY_FEE_USD` ($0.02) of the dividend for uspad, and a send that creates the holder's token account also keeps that account's rent, both in the stock (ECONOMICS.md design e). uspad no longer pays rent, so rent farming costs it nothing and `MIN_HOLDER_USD` can stay $10 (item 6, still the owner's call).
 - **After graduation: the CPMM creator fee goes to uspad** (item 3). `platform_cp_creator` is set to the fee claimer and `CPMM_CREATOR_FEES=true`; the pot is split 50 : 15 : 10 like the curve fee, and the creator's share is forwarded in SOL. Fee Key harvesting is built but stays off (`LOCKED_LP_FEES`) until checked on the first graduated coin.
 - **Next.js upgrade: done** (item 7, DEP-1). next 15.5.28 with React 19.2.9.
 - **How it works copy** (item 9, step 4): rewritten at the owner's request. Raydium's fee, the shared vault, graduation, the locked LP and the fee after graduation are explained.

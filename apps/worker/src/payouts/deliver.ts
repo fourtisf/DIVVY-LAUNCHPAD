@@ -5,15 +5,20 @@
  *   - push model only: also create the account and send, once the credit passes PUSH_NEW_ATA_MIN_USD,
  *   - claim model: everyone else claims (claims.ts) and pays their own account rent.
  *
+ * Holders pay their own delivery (owner decision 2026-10-27): each send keeps DELIVERY_FEE_USD of the
+ * credit, and a send that creates the token account also keeps that account's rent, both in the
+ * stock and rounded up (`deliveryCharge`). What's kept stays in the payout vault as uspad's
+ * (PayoutTransfer."feeAmount"); the vault's SOL pays the rent and network fees.
+ *
  * A credit is debited in the same database transaction that records the PayoutTransfer, before the
  * transaction is sent. The reconciler confirms it, or gives the credit back once the blockhash has
  * certainly expired.
  */
 import { ComputeBudgetProgram, PublicKey, SendTransactionError, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import type { Prisma } from "@divvy/db";
-import { assertCanSend, existingAtas, getMintInfo, signatureOf, transferIxs, ata, type MintInfo } from "@divvy/solana/live";
+import { assertCanSend, existingAtas, getMintInfo, newAtaLen, signatureOf, transferIxs, ata, type MintInfo } from "@divvy/solana/live";
 import type { WorkerDeps } from "../deps";
-import { deliveryAction } from "./plan";
+import { deliveryAction, deliveryCharge } from "./plan";
 
 const MAX_CREDITS_PER_RUN = 5000;
 /** Blocks past lastValidBlockHeight before a missing transaction counts as expired (load-balanced RPCs lag). */
@@ -41,8 +46,14 @@ async function blockWallet(d: WorkerDeps, assetId: string, symbol: string, walle
 
 interface Planned {
   wallet: string;
+  /** Taken from the credit: amount + fee. */
+  debit: bigint;
+  /** Sent to the wallet. */
   amount: bigint;
+  /** Kept by uspad (delivery fee, plus the rent when createAta). */
+  fee: bigint;
   createAta: boolean;
+  rentLamports: bigint;
 }
 
 export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; held: number }> {
@@ -71,6 +82,7 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
     ]);
     const busy = new Set([...pendingT, ...pendingC].map((x) => x.wallet).concat(blocked));
     const have = await existingAtas(d.conn, credits.map((c) => new PublicKey(c.wallet)), info);
+    const rentLamports = BigInt(await d.conn.getMinimumBalanceForRentExemption(newAtaLen(info)));
     const plan: Planned[] = [];
     for (const c of credits) {
       if (busy.has(c.wallet)) continue;
@@ -82,7 +94,12 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
         pushNewAtaMinUsd: d.env.PUSH_NEW_ATA_MIN_USD,
       });
       // Never pay rent for an account owned by a program (it can't claim or use it; audit).
-      if (action === "send" || (action === "send_create_ata" && PublicKey.isOnCurve(new PublicKey(c.wallet).toBytes()))) plan.push({ wallet: c.wallet, amount: c.amount, createAta: action === "send_create_ata" });
+      const go = action === "send" || (action === "send_create_ata" && PublicKey.isOnCurve(new PublicKey(c.wallet).toBytes()));
+      const createAta = action === "send_create_ata";
+      const charge = go
+        ? deliveryCharge({ credit: c.amount, createAta, feeUsd: d.params.deliveryFeeUsd, rentLamports, solUsd: prices.solUsd, assetUsd: usd, decimals: asset.decimals })
+        : null;
+      if (charge) plan.push({ wallet: c.wallet, debit: c.amount, amount: charge.net, fee: charge.fee, createAta, rentLamports: createAta ? rentLamports : 0n });
       else held++;
     }
     if (!plan.length) continue;
@@ -113,6 +130,14 @@ export async function deliverCredits(d: WorkerDeps): Promise<{ sent: number; hel
     const owed = fits.reduce((a, p) => a + p.amount, 0n);
     if (owed + reserved > bal) {
       await d.alerts.send(`vault-short-${asset.symbol}`, "critical", `Payout vault holds ${bal} ${asset.symbol} base units but owes ${owed} more on top of ${reserved} in flight; sends stopped`);
+      continue;
+    }
+    // The vault pays the new accounts' rent and the fees in SOL. Short of it, a send fails its
+    // preflight and would wrongly block the wallet, so wait and alert instead.
+    const lamportsNeeded = fits.reduce((a, p) => a + p.rentLamports, 0n) + BigInt(Math.ceil(fits.length / d.env.PUSH_BATCH_SIZE)) * 100_000n;
+    const lamports = BigInt(await d.conn.getBalance(vault.publicKey, "confirmed"));
+    if (lamports < lamportsNeeded) {
+      await d.alerts.send("vault-sol-short", "critical", `Payout vault holds ${lamports} lamports but its ${asset.symbol} sends need ${lamportsNeeded} for account rent and fees; sends wait. Top it up from the fee claimer.`, 3600);
       continue;
     }
     await d.redis.incrbyfloat(capKey, Number(owed) * unitUsd);
@@ -151,9 +176,11 @@ async function sendBatch(d: WorkerDeps, assetId: string, info: MintInfo, batch: 
   try {
     await d.prisma.$transaction(async (db) => {
       for (const p of batch) {
-        const n = await db.credit.updateMany({ where: { wallet: p.wallet, assetId, amount: { gte: p.amount } }, data: { amount: { decrement: p.amount } } });
+        const n = await db.credit.updateMany({ where: { wallet: p.wallet, assetId, amount: { gte: p.debit } }, data: { amount: { decrement: p.debit } } });
         if (n.count !== 1) throw new Error(`credit for ${p.wallet} changed`);
-        await db.payoutTransfer.create({ data: { sig, wallet: p.wallet, assetId, amount: p.amount, createdAta: p.createAta, lastValidBlockHeight: BigInt(lastValidBlockHeight) } });
+        await db.payoutTransfer.create({
+          data: { sig, wallet: p.wallet, assetId, amount: p.amount, feeAmount: p.fee, createdAta: p.createAta, rentLamports: p.rentLamports, lastValidBlockHeight: BigInt(lastValidBlockHeight) },
+        });
       }
     });
   } catch (e) {
@@ -219,13 +246,15 @@ export async function settleTransfers(d: WorkerDeps, sig: string, to: "confirmed
     for (const t of rows) {
       const moved = await db.payoutTransfer.updateMany({ where: { id: t.id, status: "pending" }, data: { status: to } });
       if (moved.count !== 1) continue;
+      // The credit lost the amount sent and the fee kept; an expired send gives both back.
+      const debit = t.amount + t.feeAmount;
       if (to === "expired") {
         await db.credit.upsert({
           where: { wallet_assetId: { wallet: t.wallet, assetId: t.assetId } },
-          create: { wallet: t.wallet, assetId: t.assetId, amount: t.amount },
-          update: { amount: { increment: t.amount } },
+          create: { wallet: t.wallet, assetId: t.assetId, amount: debit },
+          update: { amount: { increment: debit } },
         });
-      } else await markItems(db, t.wallet, t.assetId, t.amount, "sent", sig);
+      } else await markItems(db, t.wallet, t.assetId, debit, "sent", sig);
     }
   });
   if (to === "expired") d.log("deliver: transfer expired, credit restored", { sig });

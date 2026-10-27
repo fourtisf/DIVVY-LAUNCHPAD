@@ -89,6 +89,8 @@ export const ConfigSchema = z.object({
     minRoundUsd: z.number(),
     delivery: z.enum(["push", "claim"]),
     autoPushMinUsd: z.number().nullable(),
+    /** Taken from each automatic send's dividend; a wallet's first send also covers its token account's rent. */
+    deliveryFeeUsd: z.number(),
   }),
   quote: z.object({ symbol: z.literal("SOL"), mint: base58, decimals: z.literal(9), priceUsd: z.number() }),
   dividendAssets: z.array(DividendAssetSchema),

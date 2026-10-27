@@ -72,7 +72,7 @@ export function buildConfig(): Config {
       imageMaxBytes: IMAGE_MAX_BYTES,
       imageTypes: [...IMAGE_TYPES],
     },
-    payouts: { intervalSec: 3600, lateAfterSec: 900, minHolderUsd: 10, minRoundUsd: 5, delivery: "push", autoPushMinUsd: null },
+    payouts: { intervalSec: 3600, lateAfterSec: 900, minHolderUsd: 10, minRoundUsd: 5, delivery: "push", autoPushMinUsd: null, deliveryFeeUsd: 0.02 },
     quote: { symbol: "SOL", mint: WSOL_MINT, decimals: 9, priceUsd: SOL_USD },
     // Stock mints are fetched into the DividendAsset table (packages/solana/scripts/phase0/fetch-xstocks.ts),
     // never typed by hand, so the demo has none.

@@ -144,5 +144,27 @@ export function deliveryAction(p: { delivery: "push" | "claim"; hasAta: boolean;
   return "hold";
 }
 
+/**
+ * What one automatic send costs the holder, in the stock's base units, rounded up: uspad's delivery
+ * fee, plus the rent of the new token account when the send creates it (owner decision 2026-10-27:
+ * holders pay their own delivery costs out of the dividend). Null when the credit doesn't cover it.
+ */
+export function deliveryCharge(p: {
+  credit: bigint;
+  createAta: boolean;
+  feeUsd: number;
+  rentLamports: bigint;
+  solUsd: number;
+  assetUsd: number;
+  decimals: number;
+}): { fee: bigint; net: bigint } | null {
+  if (!(p.assetUsd > 0) || !(p.solUsd > 0)) return null;
+  const units = (usd: number) => BigInt(Math.ceil((usd / p.assetUsd) * 10 ** p.decimals - 1e-9));
+  const rentUsd = p.createAta ? (Number(p.rentLamports) / 1e9) * p.solUsd : 0;
+  const fee = units(p.feeUsd) + (p.createAta ? units(rentUsd) : 0n);
+  const net = p.credit - fee;
+  return net > 0n ? { fee, net } : null;
+}
+
 /** A round is late if it isn't delivered within the hour plus the grace period (HANDOFF §3.3 SLA). */
 export const isLate = (hour: Date, now: Date, lateAfterSec: number) => now.getTime() > hour.getTime() + 3_600_000 + lateAfterSec * 1000;

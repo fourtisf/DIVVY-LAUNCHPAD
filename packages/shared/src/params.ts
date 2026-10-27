@@ -22,6 +22,12 @@ const ParamsSchema = z.object({
   MIN_ROUND_USD: z.coerce.number().positive().default(5),
   MIN_HOLDER_USD: z.coerce.number().positive().default(10),
   AUTO_PUSH_MIN_USD: z.coerce.number().positive().default(1),
+  /**
+   * uspad's fee per automatic send, in USD, taken from the dividend in stock (owner decision
+   * 2026-10-27). It also covers the send's network fee. A wallet's first send pays its new token
+   * account's rent the same way.
+   */
+  DELIVERY_FEE_USD: z.coerce.number().nonnegative().max(1).default(0.02),
   LATE_AFTER_SEC: z.coerce.number().int().positive().default(900),
   MAX_SWAP_IMPACT_BPS: z.coerce.number().int().positive().default(300),
   SWAP_SLIPPAGE_BPS: z.coerce.number().int().positive().default(100),
@@ -46,6 +52,7 @@ export interface DivvyParams {
   minRoundUsd: number;
   minHolderUsd: number;
   autoPushMinUsd: number;
+  deliveryFeeUsd: number;
   lateAfterSec: number;
   maxSwapImpactBps: number;
   swapSlippageBps: number;
@@ -76,6 +83,7 @@ export function loadParams(src: Record<string, string | undefined> = process.env
     minRoundUsd: e.MIN_ROUND_USD,
     minHolderUsd: e.MIN_HOLDER_USD,
     autoPushMinUsd: e.AUTO_PUSH_MIN_USD,
+    deliveryFeeUsd: e.DELIVERY_FEE_USD,
     lateAfterSec: e.LATE_AFTER_SEC,
     maxSwapImpactBps: e.MAX_SWAP_IMPACT_BPS,
     swapSlippageBps: e.SWAP_SLIPPAGE_BPS,

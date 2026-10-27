@@ -4,7 +4,11 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
+  ExtensionType,
+  getAccountLen,
+  getAccountTypeOfMintType,
   getAssociatedTokenAddressSync,
+  getExtensionTypes,
   getPausableConfig,
   getScaledUiAmountConfig,
   getTransferHook,
@@ -47,6 +51,20 @@ export async function getMintInfo(conn: Connection, address: PublicKey): Promise
 }
 
 export const ata = (owner: PublicKey, mint: PublicKey, programId: PublicKey) => getAssociatedTokenAddressSync(mint, owner, true, programId);
+
+/**
+ * Size of a new associated token account for this mint, which sets its rent. Token-2022: the
+ * account extensions the mint requires plus ImmutableOwner, which the ATA program always adds
+ * (token-2022 GetAccountDataSize; spl-associated-token-account create). spl-token's own
+ * getAccountLenForMint counts mint-only extensions as an empty entry and omits ImmutableOwner.
+ */
+export function newAtaLen(info: Pick<MintInfo, "programId" | "mint">): number {
+  if (!info.programId.equals(TOKEN_2022_PROGRAM_ID)) return getAccountLen([]);
+  const required = getExtensionTypes(info.mint.tlvData)
+    .map(getAccountTypeOfMintType)
+    .filter((e) => e !== ExtensionType.Uninitialized);
+  return getAccountLen([...new Set([...required, ExtensionType.ImmutableOwner])]);
+}
 
 /**
  * transferChecked from `from` (owner `authority`) to `to`'s ATA, creating the ATA first when

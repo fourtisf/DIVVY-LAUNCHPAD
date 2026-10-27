@@ -20,7 +20,7 @@ The worker and the live API also refuse to start if the RPC's genesis hash doesn
 
 The details are in `docs/AUDIT.md`, "Open owner decisions".
 
-- [x] **Delivery model:** push, or credit and claim. Owner chose **push** on 2026-10-26.
+- [x] **Delivery model:** push, or credit and claim. Owner chose **push** on 2026-10-26, and on 2026-10-27 that holders pay their own delivery: `DELIVERY_FEE_USD` per send plus the new account's rent, kept from the dividend (ECONOMICS.md design e).
       - `docs/ECONOMICS.md` recommends credit and claim, because push loses money on most coins through token-account rent.
       - Set `PAYOUT_DELIVERY`. The site's copy switches from "paid" to "credited" by itself.
 - [ ] **Fee split:**

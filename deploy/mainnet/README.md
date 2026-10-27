@@ -46,7 +46,8 @@ Follow setup-vps.md with these changes:
 | `DIVVY_MAINNET_ENABLED` | `false` until phase 4 |
 | `PAYOUTS_DRY_RUN` | `true` until phase 5 |
 | `PAYOUT_DELIVERY` | `push` (owner decision) |
-| `MIN_HOLDER_USD` | owner decision. docs/ECONOMICS.md: with push, **$50 or more**, or rent farming pays (default $10) |
+| `MIN_HOLDER_USD` | owner decision; $10 (the default) is fine now that holders pay their own account rent |
+| `DELIVERY_FEE_USD` | `0.02`: uspad's fee per send, kept from the dividend (owner decision 2026-10-27) |
 | `CPMM_CREATOR_FEES` | `false` until phase 3's `set-cp-creator.ts` lands, then `true` |
 | `LOCKED_LP_FEES` | `false` until phase 6 |
 | `JUP_API_KEY` / `JUP_API_KEY_API` | two Jupiter keys: the worker's and the API's |
@@ -92,7 +93,7 @@ sudo env RPC_URL="$RPC_URL" PLATFORM_ADMIN_KEYPAIR=/root/uspad-keys/platform-adm
 
 ## Phase 4. 💰 Open launches
 
-1. Fund the hot wallets (public keys in `/etc/divvy/keys/pubkeys.txt`) with small amounts the owner picks. The launcher pays each coin's rent and Jito tip and is capped per hour (`LAUNCHER_HOURLY_CAP_LAMPORTS`). The payout vault pays a token-account rent for every new holder under push. The fee claimer pays its own transaction fees. `HOT_WALLET_MIN_SOL` sets the low-balance alert.
+1. Fund the hot wallets (public keys in `/etc/divvy/keys/pubkeys.txt`) with small amounts the owner picks. The launcher pays each coin's rent and Jito tip and is capped per hour (`LAUNCHER_HOURLY_CAP_LAMPORTS`). The payout vault pays each new holder's token-account rent in SOL and keeps the same value from that holder's dividend in stock, so it needs SOL up front and a top-up now and then. The fee claimer pays its own transaction fees. `HOT_WALLET_MIN_SOL` sets the low-balance alert.
 2. `DIVVY_MAINNET_ENABLED=true` in api.env **and** worker.env (`envcheck`), reload the API, restart the worker (RUNBOOK "Config-only changes").
 3. The owner launches one coin from the site, buys and sells a little, and checks it on Solscan and Raydium. Then resume launches.
 

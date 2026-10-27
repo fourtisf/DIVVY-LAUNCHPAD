@@ -4,6 +4,7 @@ import {
   budgetRounds,
   classifyHolders,
   deliveryAction,
+  deliveryCharge,
   entitlements,
   isLate,
   quoteLooksWrong,
@@ -122,5 +123,30 @@ describe("deliveryAction", () => {
     expect(deliveryAction({ ...base, delivery: "push", hasAta: false, creditUsd: 4 })).toBe("hold");
     expect(deliveryAction({ ...base, delivery: "push", hasAta: false, creditUsd: 6 })).toBe("send_create_ata");
     expect(deliveryAction({ ...base, delivery: "claim", hasAta: false, creditUsd: 600 })).toBe("hold");
+  });
+});
+
+describe("deliveryCharge (holders pay their own delivery)", () => {
+  // NVDAx at $180 with 8 decimals, SOL at $150.
+  const base = { feeUsd: 0.02, rentLamports: 2_074_080n, solUsd: 150, assetUsd: 180, decimals: 8 };
+
+  it("keeps the delivery fee, rounded up to whole base units", () => {
+    // $0.02 / $180 = 0.000111… NVDAx = 11,111.1 units → 11,112.
+    expect(deliveryCharge({ ...base, credit: 1_000_000n, createAta: false })).toEqual({ fee: 11_112n, net: 988_888n });
+  });
+
+  it("also keeps the new account's rent when the send creates it", () => {
+    // Rent 0.00207408 SOL × $150 = $0.311112 → 172,840 units; plus 11,112 for the fee.
+    expect(deliveryCharge({ ...base, credit: 5_000_000n, createAta: true })).toEqual({ fee: 183_952n, net: 4_816_048n });
+  });
+
+  it("holds the send when the credit doesn't cover its own costs, or a price is missing", () => {
+    expect(deliveryCharge({ ...base, credit: 11_112n, createAta: false })).toBeNull();
+    expect(deliveryCharge({ ...base, credit: 100_000n, createAta: true })).toBeNull();
+    expect(deliveryCharge({ ...base, assetUsd: 0, credit: 5_000_000n, createAta: false })).toBeNull();
+  });
+
+  it("charges nothing but the rent when the fee is off", () => {
+    expect(deliveryCharge({ ...base, feeUsd: 0, credit: 1_000_000n, createAta: false })).toEqual({ fee: 0n, net: 1_000_000n });
   });
 });

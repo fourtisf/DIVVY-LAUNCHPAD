@@ -82,7 +82,7 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
         imageMaxBytes: IMAGE_MAX_BYTES,
         imageTypes: [...IMAGE_TYPES],
       },
-      payouts: { intervalSec: 3600, lateAfterSec: p.lateAfterSec, minHolderUsd: p.minHolderUsd, minRoundUsd: p.minRoundUsd, delivery: p.delivery, autoPushMinUsd: p.delivery === "claim" ? p.autoPushMinUsd : null },
+      payouts: { intervalSec: 3600, lateAfterSec: p.lateAfterSec, minHolderUsd: p.minHolderUsd, minRoundUsd: p.minRoundUsd, delivery: p.delivery, autoPushMinUsd: p.delivery === "claim" ? p.autoPushMinUsd : null, deliveryFeeUsd: p.deliveryFeeUsd },
       quote: { symbol: "SOL", mint: WSOL_MINT, decimals: 9, priceUsd: prices.solUsd },
       dividendAssets: assets.map((a) => ({
         symbol: a.symbol,
