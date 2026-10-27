@@ -6,7 +6,9 @@ import {
   displayTicker,
   foldName,
   foldTicker,
+  normalizeXHandle,
   similarity,
+  xProfileUrl,
   type CoinIdentity,
 } from "../src/antivamp";
 
@@ -167,6 +169,14 @@ describe("checkX", () => {
   it("validates the handle format", () => {
     expect(checkX("not a handle", xCtx).code).toBe("X_INVALID");
     expect(checkX("@abcdefghijklmnop", xCtx).code).toBe("X_INVALID");
+  });
+  it("takes the profile's link, as X's share button gives it", () => {
+    for (const link of ["https://x.com/uspadfun?s=11", "x.com/uspadfun", "https://twitter.com/USPADFUN/", "http://www.x.com/uspadfun#top", "mobile.twitter.com/uspadfun"])
+      expect(normalizeXHandle(link)).toBe("uspadfun");
+    expect(normalizeXHandle("https://x.com/uspadfun/status/1")).toBeNull();
+    expect(normalizeXHandle("https://example.com/uspadfun")).toBeNull();
+    expect(checkX("https://x.com/DegenKara", xCtx).code).toBe("X_TAKEN");
+    expect(xProfileUrl("UspadFun")).toBe("https://x.com/uspadfun");
   });
   it("allows one coin per account, case-insensitively", () => {
     expect(checkX("@DegenKara", xCtx)).toMatchObject({ code: "X_TAKEN", message: "@degenkara already launched $CHIPDOG" });

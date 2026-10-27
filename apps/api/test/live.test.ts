@@ -163,7 +163,7 @@ describe.skipIf(!run)("live mode", () => {
     const upload = expectShape(UploadResponseSchema, up.json()) as { imageId: string; check: { status: string } };
     expect(upload.check.status).toBe("ok");
 
-    const body = { name: "Moon Pig", ticker: "moonpig", description: "Oink", imageId: upload.imageId, dividendAsset: "NVDAx", website: "https://moon.pig", telegram: "@moonpigchat" };
+    const body = { name: "Moon Pig", ticker: "moonpig", description: "Oink", imageId: upload.imageId, dividendAsset: "NVDAx", website: "https://moon.pig", telegram: "@moonpigchat", x: "https://x.com/MoonPigFun?s=11" };
     expect((await post("/api/launch", body, { ...u, "x-geo-country": "US" })).statusCode).toBe(451);
     expect((await post("/api/launch", body, { ...u, origin: "https://evil.example" })).statusCode).toBe(403);
     expect((await post("/api/launch", { ...body, website: "javascript:alert(1)" }, u)).statusCode).toBe(422);
@@ -173,13 +173,16 @@ describe.skipIf(!run)("live mode", () => {
     walletAgeDays = 30;
     // Symbols are refused instead of being dropped from the minted ticker.
     expect(((await post("/api/launch", { ...body, ticker: "MOONPIG!" }, u)).json() as { code: string }).code).toBe("TICKER_CHARS");
+    // The X link is the project's account: one coin per account, and a post's link isn't one.
+    expect(((await post("/api/launch", { ...body, x: "twitter.com/DegenKara" }, u)).json() as { code: string }).code).toBe("X_TAKEN");
+    expect(((await post("/api/launch", { ...body, x: "https://x.com/moonpigfun/status/1" }, u)).json() as { code: string }).code).toBe("X_INVALID");
 
     const res = await post("/api/launch", body, u);
     expect(res.statusCode).toBe(201);
     const { launchId } = res.json() as { launchId: string };
     const launch = await prisma.launch.findUniqueOrThrow({ where: { id: launchId }, include: { coin: true } });
     expect(launch.coin!.status).toBe("pending");
-    expect(launch.coin!.links).toMatchObject({ website: "https://moon.pig", telegram: "https://t.me/moonpigchat" });
+    expect(launch.coin!.links).toMatchObject({ website: "https://moon.pig", telegram: "https://t.me/moonpigchat", x: "https://x.com/moonpigfun" });
 
     // A second launch from the same wallet hits the cooldown; another wallet can't reuse the identity.
     expect((await post("/api/launch", { ...body, ticker: "OTHER", name: "Other Pig" }, u)).statusCode).toBe(429);
@@ -197,6 +200,7 @@ describe.skipIf(!run)("live mode", () => {
     // The pending coin already holds its identity.
     const chk = (await get("/api/check?ticker=M00NP1G")).json() as { ticker: { code: string; collidesWith: { mint: string | null } } };
     expect(chk.ticker.code).toBe("TICKER_TAKEN");
+    expect(((await get("/api/check?x=%40moonpigfun")).json() as { x: { code: string } }).x.code).toBe("X_TAKEN");
   });
 
   it("lets admins pause launches and hide coins, with an audit trail", async () => {

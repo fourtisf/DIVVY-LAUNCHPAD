@@ -21,10 +21,6 @@
 .kv .slip:focus-visible{outline:2px solid var(--g);outline-offset:2px;border-radius:4px}
 .kv .slip option{background:var(--s1,#0F1714);color:var(--text,#E6F2EC)}
 
-/* Create form, live mode: "Link your X account" sits where the typed handle was. */
-.tinput.xlink{text-align:left;cursor:pointer;color:var(--g-hi)}
-.tinput.xlink:hover{border-color:var(--g)}
-
 /* /me and /admin (not in the prototype; built from its panels, tables and buttons). */
 .me-actions{display:flex;gap:10px;flex-wrap:wrap;margin:-6px 0 22px}
 .me-warn{color:var(--red);margin:-8px 0 18px}

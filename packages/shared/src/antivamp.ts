@@ -154,10 +154,20 @@ export function similarity(a: string, b: string): number {
 }
 
 /** Normalises a typed X handle. Returns null if it isn't a valid handle. */
+/**
+ * The X account in what a creator typed: `@handle`, `handle`, or the profile's link, as X's share
+ * button gives it (`https://x.com/handle?s=11`; x.com or twitter.com, www and mobile too). Lowercase,
+ * or null when it isn't one account (a post's link isn't).
+ */
 export function normalizeXHandle(input: string): string | null {
-  const h = input.trim().replace(/^@/, "").toLowerCase();
+  const s = input.trim();
+  const link = /^(?:https?:\/\/)?(?:(?:www|mobile)\.)?(?:x|twitter)\.com\/([^/?#]*)\/?(?:[?#].*)?$/i.exec(s);
+  const h = (link ? link[1]! : s).replace(/^@/, "").toLowerCase();
   return /^[a-z0-9_]{1,15}$/.test(h) ? h : null;
 }
+
+/** The canonical link stored for a coin's X account. */
+export const xProfileUrl = (handle: string): string => `https://x.com/${handle.toLowerCase()}`;
 
 export interface CoinIdentity {
   ticker: string;
@@ -222,7 +232,7 @@ export function checkName(input: string, ctx: NameContext): CheckResult {
 export function checkX(input: string, ctx: XContext): CheckResult {
   if (!input.trim().replace(/^@/, "")) return result("ok", "X_EMPTY", "Optional. Linking one makes the coin yours for good");
   const h = normalizeXHandle(input);
-  if (!h) return result("fail", "X_INVALID", "That isn't a valid X handle");
+  if (!h) return result("fail", "X_INVALID", "That isn't an X account or its link");
   const hit = ctx.findByX(h);
   if (hit) return result("fail", "X_TAKEN", `@${h} already launched $${hit.ticker}`, hit);
   return result("ok", "X_OK", `@${h} has no coin yet`);

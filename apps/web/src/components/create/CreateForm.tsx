@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import useSWR from "swr";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -50,10 +50,7 @@ export function CreateForm() {
   const router = useRouter();
   const { publicKey } = useWallet();
   const { setVisible } = useWalletModal();
-  const { me, ensureSignedIn, refresh } = useSession();
-  const params = useSearchParams();
-  // Live mode: the X account comes from OAuth, never from a typed handle.
-  const oauthX = !config.demo;
+  const { me, ensureSignedIn } = useSession();
   const [d, setD] = useState<Draft>(saved);
   const [imgCheck, setImgCheck] = useState<Check>(() => (saved.upload ? { s: saved.upload.check.status, m: saved.upload.check.message } : { s: "idle", m: "Upload a picture" }));
   const [over, setOver] = useState(false);
@@ -64,30 +61,6 @@ export function CreateForm() {
     saved = d;
   }, [d]);
 
-  // Back from X's consent screen (/api/auth/x/callback redirects here with ?x=...).
-  useEffect(() => {
-    const r = params.get("x");
-    if (!r) return;
-    const msg: Record<string, string> = {
-      linked: "X account linked",
-      cancelled: "Linking X was cancelled",
-      expired: "That X link expired. Try again.",
-      taken: "That X account is already linked to another wallet",
-      failed: "X didn't confirm the account. Try again.",
-    };
-    toast(msg[r] ?? "Linking X failed");
-    void refresh();
-    router.replace("/create", { scroll: false });
-  }, [params, toast, refresh, router]);
-
-  const linkX = async () => {
-    try {
-      if (await ensureSignedIn()) window.location.href = "/api/auth/x/start";
-    } catch (e) {
-      const m = errorText(e, "Couldn't sign in. Try again.");
-      if (m) toast(m);
-    }
-  };
   const set = (k: keyof Draft) => (e: { target: { value: string } }) => setD((p) => ({ ...p, [k]: e.target.value }));
 
   // Live anti-vamp feedback from the server (the authority), debounced.
@@ -96,13 +69,8 @@ export function CreateForm() {
   const { data: checks } = useSWR<CheckResponse>(checkKey, { keepPreviousData: true });
   const ct = d.ticker.trim() ? toCheck(checks?.ticker, "Checking…") : { s: "idle" as const, m: "Type a ticker" };
   const cn = d.name.trim() ? toCheck(checks?.name, "Checking…") : { s: "idle" as const, m: "Type a name" };
-  const cx = oauthX
-    ? me?.x
-      ? { s: "ok" as const, m: `@${me.x.handle}, verified` }
-      : { s: "ok" as const, m: "Optional. Linking one makes the coin yours for good" }
-    : d.x.trim()
-      ? toCheck(checks?.x, "Checking…")
-      : { s: "ok" as const, m: "Optional. Linking one makes the coin yours for good" };
+  // The project's X link (owner decision 2026-10-27): typed like the Telegram link, one coin per account.
+  const cx = d.x.trim() ? toCheck(checks?.x, "Checking…") : { s: "ok" as const, m: "Optional. Linking one makes the coin yours for good" };
   const stale = dq.ticker !== d.ticker || dq.name !== d.name || dq.x !== d.x;
   const ci = imgCheck;
 
@@ -147,7 +115,7 @@ export function CreateForm() {
       if (!config.demo && !(await ensureSignedIn())) return;
       const { launchId } = await api<{ launchId: string }>("/api/launch", {
         method: "POST",
-        body: JSON.stringify({ name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, telegram: d.tg, website: d.web }),
+        body: JSON.stringify({ name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, x: d.x, telegram: d.tg, website: d.web }),
       });
       setLaunch({ id: launchId, ticker: t, img: d.upload.url, pays: d.pays });
     } catch (err) {
@@ -274,19 +242,7 @@ export function CreateForm() {
             <div className="form-row fld">
               <div>
                 <label className="lbl" htmlFor="fX">X account <em>optional</em></label>
-                {oauthX ? (
-                  me?.x ? (
-                    <input className="tinput" id="fX" value={`@${me.x.handle}`} readOnly />
-                  ) : config.flags.xOAuth ? (
-                    <button className="tinput xlink" id="fX" type="button" onClick={linkX}>
-                      Link your X account
-                    </button>
-                  ) : (
-                    <input className="tinput" id="fX" placeholder="Linking X isn't available yet" disabled />
-                  )
-                ) : (
-                  <input className={"tinput" + (cx.s === "fail" ? " bad" : "")} id="fX" placeholder="@yourhandle" value={d.x} onChange={set("x")} />
-                )}
+                <input className={"tinput" + (cx.s === "fail" ? " bad" : "")} id="fX" placeholder="x.com/yourproject" value={d.x} onChange={set("x")} />
               </div>
               <div>
                 <label className="lbl" htmlFor="fTg">Telegram <em>optional</em></label>

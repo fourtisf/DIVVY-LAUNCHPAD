@@ -18,6 +18,7 @@ import {
   KEYS,
   LaunchRequestSchema,
   normalizeXHandle,
+  xProfileUrl,
   type CheckResponse,
   type CheckResult,
   type LaunchStatus,
@@ -86,10 +87,11 @@ class Refusal extends Error {
 }
 
 /** The server-side launch checks: ticker, name, picture (uncached when invalidated) and asset. */
-async function launchChecks(d: LiveDeps, b: { ticker: string; name: string; imageId: string; dividendAsset: string }, userId: string) {
-  const checks = await runChecks(d, { ticker: b.ticker, name: b.name });
+async function launchChecks(d: LiveDeps, b: { ticker: string; name: string; x: string; imageId: string; dividendAsset: string }, userId: string) {
+  const checks = await runChecks(d, { ticker: b.ticker, name: b.name, x: b.x });
   if (checks.ticker!.status !== "ok") return { fail: (r: Reply) => sendCheckFailure(r, checks.ticker as CheckResult) } as const;
   if (checks.name!.status !== "ok") return { fail: (r: Reply) => sendCheckFailure(r, checks.name as CheckResult) } as const;
+  if (checks.x!.status !== "ok") return { fail: (r: Reply) => sendCheckFailure(r, checks.x as CheckResult) } as const;
   const up = await d.prisma.upload.findUnique({ where: { id: b.imageId } });
   if (!up || up.ownerUserId !== userId) return { fail: (r: Reply) => sendError(r, 422, "IMAGE_EMPTY", "Upload a picture") } as const;
   const pic = await checkPicture(d, up.sha256, up.imagePhash);
@@ -118,7 +120,7 @@ async function fundedAndAged(d: LiveDeps, wallet: string): Promise<boolean> {
 
 export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDeps }) {
   app.get("/api/check", { config: { rateLimit: { max: 240, timeWindow: "1 minute" } } }, async (req, reply) => {
-    const q = z.object({ ticker: z.string().max(64).optional(), name: z.string().max(64).optional(), x: z.string().max(64).optional() }).safeParse(req.query);
+    const q = z.object({ ticker: z.string().max(64).optional(), name: z.string().max(64).optional(), x: z.string().max(200).optional() }).safeParse(req.query);
     if (!q.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid check");
     return runChecks(d, q.data);
   });
@@ -157,6 +159,8 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const parsed = LaunchRequestSchema.safeParse(req.body);
     if (!parsed.success) return sendError(reply, 400, "BAD_REQUEST", "Some launch fields are missing or too long");
     const b = parsed.data;
+    // The typed X link (checked in launchChecks: valid and unused), else a verified X account.
+    const xHandle = normalizeXHandle(b.x) ?? v.xHandle ?? null;
     const web = Website.safeParse(b.website ?? "");
     const tg = Telegram.safeParse(b.telegram ?? "");
     if (!web.success) return sendError(reply, 422, "BAD_WEBSITE", "The website must be an http(s) link");
@@ -169,14 +173,13 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
       const p = d.params;
       if (await d.redis.exists(KEYS.launchCooldown(v.wallet))) return sendError(reply, 429, "COOLDOWN", "Wait a couple of minutes between launches");
 
-      // Abuse guard for free launches: a linked X account, or a funded wallet with some history.
-      if (!v.xUserId && !(await fundedAndAged(d, v.wallet)))
-        return sendError(
-          reply,
-          403,
-          "NEEDS_X_OR_SOL",
-          `Link your X account, or use a wallet that holds at least ${Number(p.launchMinWalletLamports) / 1e9} SOL and is ${p.launchMinWalletAgeDays} days old, to launch for free`,
-        );
+      // Abuse guard for free launches: a verified X account, or a funded wallet with some history. A typed
+      // X link proves nothing, so it doesn't count.
+      if (!v.xUserId && !(await fundedAndAged(d, v.wallet))) {
+        const wallet = `a wallet that holds at least ${Number(p.launchMinWalletLamports) / 1e9} SOL and is ${p.launchMinWalletAgeDays} days old`;
+        const xOAuth = !!(d.env.X_CLIENT_ID && d.env.X_REDIRECT_URI);
+        return sendError(reply, 403, "NEEDS_X_OR_SOL", xOAuth ? `Link your X account, or use ${wallet}, to launch for free` : `Use ${wallet} to launch for free`);
+      }
 
       // Quick answers before the locked transaction; the server re-checks everything inside it.
       const early = await launchChecks(d, b, v.userId);
@@ -219,7 +222,7 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
                 creatorWallet: v.wallet,
                 creatorXUserId: v.xUserId,
                 status: "pending",
-                links: { website: web.data || undefined, telegram: tgUrl(tg.data) ?? undefined, x: v.xHandle ? `https://x.com/${v.xHandle}` : undefined },
+                links: { website: web.data || undefined, telegram: tgUrl(tg.data) ?? undefined, x: xHandle ? xProfileUrl(xHandle) : undefined },
               },
             });
             const launch = await tx.launch.create({ data: { userId: v.userId, coinId: coin.id, step: "checking", request: b as unknown as Prisma.InputJsonValue } });

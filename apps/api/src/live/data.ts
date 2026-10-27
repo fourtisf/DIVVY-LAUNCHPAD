@@ -11,6 +11,7 @@ import {
   type CoinIdentity,
   type PayoutRound as PayoutRoundDto,
   type Receipt,
+  xProfileUrl,
 } from "@divvy/shared";
 import type { LiveDeps } from "./deps";
 
@@ -165,7 +166,8 @@ export async function antiVampContexts(d: LiveDeps) {
     },
     async xHandle(handle: string) {
       const hit = await d.prisma.coin.findFirst({
-        where: { ...identityWhere, creator: { xHandle: { equals: handle, mode: "insensitive" } } },
+        // The coin's X link (stored as xProfileUrl), or a creator's verified X account.
+        where: { ...identityWhere, OR: [{ links: { path: ["x"], equals: xProfileUrl(handle) } }, { creator: { xHandle: { equals: handle, mode: "insensitive" } } }] },
         select: { ticker: true, name: true, mint: true, status: true },
       });
       return hit ? ident(hit) : undefined;

@@ -303,6 +303,8 @@ export const LaunchRequestSchema = z.object({
   description: z.string().max(280).default(""),
   imageId: z.string().min(1),
   dividendAsset: z.string().min(1),
+  /** The project's X account: a handle or its profile link (normalizeXHandle). */
+  x: z.string().max(200).optional().default(""),
   telegram: z.string().max(100).optional().default(""),
   website: z.string().max(200).optional().default(""),
 });
