@@ -19,7 +19,7 @@ import { api, ApiRequestError, qs } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { useDebounced } from "@/lib/hooks";
 import { errorText, useSession } from "@/lib/session";
-import { payLaunchFee, SentUnconfirmed } from "@/lib/tx";
+import { confirmSignature, payLaunchFee, SentUnconfirmed, TxExpired } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { CoinCard } from "../CoinCard";
 import { Icon } from "../Icon";
@@ -47,20 +47,28 @@ type Check = { s: "idle" | "ok" | "fail"; m: string };
 const toCheck = (r: { status: Check["s"]; message: string } | undefined, idle: string): Check => (r ? { s: r.status, m: r.message } : { s: "idle", m: idle });
 
 /**
- * A launch fee this wallet paid that no launch has used yet. The next try sends it again, so a launch
- * refused after the payment never costs a second fee. sessionStorage, so a reload keeps it.
+ * A launch fee this wallet sent that no launch has used yet, with its blockhash's last valid block
+ * height. The next try settles it on chain first (landed: it pays for the launch; expired: it never
+ * landed and nothing was paid), so a launch refused or interrupted after the payment never costs a
+ * second fee. sessionStorage, so a reload keeps it.
  */
+type Held = { sig: string; lvbh: number };
 const heldFee = {
-  get(w: string): string | null {
+  get(w: string): Held | null {
     try {
-      return w ? sessionStorage.getItem(`uspad:launch-fee:${w}`) : null;
+      const raw = w ? sessionStorage.getItem(`uspad:launch-fee:${w}`) : null;
+      if (!raw) return null;
+      // Saved before the block height was kept: a bare signature, settled from history alone.
+      if (/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(raw)) return { sig: raw, lvbh: 0 };
+      const v = JSON.parse(raw);
+      return v && typeof v.sig === "string" && typeof v.lvbh === "number" ? v : null;
     } catch {
       return null;
     }
   },
-  set(w: string, sig: string | null) {
+  set(w: string, h: Held | null) {
     try {
-      if (sig) sessionStorage.setItem(`uspad:launch-fee:${w}`, sig);
+      if (h) sessionStorage.setItem(`uspad:launch-fee:${w}`, JSON.stringify(h));
       else sessionStorage.removeItem(`uspad:launch-fee:${w}`);
     } catch {
       // Storage off: a payment the API already recorded is still credited to the wallet.
@@ -84,9 +92,10 @@ export function CreateForm() {
   const [launch, setLaunch] = useState<{ id: string; ticker: string; img: string; pays: string } | null>(null);
   // Why the last launch didn't happen, kept under the button: a toast alone is gone in 2.6 s.
   const [launchError, setLaunchError] = useState<string | null>(null);
-  // Creator-paid launches (Config.launchFee): the fee in SOL, and whether the wallet is sending it now.
+  // Creator-paid launches (Config.launchFee): the fee in SOL, and where its payment is: waiting for the
+  // wallet's approval, or sent and confirming on chain.
   const feeSol = config.launchFee.to ? config.launchFee.amount.ui : 0;
-  const [paying, setPaying] = useState(false);
+  const [feeStep, setFeeStep] = useState<"approve" | "confirm" | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -144,9 +153,11 @@ export function CreateForm() {
           ? "Add a picture to continue."
           : cx.s === "fail"
             ? "Fix the X account to continue."
-            : paying
+            : feeStep === "approve"
               ? `Approve the ${feeSol} SOL launch fee in your wallet…`
-              : feeSol
+              : feeStep === "confirm"
+                ? "Confirming your launch fee on chain…"
+                : feeSol
                 ? `Ready. You'll approve the ${feeSol} SOL launch fee in your wallet.`
                 : "Ready. Launching takes a few seconds.";
 
@@ -178,10 +189,12 @@ export function CreateForm() {
       const held = heldFee.get(wallet);
       if (held) {
         try {
-          res = await post(held);
+          // Settle it on chain first: still confirming, it's waited for; expired, it never landed.
+          setFeeStep("confirm");
+          await confirmSignature(connection, held.sig, held.lvbh);
+          res = await post(held.sig);
         } catch (e) {
-          // A held payment that can't pay any more (used, too old, never landed) is dropped.
-          if (!["FEE_USED", "BAD_FEE", "FEE_NOT_FOUND"].includes(errCode(e) ?? "")) throw e;
+          if (!(e instanceof TxExpired || errCode(e) === "FEE_USED" || errCode(e) === "BAD_FEE")) throw e;
           heldFee.set(wallet, null);
         }
       }
@@ -195,29 +208,37 @@ export function CreateForm() {
       if (!res) {
         // A paid launch: the wallet sends the fee, then the same request carries the payment for the API
         // to check on chain. A launch refused after that keeps the fee for the next one.
-        setPaying(true);
+        setFeeStep("approve");
         let sig: string;
         try {
-          sig = await payLaunchFee(walletCtx, connection, config.launchFee.to!, BigInt(config.launchFee.amount.raw));
+          sig = await payLaunchFee(walletCtx, connection, config.launchFee.to!, BigInt(config.launchFee.amount.raw), (s, lvbh) => {
+            heldFee.set(wallet, { sig: s, lvbh });
+            setFeeStep("confirm");
+          });
         } catch (e) {
-          if (e instanceof SentUnconfirmed) heldFee.set(wallet, e.signature);
+          // Expired: it never landed, so there's nothing to keep.
+          if (e instanceof TxExpired) heldFee.set(wallet, null);
           throw e;
-        } finally {
-          setPaying(false);
         }
-        heldFee.set(wallet, sig);
         res = await post(sig);
       }
       heldFee.set(wallet, null);
       setLaunch({ id: res.launchId, ticker: t, img: d.upload.url, pays: d.pays });
     } catch (err) {
       if (errCode(err) === "FEE_USED" || errCode(err) === "BAD_FEE") heldFee.set(wallet, null);
-      const m = errorText(err, "The launch failed. Try again.");
+      const pending = err instanceof SentUnconfirmed || errCode(err) === "FEE_NOT_FOUND";
+      const m = pending
+        ? "Your payment is still confirming. Press Launch coin again in a minute: it uses the same payment, so you won't pay twice."
+        : err instanceof TxExpired
+          ? "The payment didn't go through in time. Nothing was charged. Press Launch coin to try again."
+          : errorText(err, "The launch failed. Try again.");
       if (m) {
-        const kept = heldFee.get(wallet) ? " Your launch fee is kept for your next launch." : "";
+        const kept = !pending && heldFee.get(wallet) ? " Your launch fee is kept for your next launch." : "";
         toast(m + kept);
         setLaunchError(m + kept);
       }
+    } finally {
+      setFeeStep(null);
     }
   };
 
@@ -389,7 +410,7 @@ export function CreateForm() {
             <div className="sumline"><span>Your share of every trade</span><b>{bpsLabel(config.fees.creatorBps)}</b></div>
             <div className="sumline"><span>Holders&apos; share</span><b id="holdShare">{bpsLabel(config.fees.holdersBps)} in {d.pays}</b></div>
             <div className="sumline"><span>Dev buy</span><b>None, for anyone</b></div>
-            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || paying || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
+            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || feeStep !== null || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
               Launch coin
             </button>
             <p className="note" id="launchHint" style={{ textAlign: "center", color: launchError ? "var(--red)" : undefined }}>

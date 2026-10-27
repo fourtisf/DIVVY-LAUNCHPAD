@@ -82,7 +82,8 @@ describe("launch fee payment check", () => {
   it("refuses a short, failed, stale, foreign or misdirected payment", () => {
     expect(check(transferTx(payer, wallet, 10_000_000))).toMatch(/0\.01 SOL; launching costs 0\.02 SOL/);
     expect(check(transferTx(payer, wallet, 20_000_000, { err: { InstructionError: [0, "Custom"] } }))).toMatch(/failed/);
-    expect(check(transferTx(payer, wallet, 20_000_000, { ageSec: 7200 }))).toMatch(/more than an hour old/);
+    expect(check(transferTx(payer, wallet, 20_000_000, { ageSec: 2 * 86_400 }))).toMatch(/more than a day old/);
+    expect(check(transferTx(payer, wallet, 20_000_000, { ageSec: 7200 }))).toBeNull();
     expect(check(transferTx(other, wallet, 20_000_000))).toMatch(/signed in with/);
     expect(check(transferTx(payer, other, 20_000_000))).toMatch(/launch wallet/);
   });

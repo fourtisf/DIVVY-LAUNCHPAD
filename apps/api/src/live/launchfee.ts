@@ -12,14 +12,17 @@ import type { LiveDeps } from "./deps";
 
 type Reply = Parameters<typeof sendError>[0];
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
-/** A payment older than this can't pay for a launch: it was made for something else. */
-const MAX_AGE_SEC = 3600;
+/**
+ * A payment older than this can't pay for a launch: it was made for something else. A day, so a
+ * payment whose launch was interrupted (a closed tab, a slow confirmation) still pays for the retry.
+ */
+const MAX_AGE_SEC = 86_400;
 
 /** Why `tx` doesn't pay the launch fee, or null when it does: signed by `payer`, `lamports` or more to `to`. */
 export function feePaymentProblem(tx: VersionedTransactionResponse, payer: string, to: string, lamports: bigint, nowSec: number): string | null {
   const meta = tx.meta;
   if (!meta || meta.err) return "The payment failed on chain. Nothing was charged but the network fee.";
-  if (tx.blockTime && nowSec - tx.blockTime > MAX_AGE_SEC) return "That payment is more than an hour old. Pay the launch fee again.";
+  if (tx.blockTime && nowSec - tx.blockTime > MAX_AGE_SEC) return "That payment is more than a day old. Pay the launch fee again.";
   const keys = tx.transaction.message.getAccountKeys({ accountKeysFromLookups: meta.loadedAddresses });
   if (keys.get(0)?.toBase58() !== payer) return "The payment has to come from the wallet you're signed in with";
   let i = 0;

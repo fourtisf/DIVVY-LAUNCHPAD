@@ -513,6 +513,23 @@ EOF
 EOF
 }
 
+# The live site's Nginx config is written once, by switch. A paid launch takes a few requests (asking
+# for the fee, then the launch with the payment), which /api/launch's old 4 a minute could refuse:
+# raise it in place, keeping the file's other edits, and put it back if Nginx doesn't accept it.
+nginx_launch_limit() {
+  local f=/etc/nginx/sites-available/uspad-live.conf
+  [ -f "$f" ] && grep -q 'zone=divvy_launch:10m rate=4r/m' "$f" || return 0
+  cp "$f" /root/uspad-live.conf.bak
+  sed -i -e 's#zone=divvy_launch:10m rate=4r/m#zone=divvy_launch:10m rate=20r/m#' -e 's#limit_req zone=divvy_launch burst=3 nodelay#limit_req zone=divvy_launch burst=10 nodelay#' "$f"
+  if nginx -t > /dev/null 2>&1; then
+    if has_systemd; then systemctl reload nginx; else nginx -s reload; fi
+    note "Nginx: /api/launch sampai 20 per menit"
+  else
+    cp /root/uspad-live.conf.bak "$f"
+    note "Nginx tidak diubah (nginx -t menolak); batas /api/launch tetap"
+  fi
+}
+
 # --------------------------------------------------------------------------------------------------
 update() {
   if [ ! -f "$LIVE_MARK" ]; then
@@ -534,6 +551,7 @@ update() {
     point_current "$REL"
   fi
   say "Reload aplikasi"
+  nginx_launch_limit
   pm2as divvy-web reload "$ECO" --only divvy-web --update-env > /dev/null
   pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
   restart_worker
