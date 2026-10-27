@@ -18,6 +18,7 @@
  *   FEE_WALLET, NFT_WALLET, TRANSFER_FEE_AUTH [admin]   VESTING_WALLET [11111111111111111111111111111111]
  *   GLOBAL_CONFIG [LAUNCHPAD_CONFIG = SOL constant-product index 0] (read only, to print the total fee)
  *   NAME [Divvy] WEB / IMG [example.com placeholders; WEB and IMG must be set explicitly for --send]
+ *   CU_PRICE_MICROLAMPORTS [1000000]   priority fee; sending re-sends until it lands (land.ts)
  *
  * SDK API used (raydium-sdk-V2@b69d02b, npm 0.2.75-alpha):
  *   createPlatformConfig()  src/raydium/launchpad/instrument.ts:758  (instruction builder)
@@ -44,6 +45,7 @@ import {
   createPlatformConfig,
   getPdaPlatformId,
 } from "@raydium-io/raydium-sdk-v2";
+import { CU_PRICE_MICROLAMPORTS, priorityLamports, sendUntilLanded } from "./land";
 
 const RATE_DEN = 1_000_000;
 const MAX_PLATFORM_FEE_RATE = 50_000; // docs reference/changelog/2026-08-26-launchlab-platform-fee-rate-cap.mdx:18
@@ -128,17 +130,23 @@ async function main(): Promise<void> {
     new BN(0), // platformVestingScale
   );
 
-  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
-  const msg = new TransactionMessage({
-    payerKey: adminPk,
-    recentBlockhash: blockhash,
-    instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }), ix],
-  }).compileToV0Message();
-  const tx = new VersionedTransaction(msg);
-  if (admin) tx.sign([admin]);
+  // Consumed 24,883 units in the 2026-10-27 simulation. A priority fee so it lands (land.ts).
+  const CU_LIMIT = 60_000;
+  const instructions = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: CU_LIMIT }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: CU_PRICE_MICROLAMPORTS }),
+    ix,
+  ];
+  const sign = (blockhash: string): VersionedTransaction => {
+    const tx = new VersionedTransaction(new TransactionMessage({ payerKey: adminPk, recentBlockhash: blockhash, instructions }).compileToV0Message());
+    if (admin) tx.sign([admin]);
+    return tx;
+  };
+  const tx = sign((await conn.getLatestBlockhash("confirmed")).blockhash);
 
   console.log(`\nPlatformConfig PDA to be created: ${platformId.toBase58()}`);
   console.log(`fee_rate ${feeRate} creator_fee_rate ${creatorFeeRate} scales ${platformScale}/${creatorScale}/${burnScale}`);
+  console.log(`priority fee ${priorityLamports(CU_LIMIT)} lamports (CU_PRICE_MICROLAMPORTS ${CU_PRICE_MICROLAMPORTS})`);
   const sim = await conn.simulateTransaction(tx, { sigVerify: !!admin, replaceRecentBlockhash: !admin });
   console.log("simulation err:", JSON.stringify(sim.value.err), "units:", sim.value.unitsConsumed);
   console.log((sim.value.logs ?? []).join("\n"));
@@ -149,9 +157,8 @@ async function main(): Promise<void> {
     return;
   }
   if (sim.value.err) throw new Error("simulation failed; not sending");
-  const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
-  await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-  console.log(`SENT ${sig} — PlatformConfig ${platformId.toBase58()}`);
+  await sendUntilLanded(conn, sign, async () => (await conn.getAccountInfo(platformId, "confirmed")) !== null, "platform_config.create");
+  console.log(`PlatformConfig ${platformId.toBase58()} is on chain`);
 }
 
 main().catch((e) => {

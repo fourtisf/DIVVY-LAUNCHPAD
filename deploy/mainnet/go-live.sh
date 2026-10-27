@@ -143,6 +143,17 @@ point_current() { # release
   sudo -u divvy ln -sfn "$1" /srv/divvy/current.next && sudo -u divvy mv -Tf /srv/divvy/current.next /srv/divvy/current
 }
 
+# Before the switch only (the live site moves to a new release through `update`): the release from
+# `prepare` may be behind the branch, so the admin scripts and the go-live run on the latest commit.
+latest_release() {
+  [ -f "$LIVE_MARK" ] && return 0
+  sudo -u divvy git -C /srv/divvy/repo.git fetch --prune -q origin
+  [ "$(cat "$CUR/REVISION" 2>/dev/null)" = "$(sudo -u divvy git -C /srv/divvy/repo.git rev-parse "refs/heads/$BRANCH")" ] && return 0
+  build_release
+  point_current "$REL"
+  migrate
+}
+
 migrate() {
   say "Migrasi database"
   (cd "$CUR/packages/db" && sudo -u divvy-api -H node --env-file=$ENV_DIR/api.env ./node_modules/prisma/build/index.js migrate deploy)
@@ -348,6 +359,7 @@ EOF
 platform_config() {
   load_secrets
   [ -L "$CUR" ] && [ -f "$ADMIN_KEY" ] || die "jalankan 'go-live.sh prepare' dulu"
+  latest_release
   local fee admin send=()
   fee=$(pubkey $KEYS/fee-claimer.json)
   admin=$(pubkey "$ADMIN_KEY")
@@ -370,13 +382,7 @@ switch() {
   pda=$(env_get $ENV_DIR/api.env DIVVY_PLATFORM_CONFIG)
   [ "$(account_exists "$pda")" = yes ] || die "PlatformConfig $pda belum ada di mainnet. Buat dulu: go-live.sh platform-config"
 
-  # The release from `prepare` may be behind the branch: go live on the latest commit.
-  sudo -u divvy git -C /srv/divvy/repo.git fetch --prune -q origin
-  if [ "$(cat "$CUR/REVISION" 2>/dev/null)" != "$(sudo -u divvy git -C /srv/divvy/repo.git rev-parse "refs/heads/$BRANCH")" ]; then
-    build_release
-    point_current "$REL"
-    migrate
-  fi
+  latest_release
   smoke "$(readlink -f $CUR)"
 
   say "Matikan situs demo"

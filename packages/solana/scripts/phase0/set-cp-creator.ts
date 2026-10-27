@@ -20,6 +20,7 @@
 import { readFileSync } from "node:fs";
 import { ComputeBudgetProgram, Connection, Keypair, PublicKey, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { LAUNCHPAD_PROGRAM, PlatformConfig, getPdaPlatformId, updatePlatformConfig } from "@raydium-io/raydium-sdk-v2";
+import { CU_PRICE_MICROLAMPORTS, priorityLamports, sendUntilLanded } from "./land";
 
 const env = (k: string, d?: string): string => {
   const v = process.env[k] ?? d;
@@ -55,15 +56,20 @@ async function main(): Promise<void> {
   if (!p.platformClaimFeeWallet.equals(cpCreator)) console.log("NOTE: CP_CREATOR isn't platform_fee_wallet. The worker collects the creator fee only as the fee claimer.");
 
   const ix = updatePlatformConfig(LAUNCHPAD_PROGRAM, adminPk, platformId, { type: "updatePlatformCpCreator", value: cpCreator });
-  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
-  const msg = new TransactionMessage({
-    payerKey: adminPk,
-    recentBlockhash: blockhash,
-    instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }), ix],
-  }).compileToV0Message();
-  const tx = new VersionedTransaction(msg);
-  if (admin) tx.sign([admin]);
+  const CU_LIMIT = 100_000;
+  const instructions = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: CU_LIMIT }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: CU_PRICE_MICROLAMPORTS }),
+    ix,
+  ];
+  const sign = (blockhash: string): VersionedTransaction => {
+    const tx = new VersionedTransaction(new TransactionMessage({ payerKey: adminPk, recentBlockhash: blockhash, instructions }).compileToV0Message());
+    if (admin) tx.sign([admin]);
+    return tx;
+  };
+  const tx = sign((await conn.getLatestBlockhash("confirmed")).blockhash);
 
+  console.log(`priority fee ${priorityLamports(CU_LIMIT)} lamports (CU_PRICE_MICROLAMPORTS ${CU_PRICE_MICROLAMPORTS})`);
   const sim = await conn.simulateTransaction(tx, { sigVerify: !!admin, replaceRecentBlockhash: !admin });
   console.log("simulation err:", JSON.stringify(sim.value.err), "units:", sim.value.unitsConsumed);
   console.log((sim.value.logs ?? []).join("\n"));
@@ -72,9 +78,15 @@ async function main(): Promise<void> {
     return;
   }
   if (sim.value.err) throw new Error("simulation failed; not sending (if the logs mention the epoch, retry in the next epoch)");
-  const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
-  await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-  console.log(`SENT ${sig} — purpose: platform_config.update_cp_creator, signer: platform admin`);
+  await sendUntilLanded(
+    conn,
+    sign,
+    async () => {
+      const now = await conn.getAccountInfo(platformId, "confirmed");
+      return now !== null && PlatformConfig.decode(now.data).platformCpCreator.equals(cpCreator);
+    },
+    "platform_config.update_cp_creator",
+  );
 }
 
 main().catch((e) => {
