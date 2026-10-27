@@ -4,11 +4,9 @@
  */
 import { randomBytes } from "node:crypto";
 import {
-  foldName,
   foldTicker,
   hashStr,
   mulberry32,
-  normalizeXHandle,
   type Amount,
   type CoinDetail,
   type CoinSummary,
@@ -57,9 +55,10 @@ export class MockStore {
     return [...this.coins, ...[...this.launches.values()].filter((l) => !l.indexed).map((l) => l.coin)];
   }
 
+  /** Coins can share a ticker: the first one launched with it (the list is newest first). */
   coinByTicker(t: string): MockCoin | undefined {
     const norm = foldTicker(t);
-    return this.coins.find((c) => foldTicker(c.ticker) === norm);
+    return [...this.coins].reverse().find((c) => foldTicker(c.ticker) === norm);
   }
 
   coinByMint(m: string): MockCoin | undefined {
@@ -68,22 +67,11 @@ export class MockStore {
 
   identity = (c: MockCoin) => ({ ticker: c.ticker, name: c.name, mint: c.mint });
 
-  tickerCtx = {
-    findByTickerNorm: (norm: string) => {
-      const c = this.allCoins().find((x) => foldTicker(x.ticker) === norm);
-      return c && this.identity(c);
-    },
-    isReserved: (norm: string) => RESERVED_SET.has(norm),
-  };
-
-  nameCtx = { candidates: () => this.allCoins().map((c) => ({ ...this.identity(c), nameNorm: foldName(c.name) })) };
-
-  xCtx = {
-    findByX: (h: string) => {
-      const c = this.allCoins().find((x) => x.xHandle && normalizeXHandle(x.xHandle) === h);
-      return c && this.identity(c);
-    },
-  };
+  // Coins may share a ticker, a name or an X account (owner decision 2026-10-27): only reserved
+  // tickers and the format rules refuse.
+  tickerCtx = { findByTickerNorm: () => undefined, isReserved: (norm: string) => RESERVED_SET.has(norm) };
+  nameCtx = { candidates: () => [] };
+  xCtx = { findByX: () => undefined };
 
   emit(e: LiveEvent): void {
     for (const l of this.listeners) l(e);

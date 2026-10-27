@@ -8,6 +8,7 @@ import { ago, short, type AdminOverview, type AdminReportList } from "@divvy/sha
 import { api } from "@/lib/api";
 import { errorText, useSession } from "@/lib/session";
 import { useToast } from "../Toasts";
+import { coinHref } from "@/lib/links";
 
 const REASONS: Record<string, string> = { copy: "Copies another coin", scam: "Scam", nsfw: "Not safe for work", illegal: "Illegal", other: "Other" };
 
@@ -123,7 +124,7 @@ export function AdminView() {
                 {reports.items.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      <Link href={`/coin/${encodeURIComponent(r.coin.ticker)}`} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
+                      <Link href={coinHref(r.coin)} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={r.coin.imageUrl} alt="" width={26} height={26} style={{ borderRadius: 8 }} />${r.coin.ticker}
                         {r.coin.hidden && <span className="faint">hidden</span>}

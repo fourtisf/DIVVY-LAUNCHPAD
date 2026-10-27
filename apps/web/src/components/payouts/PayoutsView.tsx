@@ -9,6 +9,7 @@ import { useAssets, useConfig } from "@/lib/config";
 import { deliveryCopy } from "@/lib/copy";
 import { Chip } from "../Chip";
 import { Countdown } from "../Countdown";
+import { coinHref } from "@/lib/links";
 
 export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: PayoutList; assetsInUse: string[]; nextRoundAt: string }) {
   const assets = useAssets();
@@ -65,7 +66,7 @@ export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: Pa
               {data.items.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <Link href={`/coin/${encodeURIComponent(p.coin.ticker)}`} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
+                    <Link href={coinHref(p.coin)} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={p.coin.imageUrl} alt="" width={26} height={26} style={{ borderRadius: 8 }} />${p.coin.ticker}
                     </Link>

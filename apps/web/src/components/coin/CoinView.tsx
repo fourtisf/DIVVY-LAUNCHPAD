@@ -6,7 +6,6 @@ import useSWR from "swr";
 import {
   ago,
   bpsLabel,
-  leetExamples,
   minutesSince,
   num,
   pct,
@@ -103,7 +102,6 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
               <Icon name="copy" />
               {short(coin.mint)}
             </button>
-            <span className="tag"><Icon name="lock" />Ticker locked forever</span>
             <span className="tag"><Icon name="shield" />Private bundle launch</span>
             <ReportButton mint={coin.mint} ticker={coin.ticker} />
           </div>
@@ -293,12 +291,10 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
             <p className="note">Fees sit in this coin&apos;s own on-chain vault until the hourly round. A round more than {lateMin} minutes late turns this red for everyone.</p>
           </div>
           <div className="panel">
-            <h3>Copy protection</h3>
-            <ul className="checks">
-              <li><span className="ck ok"><Icon name="check" size={13} /></span><div>${coin.ticker} is taken here forever<small>Lookalikes like {leetExamples(coin.ticker)} are refused</small></div></li>
-              <li><span className="ck ok"><Icon name="check" size={13} /></span><div>The name can&apos;t be reused<small>Adding “official” or a “2” doesn&apos;t get through</small></div></li>
-              <li><span className="ck ok"><Icon name="check" size={13} /></span><div>{coin.creator.xHandle ? "@" + coin.creator.xHandle : "No X account"} owns this coin<small>One coin per X account</small></div></li>
-            </ul>
+            <h3>Check the address</h3>
+            <p className="note">
+              Coins on uspad can share a ticker, a name, a picture and an X account. This ${coin.ticker} is <b>{short(coin.mint)}</b>: compare it with the address the project posts before you buy.
+            </p>
           </div>
         </aside>
       </div>

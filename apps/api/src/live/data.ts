@@ -1,17 +1,14 @@
 /** Reads from Postgres and maps rows to the API contract (packages/shared/src/api.ts). */
 import type { Prisma } from "@divvy/db";
 import {
-  foldName,
   foldTicker,
   short,
   splitByWeights,
   type Amount,
   type CoinDetail,
   type CoinSummary,
-  type CoinIdentity,
   type PayoutRound as PayoutRoundDto,
   type Receipt,
-  xProfileUrl,
 } from "@divvy/shared";
 import type { LiveDeps } from "./deps";
 
@@ -123,9 +120,13 @@ export const invalidateBoard = () => {
   board = null;
 };
 
+/** Coins can share a ticker: a ticker link opens the first one launched with it (links use the mint). */
 export async function coinByTicker(d: LiveDeps, ticker: string): Promise<CoinRow | null> {
-  const c = await d.prisma.coin.findUnique({ where: { tickerNorm: foldTicker(ticker) }, include: coinInclude });
-  return c && c.status !== "pending" && c.status !== "failed" && !c.hidden && c.mint ? c : null;
+  return d.prisma.coin.findFirst({
+    where: { tickerNorm: foldTicker(ticker), status: { in: ["live", "graduated"] }, hidden: false, mint: { not: null } },
+    orderBy: { launchedAt: "asc" },
+    include: coinInclude,
+  });
 }
 
 export async function coinByMint(d: LiveDeps, mint: string): Promise<CoinRow | null> {
@@ -133,48 +134,6 @@ export async function coinByMint(d: LiveDeps, mint: string): Promise<CoinRow | n
   const c = await d.prisma.coin.findUnique({ where: { mint }, include: coinInclude });
   return c && (c.status === "live" || c.status === "graduated") && !c.hidden ? c : null;
 }
-
-/* ---------- anti-vamp contexts backed by Postgres ---------- */
-
-/** Coins that hold an identity: live, graduated, or still launching. Failed launches release theirs. */
-const identityWhere: Prisma.CoinWhereInput = { status: { in: ["pending", "live", "graduated"] } };
-const ident = (c: { ticker: string; name: string; mint: string | null; status: string }): CoinIdentity => ({
-  ticker: c.ticker,
-  name: c.name,
-  // The mint of a coin that hasn't landed yet stays secret (HANDOFF §3.5).
-  mint: c.status === "pending" ? null : c.mint,
-});
-
-export async function antiVampContexts(d: LiveDeps) {
-  return {
-    async ticker(norm: string) {
-      const [hit, reserved] = await Promise.all([
-        d.prisma.coin.findFirst({ where: { ...identityWhere, tickerNorm: norm }, select: { ticker: true, name: true, mint: true, status: true } }),
-        d.prisma.reservedTicker.findUnique({ where: { tickerNorm: norm } }),
-      ]);
-      return { hit: hit ? ident(hit) : undefined, reserved: !!reserved };
-    },
-    /** Trigram prefilter, then the exact Levenshtein check runs in shared code. */
-    async nameCandidates(name: string) {
-      const norm = foldName(name);
-      if (norm.length < 2) return [];
-      const rows = await d.prisma.$queryRaw<{ ticker: string; name: string; mint: string | null; status: string; nameNorm: string }[]>`
-        SELECT ticker, name, mint, status::text AS status, "nameNorm" FROM "Coin"
-        WHERE status IN ('pending','live','graduated') AND similarity("nameNorm", ${norm}) > 0.2
-        ORDER BY similarity("nameNorm", ${norm}) DESC LIMIT 200`;
-      return rows.map((r) => ({ ...ident(r), nameNorm: r.nameNorm }));
-    },
-    async xHandle(handle: string) {
-      const hit = await d.prisma.coin.findFirst({
-        // The coin's X link (stored as xProfileUrl), or a creator's verified X account.
-        where: { ...identityWhere, OR: [{ links: { path: ["x"], equals: xProfileUrl(handle) } }, { creator: { xHandle: { equals: handle, mode: "insensitive" } } }] },
-        select: { ticker: true, name: true, mint: true, status: true },
-      });
-      return hit ? ident(hit) : undefined;
-    },
-  };
-}
-
 
 /* ---------- money waiting for the next round ---------- */
 

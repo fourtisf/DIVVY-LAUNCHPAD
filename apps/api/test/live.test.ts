@@ -179,12 +179,16 @@ describe.skipIf(!run)("live mode", () => {
     expect(d.progress).toBe(0.25);
   });
 
-  it("runs the anti-vamp checks against the database", async () => {
+  it("checks the format and reserved tickers only: tickers, names and X accounts can repeat (owner decision 2026-10-27)", async () => {
     const r = expectShape(CheckResponseSchema, (await get(`/api/check?ticker=CH1PD0G&name=${encodeURIComponent("The Real Chip Dog")}&x=degenkara`)).json()) as Record<string, { code: string }>;
-    expect(r.ticker!.code).toBe("TICKER_TAKEN");
-    expect(r.name!.code).toBe("NAME_SIMILAR");
-    expect(r.x!.code).toBe("X_TAKEN");
+    expect(r.ticker!.code).toBe("TICKER_OK");
+    expect(r.name!.code).toBe("NAME_OK");
+    expect(r.x!.code).toBe("X_OK");
     expect(((await get("/api/check?ticker=P3P3")).json() as Record<string, { code: string }>).ticker!.code).toBe("TICKER_RESERVED");
+    expect(((await get("/api/check?ticker=CHIP!")).json() as Record<string, { code: string }>).ticker!.code).toBe("TICKER_CHARS");
+    // Coin pages open by mint (links) or by ticker (the first coin launched with it).
+    const chip = await prisma.coin.findFirstOrThrow({ where: { tickerNorm: "CHIPDOG" } });
+    expect(((await get(`/api/coins/${chip.mint}`)).json() as { ticker: string }).ticker).toBe("CHIPDOG");
   });
 
   it("signs in with a DB-backed session and flags admins", async () => {
@@ -219,8 +223,7 @@ describe.skipIf(!run)("live mode", () => {
     walletAgeDays = 30;
     // Symbols are refused instead of being dropped from the minted ticker.
     expect(((await post("/api/launch", { ...body, ticker: "MOONPIG!" }, u)).json() as { code: string }).code).toBe("TICKER_CHARS");
-    // The X link is the project's account: one coin per account, and a post's link isn't one.
-    expect(((await post("/api/launch", { ...body, x: "twitter.com/DegenKara" }, u)).json() as { code: string }).code).toBe("X_TAKEN");
+    // The X link is the project's account; a post's link isn't one.
     expect(((await post("/api/launch", { ...body, x: "https://x.com/moonpigfun/status/1" }, u)).json() as { code: string }).code).toBe("X_INVALID");
 
     const res = await post("/api/launch", body, u);
@@ -230,7 +233,7 @@ describe.skipIf(!run)("live mode", () => {
     expect(launch.coin!.status).toBe("pending");
     expect(launch.coin!.links).toMatchObject({ website: "https://moon.pig", telegram: "https://t.me/moonpigchat", x: "https://x.com/moonpigfun" });
 
-    // A second launch from the same wallet hits the cooldown; another wallet can't reuse the identity.
+    // A second launch from the same wallet hits the cooldown (free launches).
     expect((await post("/api/launch", { ...body, ticker: "OTHER", name: "Other Pig" }, u)).statusCode).toBe(429);
 
     const s1 = expectShape(LaunchStatusSchema, (await get(`/api/launch/${launchId}`)).json()) as { step: string; mint?: string };
@@ -243,10 +246,11 @@ describe.skipIf(!run)("live mode", () => {
     await prisma.launch.update({ where: { id: launchId }, data: { step: "landed", signature: "sig" } });
     expect(((await get(`/api/launch/${launchId}`)).json() as { mint?: string }).mint).toBe(mint);
 
-    // The pending coin already holds its identity.
-    const chk = (await get("/api/check?ticker=M00NP1G")).json() as { ticker: { code: string; collidesWith: { mint: string | null } } };
-    expect(chk.ticker.code).toBe("TICKER_TAKEN");
-    expect(((await get("/api/check?x=%40moonpigfun")).json() as { x: { code: string } }).x.code).toBe("X_TAKEN");
+    // Another wallet can launch a coin with the same ticker, name and X account.
+    const other = await login(keypair());
+    const theirs = (await upload(img, other)).json() as { imageId: string };
+    expect((await post("/api/launch", { ...body, imageId: theirs.imageId }, other)).statusCode).toBe(201);
+    expect(await prisma.coin.count({ where: { tickerNorm: "MOONPIG" } })).toBe(2);
   });
 
   it("takes any picture, even one another coin already uses (owner decision 2026-10-27)", async () => {
@@ -314,7 +318,7 @@ describe.skipIf(!run)("live mode", () => {
   });
 
   it("serves 15m and 4h candles merged from the stored 5m and 1h ones", async () => {
-    const coin = await prisma.coin.findUniqueOrThrow({ where: { tickerNorm: "CHIPDOG" } });
+    const coin = await prisma.coin.findFirstOrThrow({ where: { tickerNorm: "CHIPDOG" } });
     const at = (min: number) => new Date(Date.UTC(2026, 9, 27, 9, min));
     const rows: [number, number, number, number, number, bigint][] = [
       [0, 1, 3, 1, 2, 10n],
@@ -373,7 +377,7 @@ describe.skipIf(!run)("live mode", () => {
     expect(mine.statusCode).not.toBe(503);
     await post("/api/admin/settings", { launchesOpen: true, reason: null }, a);
 
-    const coin = await prisma.coin.findUniqueOrThrow({ where: { tickerNorm: "CHIPDOG" } });
+    const coin = await prisma.coin.findFirstOrThrow({ where: { tickerNorm: "CHIPDOG" } });
     expect((await post(`/api/coins/${coin.mint}/report`, { reason: "copy", details: "dup" })).statusCode).toBe(201);
     expect((await post(`/api/admin/coins/${coin.mint}/hide`, { hidden: true, reason: "test" }, a)).statusCode).toBe(200);
     expect((await get("/api/coins/CHIPDOG")).statusCode).toBe(404);

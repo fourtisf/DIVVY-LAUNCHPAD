@@ -12,6 +12,7 @@ import { errorText, useSession } from "@/lib/session";
 import { explorerTx, signAndSend } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { useToast } from "../Toasts";
+import { coinHref } from "@/lib/links";
 
 const STATUS: Record<MyPayouts["items"][number]["status"], string> = { credited: "Credited", sent: "Sent", claimed: "Claimed" };
 
@@ -143,7 +144,7 @@ export function MeView() {
                 {payouts.items.map((p) => (
                   <tr key={`${p.coin.mint}-${p.hour}`}>
                     <td>
-                      <Link href={`/coin/${encodeURIComponent(p.coin.ticker)}`} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
+                      <Link href={coinHref(p.coin)} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={p.coin.imageUrl} alt="" width={26} height={26} style={{ borderRadius: 8 }} />${p.coin.ticker}
                       </Link>
@@ -177,7 +178,7 @@ export function MeView() {
                 {creator.coins.map((c) => (
                   <tr key={c.mint}>
                     <td>
-                      <Link href={`/coin/${encodeURIComponent(c.ticker)}`} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
+                      <Link href={coinHref(c)} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={c.imageUrl} alt="" width={26} height={26} style={{ borderRadius: 8 }} />${c.ticker}
                       </Link>

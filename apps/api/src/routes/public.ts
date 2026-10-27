@@ -190,7 +190,7 @@ export async function publicRoutes(app: FastifyInstance, { store }: { store: Moc
 
   app.get<{ Params: { ticker: string } }>("/api/coins/:ticker", async (req, reply) => {
     store.tick();
-    const c = store.coinByTicker(req.params.ticker);
+    const c = store.coinByMint(req.params.ticker) ?? store.coinByTicker(req.params.ticker);
     if (!c) return sendError(reply, 404, "COIN_NOT_FOUND", `There's no coin called $${req.params.ticker} here yet.`);
     return toDetail(c, Date.now());
   });

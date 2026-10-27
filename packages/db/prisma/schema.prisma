@@ -165,7 +165,7 @@ model Coin {
   /// Null until the worker generates the mint keypair. Never returned by the API before the create lands.
   mint            String?       @unique
   ticker          String
-  tickerNorm      String        @unique
+  tickerNorm      String
   name            String
   nameNorm        String
   description     String        @default("")
@@ -185,7 +185,7 @@ model Coin {
   /// The creator's wallet, recorded on-chain as pool_state.creator (creator fees accrue to it).
   creatorWallet   String
   /// One coin per OAuth-verified X account (HANDOFF §5). Null when no X account is linked.
-  creatorXUserId  String?       @unique
+  creatorXUserId  String?
   /// LaunchLab pool state account (PDA of the mint). Null until the mint exists.
   poolState       String?       @unique
   cpmmPool        String?       @unique
@@ -220,6 +220,8 @@ model Coin {
   @@index([dividendAssetId])
   @@index([creatorWallet])
   @@index([imageSha256])
+  @@index([tickerNorm])
+  @@index([creatorXUserId])
 }
 
 /// Denormalised market data, maintained by the indexer for fast board queries.

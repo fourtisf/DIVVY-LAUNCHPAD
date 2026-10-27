@@ -193,8 +193,9 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
   });
 
   app.get<{ Params: { ticker: string } }>("/api/coins/:ticker", async (req, reply) => {
-    if (req.params.ticker.length > 32) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
-    const c = await coinByTicker(d, req.params.ticker);
+    // A coin's mint, or a ticker (coins can share one: the first launched with it).
+    if (req.params.ticker.length > 44) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
+    const c = (await coinByMint(d, req.params.ticker)) ?? (await coinByTicker(d, req.params.ticker));
     if (!c) return sendError(reply, 404, "COIN_NOT_FOUND", `There's no coin called $${req.params.ticker} here yet.`);
     return toDetail(c, (await d.prices()).solUsd);
   });

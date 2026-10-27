@@ -8,8 +8,9 @@ test("board lists coins and opens one", async ({ page }) => {
   const first = page.locator("#grid a").first();
   await expect(first).toBeVisible();
   await first.click();
-  await expect(page).toHaveURL(/\/coin\//);
-  await expect(page.getByText("Ticker locked forever")).toBeVisible();
+  // Coin pages open by mint: coins can share a ticker.
+  await expect(page).toHaveURL(/\/coin\/[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  await expect(page.getByRole("heading", { name: "Check the address" })).toBeVisible();
 });
 
 test("search filters the board", async ({ page, isMobile }) => {
@@ -34,11 +35,11 @@ test("how it works and terms render", async ({ page }) => {
 
 test("create form runs the server checks", async ({ page }) => {
   await page.goto("/create");
-  // A leetspeak copy of a demo coin's ticker is refused by the server.
-  await page.locator("#fTick").fill("CH1PD0G");
+  // Symbols are refused by the server; a demo coin's ticker can be used again (owner decision 2026-10-27).
+  await page.locator("#fTick").fill("CHIP!");
+  await expect(page.locator("#checks li").first()).toContainText("Use letters and numbers only");
+  await page.locator("#fTick").fill("CHIPDOG");
   await expect(page.locator("#checks li").first()).toContainText("Reads as $CHIPDOG");
-  await page.locator("#fTick").fill("ZQXWV");
-  await expect(page.locator("#checks li").first()).toContainText("$ZQXWV is free");
   await expect(page.locator("#launchBtn")).toBeDisabled();
 });
 

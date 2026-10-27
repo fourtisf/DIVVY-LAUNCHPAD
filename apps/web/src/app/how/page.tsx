@@ -52,8 +52,8 @@ export default async function HowPage() {
         <li>
           <span className="n">2</span>
           <div>
-            <h3>Copies are refused</h3>
-            <p>The ticker has to be new here, with case, spaces, lookalike letters and leetspeak folded into one. Names with “official” or a “2” tacked on and a second coin from the same X account are all turned away, with the reason.</p>
+            <h3>Any name, any ticker</h3>
+            <p>Coins can share a ticker, a name, a picture and an X account, so the contract address is what tells them apart. Every coin page shows it: check it against the address the project posts before you buy.</p>
           </div>
         </li>
         <li>

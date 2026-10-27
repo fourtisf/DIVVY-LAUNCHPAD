@@ -117,11 +117,13 @@ describe("read endpoints", () => {
 });
 
 describe("anti-vamp, upload and launch", () => {
-  it("GET /api/check runs the shared checks", async () => {
+  it("GET /api/check runs the shared checks; tickers, names and X accounts can repeat (owner decision 2026-10-27)", async () => {
     const r = expectShape(CheckResponseSchema, (await get(`/api/check?ticker=CH1PD0G&name=${encodeURIComponent("Chip Dog Official")}&x=@degenkara`)).body) as z.infer<typeof CheckResponseSchema>;
-    expect(r.ticker?.code).toBe("TICKER_TAKEN");
-    expect(r.name?.code).toBe("NAME_SIMILAR");
-    expect(r.x?.code).toBe("X_TAKEN");
+    expect(r.ticker).toMatchObject({ code: "TICKER_OK", message: "Reads as $CH1PD0G" });
+    expect(r.name?.code).toBe("NAME_OK");
+    expect(r.x?.code).toBe("X_OK");
+    const bad = expectShape(CheckResponseSchema, (await get("/api/check?ticker=CHIP!")).body) as z.infer<typeof CheckResponseSchema>;
+    expect(bad.ticker?.code).toBe("TICKER_CHARS");
   });
 
   const upload = async (buf: Buffer, type = "image/png") => {
@@ -157,18 +159,18 @@ describe("anti-vamp, upload and launch", () => {
     const u = expectShape(UploadResponseSchema, (await upload(img)).body) as z.infer<typeof UploadResponseSchema>;
     expect(u.check.status).toBe("ok");
 
-    // Server refuses a copycat ticker even if the client skipped the check.
-    const bad = await app.inject({ method: "POST", url: "/api/launch", payload: { name: "Totally New", ticker: "ch1pd0g", imageId: u.imageId, dividendAsset: "NVDAx" } });
+    // Server refuses a ticker with symbols even if the client skipped the check.
+    const bad = await app.inject({ method: "POST", url: "/api/launch", payload: { name: "Totally New", ticker: "chip!", imageId: u.imageId, dividendAsset: "NVDAx" } });
     expect(bad.statusCode).toBe(422);
-    expect(expectShape(ApiErrorSchema, bad.json())).toMatchObject({ code: "TICKER_TAKEN", collidesWith: { ticker: "CHIPDOG" } });
+    expect(expectShape(ApiErrorSchema, bad.json())).toMatchObject({ code: "TICKER_CHARS" });
 
     const res = await app.inject({ method: "POST", url: "/api/launch", payload: { name: "Moon Pig", ticker: "moonpig", description: "Oink", imageId: u.imageId, dividendAsset: "SPYx" } });
     expect(res.statusCode).toBe(201);
     const { launchId } = res.json() as { launchId: string };
 
-    // A second launch of the same ticker while the first is in flight is refused.
-    const dup = await app.inject({ method: "POST", url: "/api/launch", payload: { name: "Moon Pig Two", ticker: "M00NPIG", imageId: u.imageId, dividendAsset: "SPYx" } });
-    expect(dup.statusCode).toBe(422);
+    // Coins can share a ticker, even one still launching.
+    const dup = await app.inject({ method: "POST", url: "/api/launch", payload: { name: "Moon Pig", ticker: "M00NPIG", imageId: u.imageId, dividendAsset: "SPYx" } });
+    expect(dup.statusCode).toBe(201);
 
     const first = expectShape(LaunchStatusSchema, (await get(`/api/launch/${launchId}`)).body) as z.infer<typeof LaunchStatusSchema>;
     expect(first.step).toBe("checking");

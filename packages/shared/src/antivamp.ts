@@ -215,7 +215,7 @@ export function checkTicker(input: string, ctx: TickerContext): CheckResult {
   const hit = ctx.findByTickerNorm(norm);
   if (hit) return result("fail", "TICKER_TAKEN", `Reads as $${hit.ticker}, which belongs to ${hit.name}`, hit);
   if (ctx.isReserved(norm)) return result("fail", "TICKER_RESERVED", `$${norm} already trades elsewhere with real volume`);
-  return result("ok", "TICKER_OK", `$${displayTicker(input)} is free`);
+  return result("ok", "TICKER_OK", `Reads as $${displayTicker(input)}`);
 }
 
 export function checkName(input: string, ctx: NameContext): CheckResult {
@@ -226,16 +226,16 @@ export function checkName(input: string, ctx: NameContext): CheckResult {
     if (similarity(c.nameNorm, norm) >= NAME_SIMILARITY_LIMIT)
       return result("fail", "NAME_SIMILAR", `Too close to “${c.name}”`, c);
   }
-  return result("ok", "NAME_OK", "No coin has a similar name");
+  return result("ok", "NAME_OK", "Looks good");
 }
 
 export function checkX(input: string, ctx: XContext): CheckResult {
-  if (!input.trim().replace(/^@/, "")) return result("ok", "X_EMPTY", "Optional. Linking one makes the coin yours for good");
+  if (!input.trim().replace(/^@/, "")) return result("ok", "X_EMPTY", "Optional");
   const h = normalizeXHandle(input);
   if (!h) return result("fail", "X_INVALID", "That isn't an X account or its link");
   const hit = ctx.findByX(h);
   if (hit) return result("fail", "X_TAKEN", `@${h} already launched $${hit.ticker}`, hit);
-  return result("ok", "X_OK", `@${h} has no coin yet`);
+  return result("ok", "X_OK", `Links to @${h}`);
 }
 
 export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;

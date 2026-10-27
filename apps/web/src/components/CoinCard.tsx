@@ -4,10 +4,13 @@ import Link from "next/link";
 import { agoMin, pct, usd } from "@divvy/shared";
 import { Coupon } from "./Coupon";
 import { Spark } from "./Spark";
+import { coinHref } from "@/lib/links";
 
 export interface CardCoin {
   name: string;
   ticker: string;
+  /** Links the card to this coin's page; coins can share a ticker. */
+  mint?: string;
   imageUrl: string;
   pays: string;
   mcap: number;
@@ -69,7 +72,7 @@ export function CoinCard({ c, asDiv = false }: { c: CardCoin; asDiv?: boolean })
   return asDiv ? (
     <div className="card tilt">{body}</div>
   ) : (
-    <Link className="card tilt" href={`/coin/${encodeURIComponent(c.ticker)}`}>
+    <Link className="card tilt" href={coinHref(c)}>
       {body}
     </Link>
   );

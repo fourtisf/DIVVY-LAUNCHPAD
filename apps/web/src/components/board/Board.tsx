@@ -17,10 +17,12 @@ import { Coupon } from "../Coupon";
 import { Icon } from "../Icon";
 import { TokenCa } from "../TokenCa";
 import { XFollow } from "../XFollow";
+import { coinHref } from "@/lib/links";
 
 export const toCard = (c: CoinSummary, now = Date.now()): CardCoin => ({
   name: c.name,
   ticker: c.ticker,
+  mint: c.mint,
   imageUrl: c.imageUrl,
   pays: c.dividendAsset,
   mcap: c.marketCapUsd,
@@ -81,7 +83,7 @@ export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders:
           </div>
           <div className="promises">
             <Link className="tag" href="/how"><Icon name="gift" />{config.launchFee.to ? "No dev buy" : "Free, no dev buy"}</Link>
-            <Link className="tag" href="/how"><Icon name="lock" />Copies refused</Link>
+            <Link className="tag" href="/how"><Icon name="lock" />Liquidity locked for good</Link>
             <Link className="tag" href="/how"><Icon name="shield" />No sniper in block 0</Link>
             <Link className="tag" href="/payouts"><Icon name="receipt" />Every payout on chain</Link>
           </div>
@@ -128,7 +130,7 @@ export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders:
         </div>
         <div className="leaders">
           {leaders.map((c, i) => (
-            <Link className="leader tilt" href={`/coin/${encodeURIComponent(c.ticker)}`} key={c.mint}>
+            <Link className="leader tilt" href={coinHref(c)} key={c.mint}>
               <span className="rank">{i + 1}</span>
               <div className="leader-top">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

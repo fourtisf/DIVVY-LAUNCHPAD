@@ -105,7 +105,7 @@ describe("checkTicker", () => {
   });
 
   it("accepts a new ticker", () => {
-    expect(checkTicker("moonpig", tickerCtx)).toMatchObject({ status: "ok", message: "$MOONPIG is free" });
+    expect(checkTicker("moonpig", tickerCtx)).toMatchObject({ status: "ok", message: "Reads as $MOONPIG" });
   });
 });
 
@@ -152,7 +152,7 @@ describe("checkName", () => {
 
   it("accepts names below the threshold", () => {
     expect(similarity("chipdog", "chipcat")).toBeLessThan(0.84);
-    expect(checkName("Chip Cat", nameCtx)).toMatchObject({ status: "ok", message: "No coin has a similar name" });
+    expect(checkName("Chip Cat", nameCtx)).toMatchObject({ status: "ok", message: "Looks good" });
   });
 
   it("handles empty and too-short names", () => {
@@ -180,6 +180,6 @@ describe("checkX", () => {
   });
   it("allows one coin per account, case-insensitively", () => {
     expect(checkX("@DegenKara", xCtx)).toMatchObject({ code: "X_TAKEN", message: "@degenkara already launched $CHIPDOG" });
-    expect(checkX("newperson", xCtx)).toMatchObject({ status: "ok", message: "@newperson has no coin yet" });
+    expect(checkX("newperson", xCtx)).toMatchObject({ status: "ok", message: "Links to @newperson" });
   });
 });

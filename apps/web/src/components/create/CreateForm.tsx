@@ -25,6 +25,7 @@ import { CoinCard } from "../CoinCard";
 import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 import { LaunchModal } from "./LaunchModal";
+import { coinHref } from "@/lib/links";
 
 interface Draft {
   name: string;
@@ -104,7 +105,7 @@ export function CreateForm() {
   const ct = d.ticker.trim() ? toCheck(checks?.ticker, "Checking…") : { s: "idle" as const, m: "Type a ticker" };
   const cn = d.name.trim() ? toCheck(checks?.name, "Checking…") : { s: "idle" as const, m: "Type a name" };
   // The project's X link (owner decision 2026-10-27): typed like the Telegram link, one coin per account.
-  const cx = d.x.trim() ? toCheck(checks?.x, "Checking…") : { s: "ok" as const, m: "Optional. Linking one makes the coin yours for good" };
+  const cx = d.x.trim() ? toCheck(checks?.x, "Checking…") : { s: "ok" as const, m: "Optional" };
   const stale = dq.ticker !== d.ticker || dq.name !== d.name || dq.x !== d.x;
   const ci = imgCheck;
 
@@ -232,7 +233,7 @@ export function CreateForm() {
     setLaunch(null);
     if (s.step === "indexed") {
       saved = blank();
-      router.push(`/coin/${encodeURIComponent(s.ticker)}`);
+      router.push(coinHref(s));
       toast(`$${s.ticker} is live`);
     } else {
       const m = s.error?.message ?? "The launch failed. Nothing was created.";
@@ -344,7 +345,7 @@ export function CreateForm() {
               <span className="n">3</span>
               <div>
                 <h2>Links</h2>
-                <p>All optional. One coin per X account.</p>
+                <p>All optional.</p>
               </div>
             </div>
             <div className="form-row fld">
@@ -375,7 +376,7 @@ export function CreateForm() {
             </div>
           </div>
           <div className="panel">
-            <h3>Copy check</h3>
+            <h3>Checks</h3>
             <ul className="checks" id="checks">
               {checkRow("Ticker", ct)}
               {checkRow("Name", cn)}

@@ -25,26 +25,22 @@ import { getLaunchSettings } from "@divvy/server";
 import { sendCheckFailure, sendError } from "../../errors";
 import { processImage } from "../../media";
 import type { LiveDeps } from "../deps";
-import { antiVampContexts, invalidateBoard } from "../data";
+import { invalidateBoard } from "../data";
 import { launchFee } from "../launchfee";
 import { refuseBlockedCountry, requireViewer } from "../viewer";
 
+/**
+ * Coins may share a ticker, a name, a picture or an X account (owner decision 2026-10-27): only the
+ * format rules refuse, and tickers already trading elsewhere with real volume (reserved).
+ */
 export async function runChecks(d: LiveDeps, q: { ticker?: string; name?: string; x?: string }): Promise<CheckResponse> {
-  const ctx = await antiVampContexts(d);
   const out: CheckResponse = {};
   if (q.ticker !== undefined) {
-    const { hit, reserved } = await ctx.ticker(foldTicker(q.ticker));
-    out.ticker = checkTicker(q.ticker, { findByTickerNorm: () => hit, isReserved: () => reserved });
+    const reserved = !!(await d.prisma.reservedTicker.findUnique({ where: { tickerNorm: foldTicker(q.ticker) } }));
+    out.ticker = checkTicker(q.ticker, { findByTickerNorm: () => undefined, isReserved: () => reserved });
   }
-  if (q.name !== undefined) {
-    const candidates = await ctx.nameCandidates(q.name);
-    out.name = checkName(q.name, { candidates: () => candidates });
-  }
-  if (q.x !== undefined) {
-    const h = normalizeXHandle(q.x);
-    const hit = h ? await ctx.xHandle(h) : undefined;
-    out.x = checkX(q.x, { findByX: () => hit });
-  }
+  if (q.name !== undefined) out.name = checkName(q.name, { candidates: () => [] });
+  if (q.x !== undefined) out.x = checkX(q.x, { findByX: () => undefined });
   return out;
 }
 
@@ -56,9 +52,7 @@ const tgUrl = (t: string) => (!t ? null : t.startsWith("@") ? `https://t.me/${t.
 function uniqueViolation(e: unknown): { code: string; message: string } | null {
   if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return null;
   const target = String((e.meta?.target as string[] | string | undefined) ?? "");
-  if (target.includes("tickerNorm")) return { code: "TICKER_TAKEN", message: "That ticker was just taken" };
   if (target.includes("uploadId")) return { code: "IMAGE_DUPLICATE", message: "That upload was just used by another coin. Upload the picture again." };
-  if (target.includes("creatorXUserId")) return { code: "X_TAKEN", message: "This X account already launched a coin" };
   return { code: "CONFLICT", message: "Something about this coin was just taken. Check the form again." };
 }
 
@@ -202,8 +196,7 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
             // connection while other launches hold the rest waiting on the lock (audit).
             const again = await launchChecks({ ...d, prisma: tx as unknown as LiveDeps["prisma"] }, b, v.userId);
             if (again.fail) throw new Refusal(0, "", "", again.fail);
-            // Unique indexes on tickerNorm, uploadId and creatorXUserId back this up. Pictures aren't
-            // checked (owner decision 2026-10-27): any picture can go on any coin.
+            // The unique index on uploadId backs this up: one upload, one coin.
             const coin = await tx.coin.create({
               data: {
                 ticker: displayTicker(b.ticker),
