@@ -706,7 +706,7 @@ payouts() {
       restart_worker
       sleep 8
       status
-      note "Putaran live pertama: menit 0 berikutnya. Setelah itu: go-live.sh payouts check"
+      note "Putaran live pertama: putaran 10-menit berikutnya (menit :x0), untuk jam ini. Setelah itu: go-live.sh payouts check"
       ;;
     dry-run)
       for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do set_env "$f" PAYOUTS_DRY_RUN true; done
