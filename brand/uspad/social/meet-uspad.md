@@ -73,3 +73,12 @@ below matches the site (How it works) and docs/VERIFIED.md.
 > Tanpa sniper. Tanpa dev buy. Likuiditas dikunci selamanya saat graduation.
 >
 > Segera hadir → uspad.fun
+
+## X profile
+
+- **Name:** uspad
+- **Bio (131 characters):** Memecoins that pay you in US stocks 🟢 Launch on Solana, hold, and get NVDAx, SPYx, TSLAx & more every hour. No snipers. No dev buy.
+- **Shorter bio (104):** Memecoins that pay us. In US stocks. Launch on Solana · hourly stock dividends · no snipers, no dev buy.
+- **Indonesian bio (133):** Memecoin dengan dividen saham Amerika. Launch di Solana, hold, dan terima NVDAx, SPYx, TSLAx setiap jam. Tanpa sniper, tanpa dev buy.
+- **Location:** Solana
+- **Website:** uspad.fun

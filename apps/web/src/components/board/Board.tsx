@@ -16,6 +16,7 @@ import { CountUp } from "../CountUp";
 import { Coupon } from "../Coupon";
 import { Icon } from "../Icon";
 import { TokenCa } from "../TokenCa";
+import { XFollow } from "../XFollow";
 
 export const toCard = (c: CoinSummary, now = Date.now()): CardCoin => ({
   name: c.name,
@@ -68,6 +69,7 @@ export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders:
               Holders paid {usd(roundUsd)} in stocks this hour
             </span>
             <TokenCa />
+            <XFollow />
           </div>
           <h1>
             Memecoins that pay you <span className="glow">real stock dividends.</span>
