@@ -305,7 +305,7 @@ export function CreateForm() {
                 )}
                 <p>
                   Drop an image or click to choose
-                  <small>PNG, JPG, WEBP or GIF up to {Math.round(config.limits.imageMaxBytes / 1024 / 1024)} MB. Copies of another coin&apos;s picture are refused.</small>
+                  <small>PNG, JPG, WEBP or GIF up to {Math.round(config.limits.imageMaxBytes / 1024 / 1024)} MB.</small>
                 </p>
               </label>
               <input ref={fileInput} type="file" id="fImg" accept={config.limits.imageTypes.join(",")} className="sr" onChange={(e) => void handleFile(e.target.files?.[0])} />

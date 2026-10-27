@@ -10,10 +10,7 @@ import {
   displayTicker,
   foldName,
   foldTicker,
-  hamming,
-  IMAGE_HAMMING_LIMIT,
   IMAGE_MAX_BYTES,
-  imageCollision,
   imageOk,
   KEYS,
   LaunchRequestSchema,
@@ -28,7 +25,7 @@ import { getLaunchSettings } from "@divvy/server";
 import { sendCheckFailure, sendError } from "../../errors";
 import { processImage } from "../../media";
 import type { LiveDeps } from "../deps";
-import { antiVampContexts, identityOf, invalidateBoard, invalidatePictures, pictureCandidates } from "../data";
+import { antiVampContexts, invalidateBoard } from "../data";
 import { launchFee } from "../launchfee";
 import { refuseBlockedCountry, requireViewer } from "../viewer";
 
@@ -49,15 +46,6 @@ export async function runChecks(d: LiveDeps, q: { ticker?: string; name?: string
     out.x = checkX(q.x, { findByX: () => hit });
   }
   return out;
-}
-
-/** Copies of another creator's picture are refused; a creator may reuse their own on a new coin. */
-export async function checkPicture(d: LiveDeps, sha256: string, phash: string, userId: string): Promise<CheckResult> {
-  const rows = (await pictureCandidates(d)).filter((r) => r.creatorUserId !== userId);
-  const exact = rows.find((r) => r.imageSha256 === sha256);
-  if (exact) return imageCollision(identityOf(exact), true);
-  const near = rows.find((r) => hamming(r.imagePhash, phash) <= IMAGE_HAMMING_LIMIT);
-  return near ? imageCollision(identityOf(near), false) : imageOk();
 }
 
 const Website = z.union([z.literal(""), z.string().url().max(200).refine((u) => /^https?:\/\//i.test(u), "http(s) only")]);
@@ -96,8 +84,6 @@ async function launchChecks(d: LiveDeps, b: { ticker: string; name: string; x: s
   if (checks.x!.status !== "ok") return { fail: (r: Reply) => sendCheckFailure(r, checks.x as CheckResult) } as const;
   const up = await d.prisma.upload.findUnique({ where: { id: b.imageId } });
   if (!up || up.ownerUserId !== userId) return { fail: (r: Reply) => sendError(r, 422, "IMAGE_EMPTY", "Upload a picture") } as const;
-  const pic = await checkPicture(d, up.sha256, up.imagePhash, userId);
-  if (pic.status !== "ok") return { fail: (r: Reply) => sendCheckFailure(r, pic) } as const;
   const asset = await d.prisma.dividendAsset.findFirst({ where: { symbol: b.dividendAsset, enabled: true } });
   if (!asset) return { fail: (r: Reply) => sendError(r, 422, "ASSET_UNKNOWN", "Pick a stock from the list") } as const;
   return { fail: null, up, asset } as const;
@@ -148,7 +134,7 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const row = await d.prisma.upload.create({
       data: { sha256: img.sha256, imagePhash: img.phash, url, storageKey: key, contentType: "image/webp", bytes: img.webp.length, ownerUserId: v.userId },
     });
-    return { imageId: row.id, url, sha256: img.sha256, check: await checkPicture(d, img.sha256, img.phash, v.userId) };
+    return { imageId: row.id, url, sha256: img.sha256, check: imageOk() };
   });
 
   // Paid launches have no daily limit, so a creator can launch often; each one takes two calls (the
@@ -212,13 +198,12 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
             ]);
             if (!paid && mine >= p.launchesPerWalletPerDay) throw new Refusal(429, "DAILY_LIMIT", `You can launch ${p.launchesPerWalletPerDay} coins a day`);
             if (all >= p.launchesPerDayGlobal) throw new Refusal(429, "GLOBAL_LIMIT", "uspad hit today's launch limit. Try again tomorrow.");
-            invalidatePictures();
             // On this transaction's connection: the lock holder must not wait for a second pooled
             // connection while other launches hold the rest waiting on the lock (audit).
             const again = await launchChecks({ ...d, prisma: tx as unknown as LiveDeps["prisma"] }, b, v.userId);
             if (again.fail) throw new Refusal(0, "", "", again.fail);
-            // Unique indexes on tickerNorm, uploadId and creatorXUserId back this up; pictures are checked
-            // here only (a creator may reuse their own).
+            // Unique indexes on tickerNorm, uploadId and creatorXUserId back this up. Pictures aren't
+            // checked (owner decision 2026-10-27): any picture can go on any coin.
             const coin = await tx.coin.create({
               data: {
                 ticker: displayTicker(b.ticker),
@@ -255,7 +240,6 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
       }
       if (!paid) await d.redis.set(KEYS.launchCooldown(v.wallet), "1", "EX", p.launchCooldownSec || 1);
       await d.queues.launch.add("create", { launchId }, { jobId: launchId, attempts: 1, removeOnComplete: 1000, removeOnFail: 1000 });
-      invalidatePictures();
       invalidateBoard();
       return reply.code(201).send({ launchId });
     } finally {

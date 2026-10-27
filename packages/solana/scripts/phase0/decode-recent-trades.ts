@@ -13,6 +13,8 @@
  *   RPC_URL=... npx tsx decode-recent-trades.ts --address <platformConfig>   # a platform's transactions (e.g. StonkFun's)
  *   RPC_URL=... npx tsx decode-recent-trades.ts --cpmm <poolId>              # a graduated pool's swaps
  *   Options: --limit 40 (signatures to read)
+ * The summary's byPool adds up each pool's trades and platform fees, and names the pools created in
+ * the transactions read (with --address <platformConfig>: where that platform's fee vault filled from).
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import { EventLayoutError, getTransactionAnyVersion, parseCpmmSwaps, parseLaunchLabTransaction, programs, TxShapeError } from "../../src/live";
@@ -40,6 +42,8 @@ async function main() {
   let unreadable = 0;
   let rpcErrors = 0;
   const versions: Record<string, number> = {};
+  const byPool: Record<string, { trades: number; platformFee: string; createdBy?: string }> = {};
+  const pool = (id: string) => (byPool[id] ??= { trades: 0, platformFee: "0" });
   for (const s of sigs) {
     if (s.err) continue;
     // The indexer's own fetch: versions newer than 0 come through the raw json fallback (rawtx.ts).
@@ -73,12 +77,16 @@ async function main() {
       for (const t of r.trades) {
         trades++;
         const e = t.event;
+        const p = pool(e.poolState.toBase58());
+        p.trades++;
+        p.platformFee = (BigInt(p.platformFee) + BigInt(e.platformFee.toString())).toString();
         console.log(
           `${s.signature.slice(0, 12)}… ${e.side} pool ${e.poolState.toBase58().slice(0, 6)}… in ${e.amountIn} out ${e.amountOut} fees protocol ${e.protocolFee} platform ${e.platformFee} creator ${e.creatorFee} share ${e.shareFee} status ${e.poolStatus}`,
         );
       }
       for (const c of r.poolCreates) {
         creates++;
+        pool(c.poolState.toBase58()).createdBy = c.creator.toBase58();
         console.log(`${s.signature.slice(0, 12)}… create pool ${c.poolState.toBase58()} creator ${c.creator.toBase58()}`);
       }
       for (const m of r.cpmmPools) {
@@ -91,7 +99,7 @@ async function main() {
       console.log(`${s.signature}: layout mismatch: ${e.message}`);
     }
   }
-  console.log(JSON.stringify({ address: address.toBase58(), read: sigs.length, versions, unreadable, rpcErrors, trades, creates, migrations, swaps, layoutErrors }));
+  console.log(JSON.stringify({ address: address.toBase58(), read: sigs.length, versions, unreadable, rpcErrors, trades, creates, migrations, swaps, layoutErrors, byPool }));
   if (layoutErrors || unreadable) process.exitCode = 2;
 }
 

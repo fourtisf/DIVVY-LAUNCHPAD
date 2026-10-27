@@ -297,7 +297,6 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
             <ul className="checks">
               <li><span className="ck ok"><Icon name="check" size={13} /></span><div>${coin.ticker} is taken here forever<small>Lookalikes like {leetExamples(coin.ticker)} are refused</small></div></li>
               <li><span className="ck ok"><Icon name="check" size={13} /></span><div>The name can&apos;t be reused<small>Adding “official” or a “2” doesn&apos;t get through</small></div></li>
-              <li><span className="ck ok"><Icon name="check" size={13} /></span><div>The picture is fingerprinted<small>Resized or recolored copies are refused</small></div></li>
               <li><span className="ck ok"><Icon name="check" size={13} /></span><div>{coin.creator.xHandle ? "@" + coin.creator.xHandle : "No X account"} owns this coin<small>One coin per X account</small></div></li>
             </ul>
           </div>

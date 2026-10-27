@@ -135,13 +135,12 @@ describe("anti-vamp, upload and launch", () => {
     return { status: r.statusCode, body: r.json() as unknown };
   };
 
-  it("refuses a resized copy of an existing coin's picture", async () => {
+  it("takes a copy of an existing coin's picture: pictures aren't checked (owner decision 2026-10-27)", async () => {
     const svg = (await app.inject({ method: "GET", url: "/api/media/coin/FROG.svg" })).rawPayload;
     const copy = await sharp(svg).resize(300, 300).modulate({ brightness: 1.08 }).png().toBuffer();
     const r = await upload(copy);
     const u = expectShape(UploadResponseSchema, r.body) as z.infer<typeof UploadResponseSchema>;
-    expect(u.check.status).toBe("fail");
-    expect(u.check.message).toBe("Looks like the picture of $FROG");
+    expect(u.check).toMatchObject({ status: "ok", message: "Picture added" });
   });
 
   it("refuses files that aren't images", async () => {

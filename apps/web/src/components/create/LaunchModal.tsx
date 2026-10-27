@@ -15,7 +15,7 @@ import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 
 const STEPS = [
-  "Checking ticker, name, picture and X account",
+  "Checking ticker, name and X account",
   "Sending the create in a private bundle",
   "Live on chain",
   "On the board",

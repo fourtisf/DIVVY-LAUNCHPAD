@@ -53,7 +53,7 @@ export default async function HowPage() {
           <span className="n">2</span>
           <div>
             <h3>Copies are refused</h3>
-            <p>The ticker has to be new here, with case, spaces, lookalike letters and leetspeak folded into one. Names with “official” or a “2” tacked on, resized or recolored pictures, and a second coin from the same X account are all turned away, with the reason.</p>
+            <p>The ticker has to be new here, with case, spaces, lookalike letters and leetspeak folded into one. Names with “official” or a “2” tacked on and a second coin from the same X account are all turned away, with the reason.</p>
           </div>
         </li>
         <li>

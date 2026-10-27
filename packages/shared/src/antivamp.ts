@@ -249,7 +249,7 @@ export function checkImageFile(type: string, bytes: number, maxBytes = IMAGE_MAX
 }
 
 export const imageIdle = (): CheckResult => result("idle", "IMAGE_EMPTY", "Upload a picture");
-export const imageOk = (): CheckResult => result("ok", "IMAGE_OK", "No coin uses this picture");
+export const imageOk = (): CheckResult => result("ok", "IMAGE_OK", "Picture added");
 export const imageCollision = (hit: CoinIdentity, exact: boolean): CheckResult =>
   result("fail", exact ? "IMAGE_DUPLICATE" : "IMAGE_SIMILAR", `Looks like the picture of $${hit.ticker}`, hit);
 

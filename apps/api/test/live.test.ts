@@ -249,12 +249,10 @@ describe.skipIf(!run)("live mode", () => {
     expect(((await get("/api/check?x=%40moonpigfun")).json() as { x: { code: string } }).x.code).toBe("X_TAKEN");
   });
 
-  it("lets a creator use their picture again, and refuses it to everyone else", async () => {
+  it("takes any picture, even one another coin already uses (owner decision 2026-10-27)", async () => {
     const img = await picture();
-    const mine = (await upload(img, await login(user))).json() as { check: { status: string } };
-    expect(mine.check.status).toBe("ok");
-    const theirs = (await upload(img, await login(keypair()))).json() as { check: { status: string; code: string } };
-    expect(theirs.check).toMatchObject({ status: "fail", code: "IMAGE_DUPLICATE" });
+    expect(((await upload(img, await login(user))).json() as { check: { status: string } }).check.status).toBe("ok");
+    expect(((await upload(img, await login(keypair()))).json() as { check: { status: string } }).check.status).toBe("ok");
   });
 
   it("charges the launch fee when one is set: one launch per payment, no cooldown or daily cap, credit after a failure", async () => {

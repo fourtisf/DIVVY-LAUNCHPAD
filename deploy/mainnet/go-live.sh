@@ -23,8 +23,9 @@
 #   go-live.sh launch-fee <SOL>   what a creator pays per launch (e.g. 0.02), to the operations wallet
 #                                 that pays the create. With a fee there is no daily limit per wallet
 #                                 and a failed launch keeps its fee as credit. 0 = free launches.
-#   go-live.sh payouts check      the dry-run's last hours: runs, vault, rounds, holders (RUNBOOK
-#                                 "First dry-run hours").
+#   go-live.sh payouts check      the last hours: runs, vault, rounds, holders, and when live, claims,
+#                                 stock purchases, sends and dividends waiting (RUNBOOK "First dry-run hours").
+#   go-live.sh payouts sources    read-only: which pools filled the platform fee vault, from the chain.
 #   I_HAVE_OWNER_APPROVAL=yes go-live.sh payouts live
 #                                 💰 real dividends: claims the fee vault, buys the stocks, sends them.
 #   go-live.sh payouts dry-run    back to computing without sending.
@@ -693,6 +694,41 @@ payouts() {
       dbq -c "SELECT c.ticker, coalesce(h.\"excludedReason\"::text, '') AS excluded, count(*)
               FROM \"HolderBalance\" h JOIN \"Coin\" c ON c.id = h.\"coinId\"
               WHERE h.\"snapshotHour\" = (SELECT max(\"snapshotHour\") FROM \"HolderBalance\") GROUP BY 1, 2 ORDER BY 1, 2"
+      say "Klaim vault live (unattributed: tidak terikat trade koin uspad, disimpan uspad)"
+      dbq -c "SELECT to_char(hour, 'MM-DD HH24:MI') AS hour, round(lamports / 1e9, 6) AS sol,
+                     round(\"unattributedLamports\" / 1e9, 6) AS unattributed_sol, sig
+              FROM \"VaultClaim\" WHERE NOT \"dryRun\" ORDER BY hour DESC LIMIT 3"
+      say "Pembelian saham (live)"
+      dbq -c "SELECT to_char(b.hour, 'MM-DD HH24:MI') AS hour, a.symbol, b.status, round(b.\"lamportsIn\" / 1e9, 6) AS sol_in,
+                     round(b.\"assetOut\"::numeric / power(10::numeric, a.decimals), 6) AS saham, b.sig, left(b.error, 60) AS error
+              FROM \"SwapBatch\" b JOIN \"DividendAsset\" a ON a.id = b.\"assetId\"
+              WHERE NOT b.\"dryRun\" ORDER BY b.hour DESC LIMIT 5"
+      say "Kiriman ke holder, 3 jam terakhir"
+      dbq -c "SELECT a.symbol, t.status, count(*) AS kiriman, sum(t.\"createdAta\"::int) AS akun_baru,
+                     round(sum(t.amount)::numeric / power(10::numeric, a.decimals), 6) AS saham,
+                     round(sum(t.\"feeAmount\")::numeric / power(10::numeric, a.decimals), 6) AS fee
+              FROM \"PayoutTransfer\" t JOIN \"DividendAsset\" a ON a.id = t.\"assetId\"
+              WHERE t.\"createdAt\" > now() - interval '3 hours' GROUP BY a.symbol, a.decimals, t.status ORDER BY 1, 2"
+      say "Dividen yang menunggu cukup untuk dikirim (kiriman pertama mulai \$5, berikutnya \$1)"
+      dbq -c "SELECT a.symbol, count(*) AS wallet, round(sum(c.amount)::numeric / power(10::numeric, a.decimals), 6) AS saham
+              FROM \"Credit\" c JOIN \"DividendAsset\" a ON a.id = c.\"assetId\" WHERE c.amount > 0 GROUP BY a.symbol, a.decimals"
+      ;;
+    sources)
+      # Read-only: every trade in the PlatformConfig's history, by pool, next to uspad's coins.
+      load_secrets
+      local pda res
+      pda=$(env_get $ENV_DIR/api.env DIVVY_PLATFORM_CONFIG)
+      say "Asal isi vault fee platform: fee per pool di riwayat PlatformConfig (beberapa menit)"
+      res=$( (cd "$CUR/packages/solana" && RPC_URL="$RPC" timeout 900 ./node_modules/.bin/tsx scripts/phase0/decode-recent-trades.ts --address "$pda" --limit 1000 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g' | tail -n 1)
+      echo "$res" | jq -e .byPool > /dev/null 2>&1 || die "pembacaan gagal: $res"
+      note "$(echo "$res" | jq -c '{read, trades, creates, unreadable, rpcErrors, layoutErrors}')"
+      echo "$res" | jq -r '.byPool | to_entries[] | "\(.key) \(.value.trades) \(.value.platformFee) \(.value.createdBy // "-")"' |
+        while read -r pool n fee by; do
+          [[ $pool =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || continue
+          local t
+          t=$(dbq -Atc "SELECT ticker || ' (' || status || ')' FROM \"Coin\" WHERE \"poolState\" = '$pool'")
+          note "pool $pool: $n trade, fee platform $(awk -v l="$fee" 'BEGIN { printf "%.6f", l / 1e9 }') SOL, ${t:-BUKAN koin uspad}$([ "$by" != - ] && echo ", dibuat oleh $by")"
+        done
       ;;
     live)
       load_secrets
@@ -721,7 +757,7 @@ payouts() {
       restart_worker
       note "Jatah holder satu koin di bawah \$$2 per jam menunggu jam berikutnya (tidak hilang)."
       ;;
-    *) die "pakai: go-live.sh payouts check | live | dry-run | minimum <USD>" ;;
+    *) die "pakai: go-live.sh payouts check | sources | live | dry-run | minimum <USD>" ;;
   esac
 }
 
@@ -773,5 +809,5 @@ case "${1:-}" in
   payouts) payouts "${2:-}" "${3:-}" ;;
   token-ca) token_ca "${2:-}" ;;
   status) status ;;
-  *) sed -n '2,39p' "$0"; exit 1 ;;
+  *) sed -n '2,40p' "$0"; exit 1 ;;
 esac

@@ -175,21 +175,6 @@ export async function antiVampContexts(d: LiveDeps) {
   };
 }
 
-let phashCache: { at: number; rows: { ticker: string; name: string; mint: string | null; status: string; imagePhash: string; imageSha256: string; creatorUserId: string }[] } | null = null;
-
-export async function pictureCandidates(d: LiveDeps) {
-  if (phashCache && Date.now() - phashCache.at < 30_000) return phashCache.rows;
-  const rows = await d.prisma.coin.findMany({
-    where: identityWhere,
-    select: { ticker: true, name: true, mint: true, status: true, imagePhash: true, imageSha256: true, creatorUserId: true },
-  });
-  phashCache = { at: Date.now(), rows: rows.map((r) => ({ ...r, status: r.status as string })) };
-  return phashCache.rows;
-}
-export const invalidatePictures = () => {
-  phashCache = null;
-};
-export { ident as identityOf };
 
 /* ---------- money waiting for the next round ---------- */
 

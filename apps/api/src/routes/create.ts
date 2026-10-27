@@ -6,14 +6,10 @@ import {
   checkTicker,
   checkX,
   displayTicker,
-  hamming,
-  IMAGE_HAMMING_LIMIT,
   IMAGE_MAX_BYTES,
-  imageCollision,
   imageOk,
   LaunchRequestSchema,
   type CheckResponse,
-  type CheckResult,
   type LaunchStatus,
   type UploadResponse,
 } from "@divvy/shared";
@@ -26,19 +22,6 @@ import type { SessionLookup } from "./auth";
 const MAX_MOCK_UPLOADS = 500;
 
 const CheckQuery = z.object({ ticker: z.string().max(64).optional(), name: z.string().max(64).optional(), x: z.string().max(64).optional() });
-
-/** Picture check against every live coin: exact SHA-256 first, then pHash distance. */
-function checkPicture(store: MockStore, sha256: string, phash: string): CheckResult {
-  const coins = store.allCoins();
-  for (const c of coins) {
-    if (store.sha256s.get(c.ticker) === sha256) return imageCollision(store.identity(c), true);
-  }
-  for (const c of coins) {
-    const h = store.phashes.get(c.ticker);
-    if (h && hamming(h, phash) <= IMAGE_HAMMING_LIMIT) return imageCollision(store.identity(c), false);
-  }
-  return imageOk();
-}
 
 export async function createRoutes(app: FastifyInstance, { store, session }: { store: MockStore; session: SessionLookup }) {
   app.get("/api/check", async (req, reply): Promise<CheckResponse | void> => {
@@ -71,7 +54,7 @@ export async function createRoutes(app: FastifyInstance, { store, session }: { s
       for (const k of store.uploads.keys()) if (!used.has(k)) { store.uploads.delete(k); break; }
     }
     store.uploads.set(id, { id, buf: processed.webp, contentType: "image/webp", sha256: processed.sha256, phash: processed.phash, owner: session(req)?.wallet ?? null });
-    return { imageId: id, url: `/api/media/upload/${id}`, sha256: processed.sha256, check: checkPicture(store, processed.sha256, processed.phash) };
+    return { imageId: id, url: `/api/media/upload/${id}`, sha256: processed.sha256, check: imageOk() };
   });
 
   app.post("/api/launch", async (req, reply) => {
@@ -85,8 +68,6 @@ export async function createRoutes(app: FastifyInstance, { store, session }: { s
     if (nm.status !== "ok") return sendCheckFailure(reply, nm);
     const up = store.uploads.get(b.imageId);
     if (!up) return sendError(reply, 422, "IMAGE_EMPTY", "Upload a picture");
-    const pic = checkPicture(store, up.sha256, up.phash);
-    if (pic.status !== "ok") return sendCheckFailure(reply, pic);
     const asset = ASSET[b.dividendAsset];
     if (!asset) return sendError(reply, 422, "ASSET_UNKNOWN", "Pick a stock from the list");
 
