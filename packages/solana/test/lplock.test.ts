@@ -124,9 +124,18 @@ describe("newAtaLen (rent of a holder's new stock account)", () => {
   });
 
   it("adds the account extensions an xStock's mint requires, and nothing for mint-only ones", () => {
-    // Pausable → PausableAccount (0 bytes), TransferHook → TransferHookAccount (1 byte); scaled UI,
-    // permanent delegate, default state and metadata need nothing on the account.
-    const xstock = [ExtensionType.PausableConfig, ExtensionType.TransferHook, ExtensionType.ScaledUiAmountConfig, ExtensionType.PermanentDelegate, ExtensionType.DefaultAccountState, ExtensionType.MetadataPointer];
+    // The extensions fetch-xstocks reported on mainnet (2026-10-27). Pausable → PausableAccount
+    // (0 bytes), TransferHook → TransferHookAccount (1 byte); the confidential-transfer mint, scaled
+    // UI, permanent delegate, default state and metadata need nothing on the account.
+    const xstock = [
+      ExtensionType.MetadataPointer, ExtensionType.PermanentDelegate, ExtensionType.DefaultAccountState, ExtensionType.ScaledUiAmountConfig,
+      ExtensionType.PausableConfig, ExtensionType.ConfidentialTransferMint, ExtensionType.TransferHook, ExtensionType.TokenMetadata,
+    ];
     expect(newAtaLen(info(TOKEN_2022_PROGRAM_ID, xstock))).toBe(165 + 1 + 4 + 4 + 5);
+  });
+
+  it("follows token-2022's own list: a transfer fee adds its 8-byte amount, non-transferable adds its marker", () => {
+    expect(newAtaLen(info(TOKEN_2022_PROGRAM_ID, [ExtensionType.TransferFeeConfig]))).toBe(165 + 1 + 4 + 12);
+    expect(newAtaLen(info(TOKEN_2022_PROGRAM_ID, [ExtensionType.NonTransferable]))).toBe(165 + 1 + 4 + 4);
   });
 });

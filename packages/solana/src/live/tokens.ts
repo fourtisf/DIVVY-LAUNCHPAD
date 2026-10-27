@@ -6,7 +6,6 @@ import {
   createTransferCheckedInstruction,
   ExtensionType,
   getAccountLen,
-  getAccountTypeOfMintType,
   getAssociatedTokenAddressSync,
   getExtensionTypes,
   getPausableConfig,
@@ -53,16 +52,26 @@ export async function getMintInfo(conn: Connection, address: PublicKey): Promise
 export const ata = (owner: PublicKey, mint: PublicKey, programId: PublicKey) => getAssociatedTokenAddressSync(mint, owner, true, programId);
 
 /**
- * Size of a new associated token account for this mint, which sets its rent. Token-2022: the
- * account extensions the mint requires plus ImmutableOwner, which the ATA program always adds
- * (token-2022 GetAccountDataSize; spl-associated-token-account create). spl-token's own
- * getAccountLenForMint counts mint-only extensions as an empty entry and omits ImmutableOwner.
+ * The account extensions token-2022 requires when an account of a mint with these extensions is
+ * initialized: token-2022@f0a7d60 interface/src/extension/mod.rs:1296-1309
+ * (required_init_account_extensions). spl-token's getAccountTypeOfMintType is broader (it also maps
+ * ConfidentialTransferMint, which xStocks carry, to a 295-byte account extension the program never
+ * adds), so it would overstate the rent.
+ */
+const REQUIRED_ACCOUNT_EXTENSIONS: Partial<Record<ExtensionType, ExtensionType[]>> = {
+  [ExtensionType.TransferFeeConfig]: [ExtensionType.TransferFeeAmount],
+  [ExtensionType.NonTransferable]: [ExtensionType.NonTransferableAccount, ExtensionType.ImmutableOwner],
+  [ExtensionType.TransferHook]: [ExtensionType.TransferHookAccount],
+  [ExtensionType.PausableConfig]: [ExtensionType.PausableAccount],
+};
+
+/**
+ * Size of a new associated token account for this mint, which sets its rent: for Token-2022, the
+ * account extensions the mint requires plus ImmutableOwner, which the ATA program always asks for.
  */
 export function newAtaLen(info: Pick<MintInfo, "programId" | "mint">): number {
   if (!info.programId.equals(TOKEN_2022_PROGRAM_ID)) return getAccountLen([]);
-  const required = getExtensionTypes(info.mint.tlvData)
-    .map(getAccountTypeOfMintType)
-    .filter((e) => e !== ExtensionType.Uninitialized);
+  const required = getExtensionTypes(info.mint.tlvData).flatMap((e) => REQUIRED_ACCOUNT_EXTENSIONS[e] ?? []);
   return getAccountLen([...new Set([...required, ExtensionType.ImmutableOwner])]);
 }
 
