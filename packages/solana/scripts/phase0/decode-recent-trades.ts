@@ -17,6 +17,19 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { EventLayoutError, parseCpmmSwaps, parseLaunchLabTransaction, programs } from "../../src/live";
 
+/**
+ * Raw getTransaction, to see what web3.js 1.x can't read: it only accepts versions "legacy" and 0, and
+ * the RPC answers -32015 (UnsupportedTransactionVersion) for anything newer.
+ */
+async function rawTransaction(rpc: string, signature: string, maxSupportedTransactionVersion: number): Promise<{ result?: Record<string, unknown> | null; error?: { code: number; message: string } }> {
+  const r = await fetch(rpc, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTransaction", params: [signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion }] }),
+  });
+  return (await r.json()) as { result?: Record<string, unknown> | null; error?: { code: number; message: string } };
+}
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -37,10 +50,38 @@ async function main() {
   let migrations = 0;
   let swaps = 0;
   let layoutErrors = 0;
+  let unsupportedVersion = 0;
+  let rpcErrors = 0;
+  const versions: Record<string, number> = {};
   for (const s of sigs) {
     if (s.err) continue;
-    const tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+    let tx;
+    try {
+      tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/-32015|not supported/i.test(msg)) {
+        rpcErrors++;
+        if (rpcErrors <= 3) console.log(`${s.signature}: RPC error: ${msg.slice(0, 200)}`);
+        continue;
+      }
+      unsupportedVersion++;
+      // What is it? Ask again for version 1 and show its shape (first three only).
+      if (unsupportedVersion <= 3) {
+        console.log(`${s.signature}: ${msg.slice(0, 200)}`);
+        const raw: Awaited<ReturnType<typeof rawTransaction>> = await rawTransaction(rpc, s.signature, 1).catch((err) => ({ error: { code: 0, message: String(err) } }));
+        if (raw.error) console.log(`  as version 1: error ${raw.error.code} ${raw.error.message.slice(0, 200)}`);
+        else if (raw.result) {
+          const t = raw.result as { version?: unknown; transaction?: { message?: Record<string, unknown> }; meta?: Record<string, unknown> };
+          const m = t.transaction?.message ?? {};
+          console.log(`  as version 1: version ${JSON.stringify(t.version)}; message keys ${Object.keys(m).join(",")}; meta keys ${Object.keys(t.meta ?? {}).join(",")}`);
+          console.log(`  launchlab in accountKeys: ${JSON.stringify(m.accountKeys ?? null).includes(P.launchLab.toBase58())}; inner instruction groups: ${Array.isArray(t.meta?.innerInstructions) ? (t.meta!.innerInstructions as unknown[]).length : "none"}`);
+        }
+      }
+      continue;
+    }
     if (!tx) continue;
+    versions[String(tx.version ?? "legacy")] = (versions[String(tx.version ?? "legacy")] ?? 0) + 1;
     if (cpmmPool) {
       for (const sw of parseCpmmSwaps(tx, P.cpmm)) {
         if (!sw.event.poolId.equals(address)) continue;
@@ -73,7 +114,7 @@ async function main() {
       console.log(`${s.signature}: layout mismatch: ${e.message}`);
     }
   }
-  console.log(JSON.stringify({ address: address.toBase58(), read: sigs.length, trades, creates, migrations, swaps, layoutErrors }));
+  console.log(JSON.stringify({ address: address.toBase58(), read: sigs.length, versions, unsupportedVersion, rpcErrors, trades, creates, migrations, swaps, layoutErrors }));
   if (layoutErrors) process.exitCode = 2;
 }
 
