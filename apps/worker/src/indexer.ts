@@ -11,7 +11,7 @@ import { Prisma } from "@divvy/db";
 import { PublicKey, type VersionedTransactionResponse } from "@solana/web3.js";
 import { publishLive } from "@divvy/server";
 import { WSOL_MINT } from "@divvy/solana";
-import { cpmmPoolPda, decodeCpmmPool, EventLayoutError, logsTruncated, parseCpmmSwaps, parseLaunchLabTransaction } from "@divvy/solana/live";
+import { cpmmPoolPda, decodeCpmmPool, EventLayoutError, getTransactionAnyVersion, logsTruncated, parseCpmmSwaps, parseLaunchLabTransaction, TxShapeError } from "@divvy/solana/live";
 import type { WorkerDeps } from "./deps";
 import { markLanded } from "./launch";
 import { bucket, cpmmTradeRow, curveTradeRow, type Tf, type TradeRow } from "./market";
@@ -113,7 +113,18 @@ export class Indexer {
     }
     for (const s of sigs.reverse()) {
       if (!s.err) {
-        const tx = await this.d.conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+        // Any transaction version: a newer one web3.js can't read is fetched raw (rawtx.ts). One whose
+        // shape we don't know stops this stream, like a layout change, instead of being skipped.
+        let tx: VersionedTransactionResponse | null;
+        try {
+          tx = await getTransactionAnyVersion(this.d.conn, s.signature);
+        } catch (e) {
+          if (e instanceof TxShapeError) {
+            this.halted.add(name);
+            await this.d.alerts.send(`indexer-shape-${name}`, "critical", `Indexer stopped on ${s.signature}: ${e.message}. Fee attribution is paused until this is fixed.`, 3600);
+          }
+          throw e;
+        }
         if (!tx) {
           // Not served yet: try again next tick without moving the cursor, but say so if it persists.
           this.nullTx = this.nullTx.sig === s.signature ? { sig: s.signature, count: this.nullTx.count + 1 } : { sig: s.signature, count: 1 };

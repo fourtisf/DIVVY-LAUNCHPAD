@@ -14,6 +14,12 @@
 #                                 wallet. Possible from the epoch after the PlatformConfig's.
 #   I_HAVE_OWNER_APPROVAL=yes go-live.sh cp-creator --send
 #                                 💰 sets it (about 0.0001 SOL) and turns on CPMM_CREATOR_FEES.
+#   I_HAVE_OWNER_APPROVAL=yes go-live.sh open-launches
+#                                 💰 checks that the indexer reads recent mainnet transactions, sets the
+#                                 owner's admin wallet, turns the mainnet gate on and opens launches to
+#                                 admins only, for the owner's test launch.
+#   go-live.sh launches open|pause [reason]
+#                                 opens launches to everyone, or pauses them (admins can still launch).
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
 #   go-live.sh status             apps, health, wallet addresses and balances.
 #
@@ -86,6 +92,7 @@ write_env() { # file owner (content on stdin)
   cat > "$1"
 }
 env_get() { grep -E "^$2=" "$1" | tail -n 1 | cut -d= -f2-; }
+set_env() { sed -i -E "/^$2=/d" "$1"; printf '%s=%s\n' "$2" "$3" >> "$1"; } # file key value
 # As divvy-backup, so its log stays writable for the nightly cron job.
 run_backup() { sudo -u divvy-backup -H bash -c '/usr/local/bin/divvy-pg-backup >> /var/log/divvy/backup/backup.log 2>&1'; }
 
@@ -554,10 +561,71 @@ cp_creator() {
     ./node_modules/.bin/tsx scripts/phase0/set-cp-creator.ts "${send[@]}" 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g'
   [ ${#send[@]} = 0 ] && return 0
   # Set on chain (the script stops this function otherwise): the worker may collect it now.
-  sed -i -E '/^CPMM_CREATOR_FEES=/d' $ENV_DIR/worker.env
-  echo CPMM_CREATOR_FEES=true >> $ENV_DIR/worker.env
+  set_env $ENV_DIR/worker.env CPMM_CREATOR_FEES true
   if [ -f "$LIVE_MARK" ]; then restart_worker; fi
   note "CPMM_CREATOR_FEES=true di worker.env"
+}
+
+# --------------------------------------------------------------------------------------------------
+# The launch switch the API reads (packages/server/src/settings.ts), the same one as /admin.
+launch_setting() { sudo -u postgres psql -X -d divvy -Atc "SELECT value FROM \"Setting\" WHERE key = 'launches'" 2>/dev/null; }
+set_launches() { # open (true/false), reason
+  local v
+  v=$(jq -cn --argjson open "$1" --arg reason "${2:-}" '{launchesOpen: $open, reason: (if $reason == "" then null else $reason end)}')
+  echo "INSERT INTO \"Setting\" (key, value, \"updatedAt\") VALUES ('launches', :'v'::jsonb, now())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, \"updatedAt\" = now();" | sudo -u postgres psql -X -q -d divvy -v ON_ERROR_STOP=1 -v v="$v"
+}
+
+open_launches() {
+  load_secrets
+  [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
+  [ "${I_HAVE_OWNER_APPROVAL:-}" = yes ] || die "butuh I_HAVE_OWNER_APPROVAL=yes: setiap launch dibayar wallet operasional (CLAUDE.md rule 3)"
+  [ -f "$CUR/packages/solana/src/live/rawtx.ts" ] || die "kode di server masih lama: jalankan 'go-live.sh update' dulu"
+
+  say "Cek: indexer membaca 300 transaksi LaunchLab terbaru di mainnet (termasuk versi baru)"
+  (cd "$CUR/packages/solana" && RPC_URL="$RPC" timeout 900 ./node_modules/.bin/tsx scripts/phase0/decode-recent-trades.ts --limit 300 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g' > /root/uspad-trades-check.txt || true
+  local res
+  res=$(tail -n 1 /root/uspad-trades-check.txt)
+  echo "$res" | jq -e . > /dev/null 2>&1 || { tail -n 20 /root/uspad-trades-check.txt; die "cek gagal jalan (log di atas)"; }
+  note "$(echo "$res" | jq -c '{read, versions, unreadable, rpcErrors, trades, layoutErrors}')"
+  [ "$(echo "$res" | jq '.unreadable + .layoutErrors')" = 0 ] || die "indexer belum bisa membaca semua transaksi. Kirim /root/uspad-trades-check.txt ke Claude; launch tetap tertutup."
+
+  say "Wallet admin (dompet Anda sendiri, untuk launch uji coba dan halaman /admin)"
+  local cur w
+  cur=$(env_get $ENV_DIR/api.env ADMIN_WALLETS)
+  read -rp "   Alamat wallet Phantom Anda${cur:+ [Enter = $cur]}: " w
+  w=${w:-$cur}
+  [[ $w =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || die "itu bukan alamat Solana"
+
+  say "Mainnet gate nyala, launch hanya untuk admin"
+  for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do
+    set_env "$f" ADMIN_WALLETS "$w"
+    set_env "$f" DIVVY_MAINNET_ENABLED true
+  done
+  set_launches false "Launches open soon."
+  rm -f /etc/nginx/divvy-launches-paused
+  if has_systemd; then systemctl reload nginx; else nginx -s reload; fi
+  pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+  restart_worker
+  sleep 8
+  status
+  cat <<EOF
+
+   Launch uji coba (hanya wallet $w yang bisa):
+     1. Buka https://$DOMAIN/create, connect wallet itu, lalu sign in.
+     2. Launch satu koin. Biayanya sekitar 0,012 SOL, dibayar wallet operasional.
+     3. Setelah live, beli dan jual sedikit di halaman koin, lalu cek di Solscan.
+     4. Kalau semuanya benar, buka untuk semua orang:  /root/go-live.sh launches open
+EOF
+}
+
+launches() {
+  case "${1:-}" in
+    open) set_launches true "" ;;
+    pause) set_launches false "${2:-Launches are paused for now.}" ;;
+    *) die "pakai: go-live.sh launches open | pause [alasan]" ;;
+  esac
+  say "Setelan launch: $(launch_setting)"
 }
 
 # --------------------------------------------------------------------------------------------------
@@ -568,7 +636,7 @@ status() {
     for u in divvy-web divvy-api divvy-worker; do pm2as "$u" jlist 2>/dev/null | jq -r '.[] | "   \(.name): \(.pm2_env.status), restarts \(.pm2_env.restart_time)"'; done
     note "health: $(curl -fsS https://$DOMAIN/api/health 2>/dev/null || echo 'tidak menjawab')"
     note "worker: $(grep '"msg":"worker started"' /var/log/divvy/worker/worker.out.log 2>/dev/null | tail -n 1 | jq -c '{cluster, mainnetEnabled, payoutsDryRun, delivery}' 2>/dev/null || echo '?')"
-    note "launch: $([ -f /etc/nginx/divvy-launches-paused ] && echo dijeda || echo buka)"
+    note "launch: $([ -f /etc/nginx/divvy-launches-paused ] && echo "dijeda di Nginx" || echo "Nginx buka"), setelan $(launch_setting || echo '?')"
   else
     note "situs demo (belum switch)"
   fi
@@ -593,6 +661,8 @@ case "${1:-}" in
   update) update ;;
   x-login) x_login ;;
   cp-creator) cp_creator "${2:-}" ;;
+  open-launches) open_launches ;;
+  launches) launches "${2:-}" "${3:-}" ;;
   status) status ;;
-  *) sed -n '2,21p' "$0"; exit 1 ;;
+  *) sed -n '2,27p' "$0"; exit 1 ;;
 esac

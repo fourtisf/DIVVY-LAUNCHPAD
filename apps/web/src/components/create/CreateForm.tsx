@@ -280,11 +280,17 @@ export function CreateForm() {
             <div className="sumline"><span>Your share of every trade</span><b>{bpsLabel(config.fees.creatorBps)}</b></div>
             <div className="sumline"><span>Holders&apos; share</span><b id="holdShare">{bpsLabel(config.fees.holdersBps)} in {d.pays}</b></div>
             <div className="sumline"><span>Dev buy</span><b>None, for anyone</b></div>
-            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || !config.launchesOpen || !!me?.blocked}>
+            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
               Launch coin
             </button>
             <p className="note" id="launchHint" style={{ textAlign: "center" }}>
-              {me?.blocked ? "uspad isn't available in your country." : config.launchesOpen ? hint : config.launchesPausedReason ?? "Launches are paused."}
+              {me?.blocked
+                ? "uspad isn't available in your country."
+                : config.launchesOpen
+                  ? hint
+                  : me?.isAdmin
+                    ? `Paused for everyone else; you can launch as an admin. ${hint}`
+                    : (config.launchesPausedReason ?? "Launches are paused.")}
             </p>
           </div>
         </aside>

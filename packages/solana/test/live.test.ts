@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import BN from "bn.js";
 import bs58 from "bs58";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Connection, Keypair, MessageV0, PublicKey, VersionedTransaction, type VersionedTransactionResponse } from "@solana/web3.js";
 import { Curve, LaunchpadPool, PlatformConfig } from "@raydium-io/raydium-sdk-v2";
 import {
@@ -27,6 +27,9 @@ import {
   CPMM_SWAP_EVENT_LEN,
   cpmmPoolPda,
   parseCpmmSwaps,
+  getTransactionAnyVersion,
+  TxShapeError,
+  unsupportedVersionOf,
   type GlobalConfigState,
   type PoolState,
 } from "../src/live";
@@ -144,6 +147,83 @@ function freshPool(): { pool: PoolState; config: GlobalConfigState } {
   });
   return { pool, config: { curveType: 0, tradeFeeRate: new BN(2500) } as GlobalConfigState };
 }
+
+describe("getTransactionAnyVersion (transaction versions web3.js can't read)", () => {
+  const trader = Keypair.generate().publicKey;
+  const pool = Keypair.generate().publicKey;
+  const buyDisc = Buffer.from([250, 234, 13, 123, 213, 156, 19, 236]);
+  const eventData = Buffer.concat([EVENT_IX_TAG_LE, TRADE_EVENT_DISC, tradeEventBody({ pool })]);
+  // What the RPC returns for getTransaction with encoding "json".
+  const json = {
+    slot: 7,
+    blockTime: 1_800_000_000,
+    version: 1,
+    transaction: {
+      signatures: ["sig"],
+      message: {
+        header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 1 },
+        accountKeys: [trader, P.launchLab, pool].map((k) => k.toBase58()),
+        recentBlockhash: bs58.encode(Buffer.alloc(32, 1)),
+        instructions: [{ programIdIndex: 1, accounts: [0, 2], data: bs58.encode(Buffer.concat([buyDisc, Buffer.alloc(24)])), stackHeight: 1 }],
+      },
+    },
+    meta: { err: null, fee: 5000, logMessages: [], innerInstructions: [{ index: 0, instructions: [{ programIdIndex: 1, accounts: [1], data: bs58.encode(eventData), stackHeight: 2 }] }] },
+  };
+  const unsupported = Object.assign(
+    new Error('failed to get transaction: Transaction version (1) is not supported by the requesting client. Please try the request again with the following configuration parameter: "maxSupportedTransactionVersion": 1'),
+    { code: -32015 },
+  );
+  const conn = (err: Error) => ({ rpcEndpoint: "http://rpc.test", getTransaction: async () => Promise.reject(err) }) as unknown as Connection;
+  const serve = (result: unknown) => {
+    const bodies: { params: [string, { maxSupportedTransactionVersion: number; encoding: string }] }[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }));
+    });
+    return bodies;
+  };
+
+  it("asks again for that version and parses its trade like any other", async () => {
+    const bodies = serve(json);
+    try {
+      const tx = await getTransactionAnyVersion(conn(unsupported), "sig");
+      expect(bodies[0]!.params[1]).toMatchObject({ maxSupportedTransactionVersion: 1, encoding: "json" });
+      expect(tx!.slot).toBe(7);
+      expect(tx!.transaction.message.staticAccountKeys[0]!.equals(trader)).toBe(true);
+      const r = parseLaunchLabTransaction(tx!, P.launchLab, P.cpmm);
+      expect(r.trades).toHaveLength(1);
+      expect(r.trades[0]!.trader?.equals(trader)).toBe(true);
+      expect(r.trades[0]!.event.poolState.equals(pool)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("stops on a shape it doesn't know instead of skipping the transaction", async () => {
+    serve({ ...json, transaction: { signatures: ["sig"], message: { staticKeys: [] } } });
+    try {
+      await expect(getTransactionAnyVersion(conn(unsupported), "sig")).rejects.toBeInstanceOf(TxShapeError);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("passes other RPC errors through", async () => {
+    const bodies = serve(json);
+    try {
+      await expect(getTransactionAnyVersion(conn(new Error("429 Too Many Requests")), "sig")).rejects.toThrow("429");
+      expect(bodies).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reads the version from the error", () => {
+    expect(unsupportedVersionOf(unsupported)).toBe(1);
+    expect(unsupportedVersionOf(new Error("Transaction version (2) is not supported by the requesting client"))).toBe(2);
+    expect(unsupportedVersionOf(new Error("failed to get transaction: Node is behind"))).toBeNull();
+  });
+});
 
 describe("quotes (SDK curve math)", () => {
   const rates = { protocol: new BN(2500), platform: new BN(6000), creator: new BN(1500) };

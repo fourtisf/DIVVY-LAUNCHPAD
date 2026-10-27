@@ -8,3 +8,4 @@ export * from "./holders";
 export * from "./send";
 export * from "./cpmm";
 export * from "./lplock";
+export * from "./rawtx";

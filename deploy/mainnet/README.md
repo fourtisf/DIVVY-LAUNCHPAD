@@ -13,6 +13,8 @@ I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-config --send
 /root/go-live.sh x-login                 # "Link your X account": the X app's Client ID and Secret
 /root/go-live.sh cp-creator              # dry run, from the epoch after the PlatformConfig's; then, with the owner's OK:
 I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh cp-creator --send
+I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh open-launches   # gate on, launches for admins only (the owner's test launch)
+/root/go-live.sh launches open           # then for everyone; `launches pause "reason"` to stop them again
 /root/go-live.sh update                  # every later deploy
 /root/go-live.sh status
 ```
@@ -113,6 +115,8 @@ sudo env RPC_URL="$RPC_URL" PLATFORM_ADMIN_KEYPAIR=/root/uspad-keys/platform-adm
 4. Check: the site shows no demo banner, `/api/health` says `"mode":"live"`, the worker log says `"cluster":"mainnet-beta","mainnetEnabled":false,"payoutsDryRun":true`.
 
 ## Phase 4. 💰 Open launches
+
+`go-live.sh open-launches` does steps 1–2 and the first half of step 3 in one go, after a gate: it runs the indexer's decoder over the 300 latest LaunchLab transactions on mainnet (newer transaction versions included, `packages/solana/src/live/rawtx.ts`) and stops if one can't be read. It asks for the owner's wallet (`ADMIN_WALLETS`), turns the mainnet gate on, and opens launches to admins only; `go-live.sh launches open` opens them to everyone after the test launch.
 
 1. Fund the hot wallets (public keys in `/etc/divvy/keys/pubkeys.txt`) with small amounts the owner picks. The launcher pays each coin's rent and Jito tip and is capped per hour (`LAUNCHER_HOURLY_CAP_LAMPORTS`). The payout vault pays each new holder's token-account rent in SOL and keeps the same value from that holder's dividend in stock, so it needs SOL up front and a top-up now and then. The fee claimer pays its own transaction fees. `HOT_WALLET_MIN_SOL` sets the low-balance alert.
 2. `DIVVY_MAINNET_ENABLED=true` in api.env **and** worker.env (`envcheck`), reload the API, restart the worker (RUNBOOK "Config-only changes").

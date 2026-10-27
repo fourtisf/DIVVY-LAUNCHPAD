@@ -211,6 +211,9 @@ describe.skipIf(!run)("live mode", () => {
     const r = await post("/api/launch", { name: "X", ticker: "XX", imageId: "nope", dividendAsset: "NVDAx" }, other);
     expect(r.statusCode).toBe(503);
     expectShape(ApiErrorSchema, r.json());
+    // An admin still gets past the pause (the owner's test launch); here the next check refuses the upload.
+    const mine = await post("/api/launch", { name: "X", ticker: "XX", imageId: "nope", dividendAsset: "NVDAx" }, a);
+    expect(mine.statusCode).not.toBe(503);
     await post("/api/admin/settings", { launchesOpen: true, reason: null }, a);
 
     const coin = await prisma.coin.findUniqueOrThrow({ where: { tickerNorm: "CHIPDOG" } });

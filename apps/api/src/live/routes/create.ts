@@ -154,7 +154,9 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     if (!v) return;
     if (await refuseBlockedCountry(d, req, reply)) return;
     const settings = await getLaunchSettings(d.prisma);
-    if (!settings.launchesOpen) return sendError(reply, 503, "LAUNCHES_PAUSED", settings.reason ?? "Launches are paused for now");
+    // Admins can still launch while launches are paused: the owner's test launch before opening them
+    // (deploy/mainnet/README.md, phase 4).
+    if (!settings.launchesOpen && !v.isAdmin) return sendError(reply, 503, "LAUNCHES_PAUSED", settings.reason ?? "Launches are paused for now");
 
     const parsed = LaunchRequestSchema.safeParse(req.body);
     if (!parsed.success) return sendError(reply, 400, "BAD_REQUEST", "Some launch fields are missing or too long");
@@ -174,8 +176,8 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
       if (await d.redis.exists(KEYS.launchCooldown(v.wallet))) return sendError(reply, 429, "COOLDOWN", "Wait a couple of minutes between launches");
 
       // Abuse guard for free launches: a verified X account, or a funded wallet with some history. A typed
-      // X link proves nothing, so it doesn't count.
-      if (!v.xUserId && !(await fundedAndAged(d, v.wallet))) {
+      // X link proves nothing, so it doesn't count. Admins are trusted.
+      if (!v.xUserId && !v.isAdmin && !(await fundedAndAged(d, v.wallet))) {
         const wallet = `a wallet that holds at least ${Number(p.launchMinWalletLamports) / 1e9} SOL and is ${p.launchMinWalletAgeDays} days old`;
         const xOAuth = !!(d.env.X_CLIENT_ID && d.env.X_REDIRECT_URI);
         return sendError(reply, 403, "NEEDS_X_OR_SOL", xOAuth ? `Link your X account, or use ${wallet}, to launch for free` : `Use ${wallet} to launch for free`);
