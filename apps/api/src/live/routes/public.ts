@@ -89,6 +89,7 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
       demo: false,
       launchesOpen: settings.launchesOpen,
       launchesPausedReason: settings.reason,
+      launchFee: { amount: amount(d.env.LAUNCH_FEE_LAMPORTS, 9), to: d.env.LAUNCH_FEE_LAMPORTS > 0n ? d.env.LAUNCH_FEE_WALLET! : null },
       fees: p.fees,
       graduation: {
         targetUsd: fdvSol * prices.solUsd,

@@ -51,6 +51,7 @@ export function buildConfig(): Config {
     demo: true,
     launchesOpen: true,
     launchesPausedReason: null,
+    launchFee: { amount: amount(0, 9), to: null },
     fees: FEES,
     graduation: {
       // The prototype says "graduates at $48k". The real figure is graduation FDV (≈ 410.8 SOL with the

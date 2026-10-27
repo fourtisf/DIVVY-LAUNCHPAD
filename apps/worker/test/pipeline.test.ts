@@ -183,10 +183,13 @@ describe.skipIf(!run)("launch pipeline", () => {
 
   it("failLaunch frees the unique identity but keeps the record", async () => {
     const { coin, launch } = await pendingLaunch("FREE");
+    const fee = await prisma.launchFee.create({ data: { userId: launch.userId, sig: "feesig-free", lamports: 20_000_000n, launchId: launch.id } });
     await failLaunch(deps({}), launch.id, "LAUNCH_FAILED", "nope");
     const c = await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } });
     expect(c).toMatchObject({ status: "failed", ticker: "FREE", creatorXUserId: null });
     expect(c.tickerNorm).not.toBe(foldTicker("FREE"));
+    // The creator's launch fee is free again, as credit for their next launch.
+    expect((await prisma.launchFee.findUniqueOrThrow({ where: { id: fee.id } })).launchId).toBeNull();
   });
 
   it("indexer: a create event lands the coin; trades are stored once with candles", async () => {

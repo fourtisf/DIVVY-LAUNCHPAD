@@ -29,6 +29,7 @@ import { sendCheckFailure, sendError } from "../../errors";
 import { processImage } from "../../media";
 import type { LiveDeps } from "../deps";
 import { antiVampContexts, identityOf, invalidateBoard, invalidatePictures, pictureCandidates } from "../data";
+import { launchFee } from "../launchfee";
 import { refuseBlockedCountry, requireViewer } from "../viewer";
 
 export async function runChecks(d: LiveDeps, q: { ticker?: string; name?: string; x?: string }): Promise<CheckResponse> {
@@ -50,8 +51,9 @@ export async function runChecks(d: LiveDeps, q: { ticker?: string; name?: string
   return out;
 }
 
-export async function checkPicture(d: LiveDeps, sha256: string, phash: string): Promise<CheckResult> {
-  const rows = await pictureCandidates(d);
+/** Copies of another creator's picture are refused; a creator may reuse their own on a new coin. */
+export async function checkPicture(d: LiveDeps, sha256: string, phash: string, userId: string): Promise<CheckResult> {
+  const rows = (await pictureCandidates(d)).filter((r) => r.creatorUserId !== userId);
   const exact = rows.find((r) => r.imageSha256 === sha256);
   if (exact) return imageCollision(identityOf(exact), true);
   const near = rows.find((r) => hamming(r.imagePhash, phash) <= IMAGE_HAMMING_LIMIT);
@@ -67,7 +69,7 @@ function uniqueViolation(e: unknown): { code: string; message: string } | null {
   if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return null;
   const target = String((e.meta?.target as string[] | string | undefined) ?? "");
   if (target.includes("tickerNorm")) return { code: "TICKER_TAKEN", message: "That ticker was just taken" };
-  if (target.includes("imageSha256") || target.includes("uploadId")) return { code: "IMAGE_DUPLICATE", message: "That picture was just used by another coin" };
+  if (target.includes("uploadId")) return { code: "IMAGE_DUPLICATE", message: "That upload was just used by another coin. Upload the picture again." };
   if (target.includes("creatorXUserId")) return { code: "X_TAKEN", message: "This X account already launched a coin" };
   return { code: "CONFLICT", message: "Something about this coin was just taken. Check the form again." };
 }
@@ -94,7 +96,7 @@ async function launchChecks(d: LiveDeps, b: { ticker: string; name: string; x: s
   if (checks.x!.status !== "ok") return { fail: (r: Reply) => sendCheckFailure(r, checks.x as CheckResult) } as const;
   const up = await d.prisma.upload.findUnique({ where: { id: b.imageId } });
   if (!up || up.ownerUserId !== userId) return { fail: (r: Reply) => sendError(r, 422, "IMAGE_EMPTY", "Upload a picture") } as const;
-  const pic = await checkPicture(d, up.sha256, up.imagePhash);
+  const pic = await checkPicture(d, up.sha256, up.imagePhash, userId);
   if (pic.status !== "ok") return { fail: (r: Reply) => sendCheckFailure(r, pic) } as const;
   const asset = await d.prisma.dividendAsset.findFirst({ where: { symbol: b.dividendAsset, enabled: true } });
   if (!asset) return { fail: (r: Reply) => sendError(r, 422, "ASSET_UNKNOWN", "Pick a stock from the list") } as const;
@@ -146,10 +148,12 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const row = await d.prisma.upload.create({
       data: { sha256: img.sha256, imagePhash: img.phash, url, storageKey: key, contentType: "image/webp", bytes: img.webp.length, ownerUserId: v.userId },
     });
-    return { imageId: row.id, url, sha256: img.sha256, check: await checkPicture(d, img.sha256, img.phash) };
+    return { imageId: row.id, url, sha256: img.sha256, check: await checkPicture(d, img.sha256, img.phash, v.userId) };
   });
 
-  app.post("/api/launch", { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } }, async (req, reply) => {
+  // Paid launches have no daily limit, so a creator can launch often; each one takes two calls (the
+  // FEE_REQUIRED answer, then the call with the payment).
+  app.post("/api/launch", { config: { rateLimit: { max: 60, timeWindow: "1 hour" } } }, async (req, reply) => {
     const v = await requireViewer(d, req, reply);
     if (!v) return;
     if (await refuseBlockedCountry(d, req, reply)) return;
@@ -167,17 +171,20 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const tg = Telegram.safeParse(b.telegram ?? "");
     if (!web.success) return sendError(reply, 422, "BAD_WEBSITE", "The website must be an http(s) link");
     if (!tg.success) return sendError(reply, 422, "BAD_TELEGRAM", "Use a t.me link or @group for Telegram");
+    // Creator-paid launches (LAUNCH_FEE_LAMPORTS): the fee stands in for the free-launch limits. Admins
+    // don't pay; the fee goes to the wallet they run.
+    const paid = d.env.LAUNCH_FEE_LAMPORTS > 0n && !v.isAdmin;
 
     // One launch request per wallet at a time: concurrent requests would all pass the checks below.
     const lockKey = `divvy:launch-lock:${v.wallet}`;
     if ((await d.redis.set(lockKey, "1", "EX", 60, "NX")) !== "OK") return sendError(reply, 429, "LAUNCH_IN_PROGRESS", "A launch from this wallet is already on its way");
     try {
       const p = d.params;
-      if (await d.redis.exists(KEYS.launchCooldown(v.wallet))) return sendError(reply, 429, "COOLDOWN", "Wait a couple of minutes between launches");
+      if (!paid && (await d.redis.exists(KEYS.launchCooldown(v.wallet)))) return sendError(reply, 429, "COOLDOWN", "Wait a couple of minutes between launches");
 
       // Abuse guard for free launches: a verified X account, or a funded wallet with some history. A typed
       // X link proves nothing, so it doesn't count. Admins are trusted.
-      if (!v.xUserId && !v.isAdmin && !(await fundedAndAged(d, v.wallet))) {
+      if (!paid && !v.xUserId && !v.isAdmin && !(await fundedAndAged(d, v.wallet))) {
         const wallet = `a wallet that holds at least ${Number(p.launchMinWalletLamports) / 1e9} SOL and is ${p.launchMinWalletAgeDays} days old`;
         const xOAuth = !!(d.env.X_CLIENT_ID && d.env.X_REDIRECT_URI);
         return sendError(reply, 403, "NEEDS_X_OR_SOL", xOAuth ? `Link your X account, or use ${wallet}, to launch for free` : `Use ${wallet} to launch for free`);
@@ -187,6 +194,9 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
       const early = await launchChecks(d, b, v.userId);
       if (early.fail) return early.fail(reply);
       const { up, asset } = early;
+      // The fee is asked for only once the form passes, so nobody pays for a launch that would be refused.
+      const fee = paid ? await launchFee(d, v, b.feeSig) : null;
+      if (fee?.fail) return fee.fail(reply);
 
       let launchId: string;
       try {
@@ -200,14 +210,15 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
               tx.launch.count({ where: { userId: v.userId, createdAt: { gte: dayStart }, step: { not: "failed" } } }),
               tx.launch.count({ where: { createdAt: { gte: dayStart }, step: { not: "failed" } } }),
             ]);
-            if (mine >= p.launchesPerWalletPerDay) throw new Refusal(429, "DAILY_LIMIT", `You can launch ${p.launchesPerWalletPerDay} coins a day`);
+            if (!paid && mine >= p.launchesPerWalletPerDay) throw new Refusal(429, "DAILY_LIMIT", `You can launch ${p.launchesPerWalletPerDay} coins a day`);
             if (all >= p.launchesPerDayGlobal) throw new Refusal(429, "GLOBAL_LIMIT", "uspad hit today's launch limit. Try again tomorrow.");
             invalidatePictures();
             // On this transaction's connection: the lock holder must not wait for a second pooled
             // connection while other launches hold the rest waiting on the lock (audit).
             const again = await launchChecks({ ...d, prisma: tx as unknown as LiveDeps["prisma"] }, b, v.userId);
             if (again.fail) throw new Refusal(0, "", "", again.fail);
-            // Unique indexes on tickerNorm, imageSha256, uploadId and creatorXUserId back this up.
+            // Unique indexes on tickerNorm, uploadId and creatorXUserId back this up; pictures are checked
+            // here only (a creator may reuse their own).
             const coin = await tx.coin.create({
               data: {
                 ticker: displayTicker(b.ticker),
@@ -228,6 +239,10 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
               },
             });
             const launch = await tx.launch.create({ data: { userId: v.userId, coinId: coin.id, step: "checking", request: b as unknown as Prisma.InputJsonValue } });
+            if (fee) {
+              const used = await tx.launchFee.updateMany({ where: { id: fee.id, launchId: null }, data: { launchId: launch.id } });
+              if (used.count !== 1) throw new Refusal(409, "FEE_USED", "That payment already paid for a launch");
+            }
             return launch.id;
           },
           { timeout: 20_000, maxWait: 20_000 },
@@ -238,7 +253,7 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
         if (u) return sendError(reply, 422, u.code, u.message);
         throw e;
       }
-      await d.redis.set(KEYS.launchCooldown(v.wallet), "1", "EX", p.launchCooldownSec || 1);
+      if (!paid) await d.redis.set(KEYS.launchCooldown(v.wallet), "1", "EX", p.launchCooldownSec || 1);
       await d.queues.launch.add("create", { launchId }, { jobId: launchId, attempts: 1, removeOnComplete: 1000, removeOnFail: 1000 });
       invalidatePictures();
       invalidateBoard();

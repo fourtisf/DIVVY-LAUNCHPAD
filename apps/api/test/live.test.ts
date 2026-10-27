@@ -11,11 +11,13 @@ import bs58 from "bs58";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { Keypair, type Connection } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, TransactionMessage, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
 import { Redis } from "ioredis";
 import { PrismaClient } from "@divvy/db";
 import { ApiErrorSchema, CheckResponseSchema, CoinDetailSchema, CoinListSchema, ConfigSchema, LaunchStatusSchema, MeSchema, StatsSchema, UploadResponseSchema } from "@divvy/shared";
 import { foldName, foldTicker } from "@divvy/shared";
+import type { Env } from "../src/env";
+import { feePaymentProblem } from "../src/live/launchfee";
 import { mergeCandles } from "../src/live/routes/public";
 import { expectShape } from "./util";
 
@@ -49,8 +51,46 @@ const fakeConn = {
   },
 } as unknown as Connection;
 
+/** A confirmed SOL transfer the way getTransaction returns it, for the launch-fee checks. */
+function transferTx(from: string, to: string, lamports: number, o: { err?: unknown; ageSec?: number } = {}): VersionedTransactionResponse {
+  const message = new TransactionMessage({
+    payerKey: new PublicKey(from),
+    recentBlockhash: bs58.encode(Buffer.alloc(32, 3)),
+    instructions: [SystemProgram.transfer({ fromPubkey: new PublicKey(from), toPubkey: new PublicKey(to), lamports })],
+  }).compileToV0Message();
+  return {
+    slot: 1,
+    version: 0,
+    blockTime: Math.floor(Date.now() / 1000) - (o.ageSec ?? 5),
+    transaction: { message, signatures: [] },
+    meta: { err: o.err ?? null, fee: 5000, preBalances: [1e9, 0, 1], postBalances: [1e9 - lamports - 5000, lamports, 1], innerInstructions: [], loadedAddresses: { writable: [], readonly: [] }, logMessages: [] },
+  } as unknown as VersionedTransactionResponse;
+}
+
+describe("launch fee payment check", () => {
+  const payer = Keypair.generate().publicKey.toBase58();
+  const wallet = Keypair.generate().publicKey.toBase58();
+  const other = Keypair.generate().publicKey.toBase58();
+  const now = Math.floor(Date.now() / 1000);
+  const check = (tx: VersionedTransactionResponse) => feePaymentProblem(tx, payer, wallet, 20_000_000n, now);
+
+  it("accepts the fee or more, sent from the signed-in wallet to the launch wallet", () => {
+    expect(check(transferTx(payer, wallet, 20_000_000))).toBeNull();
+    expect(check(transferTx(payer, wallet, 25_000_000))).toBeNull();
+  });
+
+  it("refuses a short, failed, stale, foreign or misdirected payment", () => {
+    expect(check(transferTx(payer, wallet, 10_000_000))).toMatch(/0\.01 SOL; launching costs 0\.02 SOL/);
+    expect(check(transferTx(payer, wallet, 20_000_000, { err: { InstructionError: [0, "Custom"] } }))).toMatch(/failed/);
+    expect(check(transferTx(payer, wallet, 20_000_000, { ageSec: 7200 }))).toMatch(/more than an hour old/);
+    expect(check(transferTx(other, wallet, 20_000_000))).toMatch(/signed in with/);
+    expect(check(transferTx(payer, other, 20_000_000))).toMatch(/launch wallet/);
+  });
+});
+
 let app: FastifyInstance;
 let prisma: PrismaClient;
+let env: Env;
 
 describe.skipIf(!run)("live mode", () => {
   beforeAll(async () => {
@@ -96,7 +136,7 @@ describe.skipIf(!run)("live mode", () => {
     const { buildApp } = await import("../src/app");
     const { loadEnv } = await import("../src/env");
     const { createLiveDeps } = await import("../src/live/deps");
-    const env = loadEnv();
+    env = loadEnv();
     app = await buildApp({ env, live: createLiveDeps(env, { prisma, conn: fakeConn }) });
   });
 
@@ -115,6 +155,17 @@ describe.skipIf(!run)("live mode", () => {
     expect(r.statusCode).toBe(200);
     return { cookie: String(r.headers["set-cookie"]).split(";")[0]! };
   }
+
+  const picture = () =>
+    sharp({ create: { width: 200, height: 200, channels: 3, background: "#203040" } })
+      .composite([{ input: Buffer.from('<svg width="200" height="200"><circle cx="70" cy="90" r="50" fill="#fc0"/><rect x="120" y="20" width="50" height="160" fill="#0cf"/></svg>') }])
+      .png()
+      .toBuffer();
+  const upload = (img: Buffer, headers: Record<string, string> = {}) => {
+    const boundary = "----divvylive";
+    const payload = Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.png"\r\nContent-Type: image/png\r\n\r\n`), img, Buffer.from(`\r\n--${boundary}--\r\n`)]);
+    return app.inject({ method: "POST", url: "/api/upload", payload, headers: { ...headers, "content-type": `multipart/form-data; boundary=${boundary}` } });
+  };
 
   it("serves config, stats and the board from Postgres in the contract shapes", async () => {
     const c = expectShape(ConfigSchema, (await get("/api/config")).json()) as { demo: boolean; network: string };
@@ -153,18 +204,12 @@ describe.skipIf(!run)("live mode", () => {
 
   it("uploads, launches through the queue, and hides the mint until it lands", async () => {
     const u = await login(user);
-    const img = await sharp({ create: { width: 200, height: 200, channels: 3, background: "#203040" } })
-      .composite([{ input: Buffer.from('<svg width="200" height="200"><circle cx="70" cy="90" r="50" fill="#fc0"/><rect x="120" y="20" width="50" height="160" fill="#0cf"/></svg>') }])
-      .png()
-      .toBuffer();
-    const boundary = "----divvylive";
-    const payload = Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.png"\r\nContent-Type: image/png\r\n\r\n`), img, Buffer.from(`\r\n--${boundary}--\r\n`)]);
-    expect((await app.inject({ method: "POST", url: "/api/upload", payload, headers: { "content-type": `multipart/form-data; boundary=${boundary}` } })).statusCode).toBe(401);
-    const up = await app.inject({ method: "POST", url: "/api/upload", payload, headers: { ...u, "content-type": `multipart/form-data; boundary=${boundary}` } });
-    const upload = expectShape(UploadResponseSchema, up.json()) as { imageId: string; check: { status: string } };
-    expect(upload.check.status).toBe("ok");
+    const img = await picture();
+    expect((await upload(img)).statusCode).toBe(401);
+    const up = expectShape(UploadResponseSchema, (await upload(img, u)).json()) as { imageId: string; check: { status: string } };
+    expect(up.check.status).toBe("ok");
 
-    const body = { name: "Moon Pig", ticker: "moonpig", description: "Oink", imageId: upload.imageId, dividendAsset: "NVDAx", website: "https://moon.pig", telegram: "@moonpigchat", x: "https://x.com/MoonPigFun?s=11" };
+    const body = { name: "Moon Pig", ticker: "moonpig", description: "Oink", imageId: up.imageId, dividendAsset: "NVDAx", website: "https://moon.pig", telegram: "@moonpigchat", x: "https://x.com/MoonPigFun?s=11" };
     expect((await post("/api/launch", body, { ...u, "x-geo-country": "US" })).statusCode).toBe(451);
     expect((await post("/api/launch", body, { ...u, origin: "https://evil.example" })).statusCode).toBe(403);
     expect((await post("/api/launch", { ...body, website: "javascript:alert(1)" }, u)).statusCode).toBe(422);
@@ -202,6 +247,72 @@ describe.skipIf(!run)("live mode", () => {
     const chk = (await get("/api/check?ticker=M00NP1G")).json() as { ticker: { code: string; collidesWith: { mint: string | null } } };
     expect(chk.ticker.code).toBe("TICKER_TAKEN");
     expect(((await get("/api/check?x=%40moonpigfun")).json() as { x: { code: string } }).x.code).toBe("X_TAKEN");
+  });
+
+  it("lets a creator use their picture again, and refuses it to everyone else", async () => {
+    const img = await picture();
+    const mine = (await upload(img, await login(user))).json() as { check: { status: string } };
+    expect(mine.check.status).toBe("ok");
+    const theirs = (await upload(img, await login(keypair()))).json() as { check: { status: string; code: string } };
+    expect(theirs.check).toMatchObject({ status: "fail", code: "IMAGE_DUPLICATE" });
+  });
+
+  it("charges the launch fee when one is set: one launch per payment, no cooldown or daily cap, credit after a failure", async () => {
+    const { buildApp } = await import("../src/app");
+    const { createLiveDeps } = await import("../src/live/deps");
+    const feeWallet = Keypair.generate().publicKey.toBase58();
+    const txs = new Map<string, VersionedTransactionResponse>();
+    const conn = { ...fakeConn, getTransaction: async (sig: string) => txs.get(sig) ?? null } as unknown as Connection;
+    const paidEnv = { ...env, LAUNCH_FEE_LAMPORTS: 20_000_000n, LAUNCH_FEE_WALLET: feeWallet };
+    const paid = await buildApp({ env: paidEnv, live: createLiveDeps(paidEnv, { prisma, conn }) });
+    // The fee stands in for the free-launch guard: this wallet has no X and no history.
+    walletAgeDays = 0;
+    try {
+      const cfg = expectShape(ConfigSchema, (await paid.inject({ method: "GET", url: "/api/config" })).json()) as { launchFee: { amount: { ui: number }; to: string | null } };
+      expect(cfg.launchFee).toMatchObject({ amount: { ui: 0.02 }, to: feeWallet });
+
+      // `user` launched Moon Pig above, so the free launch's cooldown is still running.
+      const u = await login(user);
+      const img = await picture();
+      const coin = async (name: string, ticker: string) => ({ name, ticker, dividendAsset: "NVDAx", imageId: ((await upload(img, u)).json() as { imageId: string }).imageId });
+      const launch = (body: object) => paid.inject({ method: "POST", url: "/api/launch", payload: body, headers: u });
+      const code = (r: { json: () => unknown }) => (r.json() as { code: string }).code;
+      const sig = (n: number) => bs58.encode(Buffer.alloc(64, n));
+
+      const fish = await coin("Gold Fish", "GFISH");
+      const ask = await launch(fish);
+      expect(ask.statusCode).toBe(402);
+      expect(code(ask)).toBe("FEE_REQUIRED");
+      expect(code(await launch({ ...fish, feeSig: sig(1) }))).toBe("FEE_NOT_FOUND");
+      txs.set(sig(2), transferTx(user.address, feeWallet, 10_000_000));
+      expect(code(await launch({ ...fish, feeSig: sig(2) }))).toBe("BAD_FEE");
+      txs.set(sig(3), transferTx(admin.address, feeWallet, 20_000_000));
+      expect(code(await launch({ ...fish, feeSig: sig(3) }))).toBe("BAD_FEE");
+
+      txs.set(sig(4), transferTx(user.address, feeWallet, 20_000_000));
+      const first = await launch({ ...fish, feeSig: sig(4) });
+      expect(first.statusCode).toBe(201);
+      const fee = await prisma.launchFee.findUniqueOrThrow({ where: { sig: sig(4) } });
+      expect(fee).toMatchObject({ lamports: 20_000_000n, launchId: (first.json() as { launchId: string }).launchId });
+
+      // One payment, one launch; the next payment launches again straight away, past the daily cap.
+      const cat = await coin("Rocket Cat", "RCAT");
+      expect(code(await launch({ ...cat, feeSig: sig(4) }))).toBe("FEE_USED");
+      txs.set(sig(5), transferTx(user.address, feeWallet, 20_000_000));
+      const second = await launch({ ...cat, feeSig: sig(5) });
+      expect(second.statusCode).toBe(201);
+
+      // A launch that fails gives its fee back (worker failLaunch); the next launch uses it without paying.
+      await prisma.launchFee.updateMany({ where: { sig: sig(5) }, data: { launchId: null } });
+      const whale = await launch(await coin("Sky Whale", "SWHALE"));
+      expect(whale.statusCode).toBe(201);
+      expect((await prisma.launchFee.findUniqueOrThrow({ where: { sig: sig(5) } })).launchId).toBe((whale.json() as { launchId: string }).launchId);
+      expect(await prisma.launch.count({ where: { userId: fee.userId } })).toBeGreaterThan(3);
+      expect(code(await launch(await coin("Deep Crab", "DCRAB")))).toBe("FEE_REQUIRED");
+    } finally {
+      walletAgeDays = 30;
+      await paid.close();
+    }
   });
 
   it("serves 15m and 4h candles merged from the stored 5m and 1h ones", async () => {

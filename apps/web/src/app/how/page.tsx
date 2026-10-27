@@ -46,7 +46,7 @@ export default async function HowPage() {
           <span className="n">1</span>
           <div>
             <h3>You fill in the form</h3>
-            <p>Name, ticker, picture and the stock your holders will earn: NVDAx, SPYx, TSLAx and the rest. Launching costs nothing. The stock is locked once the coin is live.</p>
+            <p>Name, ticker, picture and the stock your holders will earn: NVDAx, SPYx, TSLAx and the rest. {c.launchFee.to ? `Launching costs ${c.launchFee.amount.ui} SOL, sent from your wallet when you launch; if the launch fails, it's kept for your next one.` : "Launching costs nothing."} The stock is locked once the coin is live.</p>
           </div>
         </li>
         <li>

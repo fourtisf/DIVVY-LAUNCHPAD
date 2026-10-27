@@ -14,6 +14,7 @@ I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-config --send
 /root/go-live.sh cp-creator              # dry run, from the epoch after the PlatformConfig's; then, with the owner's OK:
 I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh cp-creator --send
 I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh open-launches   # gate on, launches for admins only (the owner's test launch)
+/root/go-live.sh launch-fee 0.02         # creators pay 0.02 SOL per launch, no daily limit (0 = free again)
 /root/go-live.sh launches open           # then for everyone; `launches pause "reason"` to stop them again
 /root/go-live.sh update                  # every later deploy
 /root/go-live.sh status

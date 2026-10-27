@@ -107,17 +107,18 @@ enum TokenProgram {
 }
 
 model User {
-  id        String    @id @default(cuid())
-  wallet    String    @unique
+  id         String      @id @default(cuid())
+  wallet     String      @unique
   /// OAuth-verified X user ID. The handle is display only.
-  xUserId   String?   @unique
-  xHandle   String?
-  createdAt DateTime  @default(now())
-  sessions  Session[]
-  coins     Coin[]
-  launches  Launch[]
-  uploads   Upload[]
-  reports   Report[]
+  xUserId    String?     @unique
+  xHandle    String?
+  createdAt  DateTime    @default(now())
+  sessions   Session[]
+  coins      Coin[]
+  launches   Launch[]
+  launchFees LaunchFee[]
+  uploads    Upload[]
+  reports    Report[]
 }
 
 model Session {
@@ -169,7 +170,9 @@ model Coin {
   nameNorm        String
   description     String        @default("")
   imageUrl        String
-  imageSha256     String        @unique
+  /// Not unique: a creator may reuse a picture on their own coins (owner decision 2026-10-27); the
+  /// launch's picture check refuses it for anyone else.
+  imageSha256     String
   imagePhash      String
   uploadId        String?       @unique
   upload          Upload?       @relation(fields: [uploadId], references: [id])
@@ -216,6 +219,7 @@ model Coin {
   @@index([status, createdAt])
   @@index([dividendAssetId])
   @@index([creatorWallet])
+  @@index([imageSha256])
 }
 
 /// Denormalised market data, maintained by the indexer for fast board queries.
@@ -268,10 +272,27 @@ model Upload {
   @@index([createdAt])
 }
 
+/// A creator's launch fee (owner decision 2026-10-27: creators pay for their launches): a SOL transfer
+/// from their wallet to the operations wallet, verified on chain by the API. launchId is the launch it
+/// paid for; a launch that fails sets it back to null, so the fee is the creator's credit for the next.
+model LaunchFee {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  sig       String   @unique
+  lamports  BigInt
+  launchId  String?  @unique
+  launch    Launch?  @relation(fields: [launchId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([userId, launchId])
+}
+
 model Launch {
   id                   String     @id @default(cuid())
   userId               String
   user                 User       @relation(fields: [userId], references: [id])
+  fee                  LaunchFee?
   coinId               String?    @unique
   coin                 Coin?      @relation(fields: [coinId], references: [id])
   step                 LaunchStep @default(checking)

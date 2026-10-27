@@ -57,6 +57,8 @@ export const ConfigSchema = z.object({
   demo: z.boolean(),
   launchesOpen: z.boolean(),
   launchesPausedReason: z.string().nullable(),
+  /** What a launch costs its creator, sent to `to` before the create; 0 and null when launching is free. */
+  launchFee: z.object({ amount: AmountSchema, to: base58.nullable() }),
   fees: z.object({
     tradeFeeBps: z.number().int(),
     protocolBps: z.number().int(),
@@ -307,6 +309,8 @@ export const LaunchRequestSchema = z.object({
   x: z.string().max(200).optional().default(""),
   telegram: z.string().max(100).optional().default(""),
   website: z.string().max(200).optional().default(""),
+  /** The creator's launch-fee transfer, when the API answered FEE_REQUIRED (Config.launchFee). */
+  feeSig: z.string().max(100).optional(),
 });
 export type LaunchRequest = z.input<typeof LaunchRequestSchema>;
 

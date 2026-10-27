@@ -226,6 +226,8 @@ export async function failLaunch(d: WorkerDeps, launchId: string, code: string, 
   await d.prisma.$transaction(async (tx) => {
     const l = await tx.launch.updateMany({ where: { id: launchId, step: { in: ["checking", "bundling"] } }, data: { step: "failed", error: { code, message } } });
     if (l.count !== 1) return;
+    // A paid launch's fee becomes the creator's credit for their next launch (apps/api/src/live/launchfee.ts).
+    await tx.launchFee.updateMany({ where: { launchId }, data: { launchId: null } });
     const c = launch.coin;
     // Conditional, so a coin the indexer just marked live is never wiped (audit). The mint and pool
     // stay recorded: if the create lands after all, the indexer recognises it and alerts.

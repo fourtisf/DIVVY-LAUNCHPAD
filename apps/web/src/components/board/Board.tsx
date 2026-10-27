@@ -74,13 +74,13 @@ export function Board({ stats, leaders, initialCoins }: { stats: Stats; leaders:
           <h1>
             Memecoins that pay you <span className="glow">real stock dividends.</span>
           </h1>
-          <p className="lede">Launch a coin for free. Every trade buys the stock you picked, like NVDAx or SPYx, {deliveryCopy(config).heroTail}</p>
+          <p className="lede">Launch a coin{config.launchFee.to ? " in seconds" : " for free"}. Every trade buys the stock you picked, like NVDAx or SPYx, {deliveryCopy(config).heroTail}</p>
           <div className="ctas">
             <Link className="btn btn-g btn-lg" href="/create">Create a coin</Link>
             <Link className="btn btn-ghost btn-lg" href="/how">How it works</Link>
           </div>
           <div className="promises">
-            <Link className="tag" href="/how"><Icon name="gift" />Free, no dev buy</Link>
+            <Link className="tag" href="/how"><Icon name="gift" />{config.launchFee.to ? "No dev buy" : "Free, no dev buy"}</Link>
             <Link className="tag" href="/how"><Icon name="lock" />Copies refused</Link>
             <Link className="tag" href="/how"><Icon name="shield" />No sniper in block 0</Link>
             <Link className="tag" href="/payouts"><Icon name="receipt" />Every payout on chain</Link>

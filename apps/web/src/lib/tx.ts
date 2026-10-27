@@ -1,6 +1,6 @@
 "use client";
 
-import { PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
+import { PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type Connection } from "@solana/web3.js";
 import type { WalletContextState } from "@solana/wallet-adapter-react";
 import { checkTransaction, type TxKind } from "./txcheck";
 
@@ -39,8 +39,14 @@ export async function signAndSend(
     sig = await wallet.sendTransaction(tx, connection, { maxRetries: 3 });
   }
   onSent?.(sig);
-  // From here on the transaction is out: never tell the user "nothing was spent".
-  // Confirmation by polling, not a websocket subscription: the browser's RPC is uspad's HTTP relay.
+  return confirmSignature(connection, sig, lastValidBlockHeight);
+}
+
+/**
+ * Waits for a sent transaction to confirm. By polling, not a websocket subscription: the browser's RPC is
+ * uspad's HTTP relay. The transaction is out by now, so never tell the user "nothing was spent".
+ */
+async function confirmSignature(connection: Connection, sig: string, lastValidBlockHeight: number): Promise<string> {
   try {
     for (let i = 0; ; i++) {
       const st = (await connection.getSignatureStatuses([sig])).value[0];
@@ -53,6 +59,23 @@ export async function signAndSend(
     if (e instanceof Error && e.message.startsWith("The transaction failed on chain")) throw e;
   }
   throw new SentUnconfirmed(sig);
+}
+
+/**
+ * The creator's launch fee: a plain SOL transfer from the connected wallet to uspad's launch wallet
+ * (Config.launchFee), built here so there's nothing to check. Returns the confirmed signature, which
+ * the API verifies on chain before it queues the launch.
+ */
+export async function payLaunchFee(wallet: WalletContextState, connection: Connection, to: string, lamports: bigint): Promise<string> {
+  if (!wallet.publicKey || !wallet.sendTransaction) throw new Error("Connect a wallet first");
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const message = new TransactionMessage({
+    payerKey: wallet.publicKey,
+    recentBlockhash: blockhash,
+    instructions: [SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: new PublicKey(to), lamports })],
+  }).compileToV0Message();
+  const sig = await wallet.sendTransaction(new VersionedTransaction(message), connection, { maxRetries: 3 });
+  return confirmSignature(connection, sig, lastValidBlockHeight);
 }
 
 export const explorerTx = (sig: string, network: "mainnet-beta" | "devnet") => `https://solscan.io/tx/${sig}${network === "devnet" ? "?cluster=devnet" : ""}`;

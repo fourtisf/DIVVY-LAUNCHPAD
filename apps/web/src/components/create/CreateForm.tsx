@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import useSWR from "swr";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import {
   avatarDataUri,
@@ -19,6 +19,7 @@ import { api, ApiRequestError, qs } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { useDebounced } from "@/lib/hooks";
 import { errorText, useSession } from "@/lib/session";
+import { payLaunchFee, SentUnconfirmed } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { CoinCard } from "../CoinCard";
 import { Icon } from "../Icon";
@@ -44,11 +45,36 @@ let saved: Draft = { name: "", ticker: "", desc: "", pays: "NVDAx", x: "", tg: "
 type Check = { s: "idle" | "ok" | "fail"; m: string };
 const toCheck = (r: { status: Check["s"]; message: string } | undefined, idle: string): Check => (r ? { s: r.status, m: r.message } : { s: "idle", m: idle });
 
+/**
+ * A launch fee this wallet paid that no launch has used yet. The next try sends it again, so a launch
+ * refused after the payment never costs a second fee. sessionStorage, so a reload keeps it.
+ */
+const heldFee = {
+  get(w: string): string | null {
+    try {
+      return w ? sessionStorage.getItem(`uspad:launch-fee:${w}`) : null;
+    } catch {
+      return null;
+    }
+  },
+  set(w: string, sig: string | null) {
+    try {
+      if (sig) sessionStorage.setItem(`uspad:launch-fee:${w}`, sig);
+      else sessionStorage.removeItem(`uspad:launch-fee:${w}`);
+    } catch {
+      // Storage off: a payment the API already recorded is still credited to the wallet.
+    }
+  },
+};
+const errCode = (e: unknown) => (e instanceof ApiRequestError ? e.body?.code : undefined);
+
 export function CreateForm() {
   const config = useConfig();
   const toast = useToast();
   const router = useRouter();
-  const { publicKey } = useWallet();
+  const walletCtx = useWallet();
+  const { publicKey } = walletCtx;
+  const { connection } = useConnection();
   const { setVisible } = useWalletModal();
   const { me, ensureSignedIn } = useSession();
   const [d, setD] = useState<Draft>(saved);
@@ -57,6 +83,9 @@ export function CreateForm() {
   const [launch, setLaunch] = useState<{ id: string; ticker: string; img: string; pays: string } | null>(null);
   // Why the last launch didn't happen, kept under the button: a toast alone is gone in 2.6 s.
   const [launchError, setLaunchError] = useState<string | null>(null);
+  // Creator-paid launches (Config.launchFee): the fee in SOL, and whether the wallet is sending it now.
+  const feeSol = config.launchFee.to ? config.launchFee.amount.ui : 0;
+  const [paying, setPaying] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -106,7 +135,19 @@ export function CreateForm() {
 
   const ready = !stale && ct.s === "ok" && cn.s === "ok" && cx.s !== "fail" && ci.s === "ok";
   const hint =
-    ct.s !== "ok" ? "Fix the ticker to continue." : cn.s !== "ok" ? "Fix the name to continue." : ci.s !== "ok" ? "Add a picture to continue." : cx.s === "fail" ? "Fix the X account to continue." : "Ready. Launching takes a few seconds.";
+    ct.s !== "ok"
+      ? "Fix the ticker to continue."
+      : cn.s !== "ok"
+        ? "Fix the name to continue."
+        : ci.s !== "ok"
+          ? "Add a picture to continue."
+          : cx.s === "fail"
+            ? "Fix the X account to continue."
+            : paying
+              ? `Approve the ${feeSol} SOL launch fee in your wallet…`
+              : feeSol
+                ? `Ready. You'll approve the ${feeSol} SOL launch fee in your wallet.`
+                : "Ready. Launching takes a few seconds.";
 
   const t = displayTicker(d.ticker) || "TICKER";
   const previewImg = d.upload?.url ?? d.imgPreview ?? avatarDataUri(t);
@@ -117,18 +158,64 @@ export function CreateForm() {
     // Demo mode keeps the prototype's flow (launch without a wallet). Live mode needs a signed-in wallet.
     if (!publicKey && !config.demo) return setVisible(true);
     setLaunchError(null);
+    const wallet = publicKey?.toBase58() ?? "";
     try {
       if (!config.demo && !(await ensureSignedIn())) return;
-      const { launchId } = await api<{ launchId: string }>("/api/launch", {
-        method: "POST",
-        body: JSON.stringify({ name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, x: d.x, telegram: d.tg, website: d.web }),
-      });
-      setLaunch({ id: launchId, ticker: t, img: d.upload.url, pays: d.pays });
+      const body = { name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, x: d.x, telegram: d.tg, website: d.web };
+      // With a payment, the API reads it from the chain, and its RPC can be a few seconds behind the wallet's.
+      const post = async (feeSig?: string) => {
+        for (let i = 0; ; i++) {
+          try {
+            return await api<{ launchId: string }>("/api/launch", { method: "POST", body: JSON.stringify({ ...body, feeSig }) });
+          } catch (e) {
+            if (feeSig && i < 5 && errCode(e) === "FEE_NOT_FOUND") await new Promise((r) => setTimeout(r, 2000));
+            else throw e;
+          }
+        }
+      };
+      let res: { launchId: string } | null = null;
+      const held = heldFee.get(wallet);
+      if (held) {
+        try {
+          res = await post(held);
+        } catch (e) {
+          // A held payment that can't pay any more (used, too old, never landed) is dropped.
+          if (!["FEE_USED", "BAD_FEE", "FEE_NOT_FOUND"].includes(errCode(e) ?? "")) throw e;
+          heldFee.set(wallet, null);
+        }
+      }
+      if (!res) {
+        try {
+          res = await post();
+        } catch (e) {
+          if (!(errCode(e) === "FEE_REQUIRED" && config.launchFee.to && wallet)) throw e;
+        }
+      }
+      if (!res) {
+        // A paid launch: the wallet sends the fee, then the same request carries the payment for the API
+        // to check on chain. A launch refused after that keeps the fee for the next one.
+        setPaying(true);
+        let sig: string;
+        try {
+          sig = await payLaunchFee(walletCtx, connection, config.launchFee.to!, BigInt(config.launchFee.amount.raw));
+        } catch (e) {
+          if (e instanceof SentUnconfirmed) heldFee.set(wallet, e.signature);
+          throw e;
+        } finally {
+          setPaying(false);
+        }
+        heldFee.set(wallet, sig);
+        res = await post(sig);
+      }
+      heldFee.set(wallet, null);
+      setLaunch({ id: res.launchId, ticker: t, img: d.upload.url, pays: d.pays });
     } catch (err) {
+      if (errCode(err) === "FEE_USED" || errCode(err) === "BAD_FEE") heldFee.set(wallet, null);
       const m = errorText(err, "The launch failed. Try again.");
       if (m) {
-        toast(m);
-        setLaunchError(m);
+        const kept = heldFee.get(wallet) ? " Your launch fee is kept for your next launch." : "";
+        toast(m + kept);
+        setLaunchError(m + kept);
       }
     }
   };
@@ -297,11 +384,11 @@ export function CreateForm() {
             </ul>
           </div>
           <div className="panel">
-            <div className="sumline"><span>Cost to launch</span><b>Free</b></div>
+            <div className="sumline"><span>Cost to launch</span><b>{feeSol ? `${feeSol} SOL` : "Free"}</b></div>
             <div className="sumline"><span>Your share of every trade</span><b>{bpsLabel(config.fees.creatorBps)}</b></div>
             <div className="sumline"><span>Holders&apos; share</span><b id="holdShare">{bpsLabel(config.fees.holdersBps)} in {d.pays}</b></div>
             <div className="sumline"><span>Dev buy</span><b>None, for anyone</b></div>
-            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
+            <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || paying || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
               Launch coin
             </button>
             <p className="note" id="launchHint" style={{ textAlign: "center", color: launchError ? "var(--red)" : undefined }}>

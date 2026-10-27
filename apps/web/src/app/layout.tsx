@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.WEB_ORIGIN || "http://localhost:3000"),
   title: "uspad: memecoins that pay dividends in real stocks",
-  description: "Launch a memecoin for free. Every trade buys a real stock token and splits it between holders, every hour.",
+  description: "Launch a memecoin on Solana. Every trade buys a real stock token and splits it between holders, every hour.",
   // Link cards on X credit the official account.
   twitter: { card: "summary_large_image", site: "@uspadfun", creator: "@uspadfun" },
 };

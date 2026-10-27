@@ -20,6 +20,9 @@
 #                                 admins only, for the owner's test launch.
 #   go-live.sh launches open|pause [reason]
 #                                 opens launches to everyone, or pauses them (admins can still launch).
+#   go-live.sh launch-fee <SOL>   what a creator pays per launch (e.g. 0.02), to the operations wallet
+#                                 that pays the create. With a fee there is no daily limit per wallet
+#                                 and a failed launch keeps its fee as credit. 0 = free launches.
 #   go-live.sh payouts check      the dry-run's last hours: runs, vault, rounds, holders (RUNBOOK
 #                                 "First dry-run hours").
 #   I_HAVE_OWNER_APPROVAL=yes go-live.sh payouts live
@@ -638,6 +641,31 @@ launches() {
   say "Setelan launch: $(launch_setting)"
 }
 
+# Creator-paid launches (owner decision 2026-10-27, apps/api/src/live/launchfee.ts): before each launch
+# the creator's wallet sends LAUNCH_FEE_LAMPORTS to the operations wallet, which pays the create.
+launch_fee() {
+  [[ ${1:-} =~ ^[0-9]+(\.[0-9]{1,9})?$ ]] || die "pakai: go-live.sh launch-fee <SOL>, misalnya 0.02 (0 = gratis)"
+  [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
+  [ -f "$CUR/apps/api/src/live/launchfee.ts" ] || die "kode di server masih lama: jalankan 'go-live.sh update' dulu"
+  local int=${1%%.*} frac="" lamports wallet
+  [[ $1 == *.* ]] && frac=${1#*.}
+  frac=$(printf '%-9s' "$frac" | tr ' ' 0)
+  lamports=$((10#$int * 1000000000 + 10#$frac))
+  [ "$lamports" -le 1000000000 ] || die "lebih dari 1 SOL per launch: salah ketik? (contoh: 0.02)"
+  wallet=$(pubkey $KEYS/fee-claimer.json)
+  set_env $ENV_DIR/api.env LAUNCH_FEE_LAMPORTS "$lamports"
+  set_env $ENV_DIR/api.env LAUNCH_FEE_WALLET "$wallet"
+  pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+  sleep 3
+  if [ "$lamports" -gt 0 ]; then
+    [ "$lamports" -ge 15000000 ] || note "Peringatan: satu create memakan sekitar 0,012 SOL dari wallet operasional; fee ini tidak menutupnya."
+    note "Biaya launch: $1 SOL per koin, dibayar wallet creator ke $wallet. Tanpa batas harian per wallet."
+  else
+    note "Launch gratis lagi (dibayar wallet operasional), dengan batas harian per wallet."
+  fi
+  note "config: $(curl -fsS https://$DOMAIN/api/config 2>/dev/null | jq -c .launchFee 2>/dev/null || echo '?')"
+}
+
 # --------------------------------------------------------------------------------------------------
 # Dividends: dry-run computes every round without signing; live claims, swaps and sends (RUNBOOK
 # "Switching dry-run to live").
@@ -732,8 +760,9 @@ case "${1:-}" in
   cp-creator) cp_creator "${2:-}" ;;
   open-launches) open_launches ;;
   launches) launches "${2:-}" "${3:-}" ;;
+  launch-fee) launch_fee "${2:-}" ;;
   payouts) payouts "${2:-}" ;;
   token-ca) token_ca "${2:-}" ;;
   status) status ;;
-  *) sed -n '2,34p' "$0"; exit 1 ;;
+  *) sed -n '2,37p' "$0"; exit 1 ;;
 esac
