@@ -20,6 +20,11 @@
 #                                 admins only, for the owner's test launch.
 #   go-live.sh launches open|pause [reason]
 #                                 opens launches to everyone, or pauses them (admins can still launch).
+#   go-live.sh payouts check      the dry-run's last hours: runs, vault, rounds, holders (RUNBOOK
+#                                 "First dry-run hours").
+#   I_HAVE_OWNER_APPROVAL=yes go-live.sh payouts live
+#                                 💰 real dividends: claims the fee vault, buys the stocks, sends them.
+#   go-live.sh payouts dry-run    back to computing without sending.
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
 #   go-live.sh status             apps, health, wallet addresses and balances.
 #
@@ -632,6 +637,56 @@ launches() {
 }
 
 # --------------------------------------------------------------------------------------------------
+# Dividends: dry-run computes every round without signing; live claims, swaps and sends (RUNBOOK
+# "Switching dry-run to live").
+dbq() { sudo -u postgres psql -X -d divvy "$@"; }
+payouts() {
+  local log=/var/log/divvy/worker/worker.out.log
+  case "${1:-}" in
+    check)
+      say "Worker"
+      grep '"msg":"worker started"' $log | tail -n 1 | jq -c '{t, mainnetEnabled, payoutsDryRun, delivery}'
+      say "Putaran terakhir (setiap 10 menit)"
+      grep -E '"msg":"payouts: (run|failed)"' $log | tail -n 4 | jq -c '{t, hour, dryRun, claimedLamports, rounds, error}'
+      say "Vault fee platform (dry-run: klaim simulasi vs saldo asli)"
+      grep '"msg":"payouts: dry-run vault claim"' $log | tail -n 3 | jq -c '{hour, indexed, vaultBalance}'
+      say "Round per koin, 3 jam terakhir"
+      dbq -c "SELECT to_char(r.hour, 'MM-DD HH24:MI') AS hour, c.ticker, r.\"dryRun\" AS dry, r.status, r.step,
+                     round(r.\"solIn\" / 1e9, 6) AS sol_in, round(r.\"carriedOutLamports\" / 1e9, 6) AS carried_sol,
+                     r.\"holdersPaid\" AS holders, left(r.error, 60) AS error
+              FROM \"PayoutRound\" r JOIN \"Coin\" c ON c.id = r.\"coinId\"
+              WHERE r.hour >= date_trunc('hour', now() AT TIME ZONE 'UTC') - interval '3 hours'
+              ORDER BY r.hour DESC, c.ticker"
+      say "Holder di snapshot terakhir (kosong = berhak dividen)"
+      dbq -c "SELECT c.ticker, coalesce(h.\"excludedReason\"::text, '') AS excluded, count(*)
+              FROM \"HolderBalance\" h JOIN \"Coin\" c ON c.id = h.\"coinId\"
+              WHERE h.\"snapshotHour\" = (SELECT max(\"snapshotHour\") FROM \"HolderBalance\") GROUP BY 1, 2 ORDER BY 1, 2"
+      ;;
+    live)
+      load_secrets
+      [ "${I_HAVE_OWNER_APPROVAL:-}" = yes ] || die "butuh I_HAVE_OWNER_APPROVAL=yes: dividen live membelanjakan isi vault (CLAUDE.md rule 3)"
+      [ "$(env_get $ENV_DIR/worker.env DIVVY_MAINNET_ENABLED)" = true ] || die "mainnet gate masih mati: jalankan 'go-live.sh open-launches' dulu"
+      local m
+      m=$((10#$(date -u +%M)))
+      { [ "$m" -ge 20 ] && [ "$m" -le 50 ]; } || die "jalankan antara menit 20 dan 50 (sekarang menit $m), supaya tidak bertabrakan dengan putaran menit 0"
+      for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do set_env "$f" PAYOUTS_DRY_RUN false; done
+      pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+      restart_worker
+      sleep 8
+      status
+      note "Putaran live pertama: menit 0 berikutnya. Setelah itu: go-live.sh payouts check"
+      ;;
+    dry-run)
+      for f in $ENV_DIR/api.env $ENV_DIR/worker.env; do set_env "$f" PAYOUTS_DRY_RUN true; done
+      pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+      restart_worker
+      note "Dividen kembali ke dry-run"
+      ;;
+    *) die "pakai: go-live.sh payouts check | live | dry-run" ;;
+  esac
+}
+
+# --------------------------------------------------------------------------------------------------
 status() {
   load_secrets
   say "Aplikasi"
@@ -666,6 +721,7 @@ case "${1:-}" in
   cp-creator) cp_creator "${2:-}" ;;
   open-launches) open_launches ;;
   launches) launches "${2:-}" "${3:-}" ;;
+  payouts) payouts "${2:-}" ;;
   status) status ;;
-  *) sed -n '2,27p' "$0"; exit 1 ;;
+  *) sed -n '2,32p' "$0"; exit 1 ;;
 esac

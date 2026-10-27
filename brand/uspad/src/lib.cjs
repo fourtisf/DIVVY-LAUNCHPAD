@@ -57,4 +57,49 @@ async function render(dir, file, width, height, css, html) {
   await b.close();
 }
 
-module.exports = { sized, stockLogo, guilloche, orbitScene, baseCss, render };
+/** Scene fades and entrances for the videos; renderVideo seeks them frame by frame. */
+const motionCss = `.scene{position:absolute;inset:0;opacity:0;animation:sc var(--d) linear var(--s) both}
+.scene.last{animation-name:scLast}
+@keyframes sc{0%{opacity:0;transform:scale(1.03)}6%{opacity:1;transform:none}94%{opacity:1;transform:none}100%{opacity:0;transform:scale(.99)}}
+@keyframes scLast{0%{opacity:0;transform:scale(1.03)}8%{opacity:1;transform:none}100%{opacity:1;transform:none}}
+.in{animation:rise .8s cubic-bezier(.16,1,.3,1) calc(var(--s) + var(--o,0s)) both}
+@keyframes rise{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}
+.pop{animation:pop .7s cubic-bezier(.34,1.56,.64,1) calc(var(--s) + var(--o,0s)) both}
+@keyframes pop{from{opacity:0;transform:translate(-50%,-50%) scale(.3)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}`;
+
+/**
+ * Renders `html` (width x height, CSS animations timed from 0 s) to an H.264 MP4 at `out`. Every
+ * animation is paused and seeked with the Web Animations API, so each frame is exact however slow the
+ * screenshot. With `stills` (a folder and a list of times), it saves those frames as PNGs instead.
+ */
+async function renderVideo({ out, width, height, fps, duration, css, html, stills }) {
+  const { chromium } = require("playwright");
+  const { spawn } = require("child_process");
+  const b = await chromium.launch();
+  const page = await b.newPage({ viewport: { width, height } });
+  await page.setContent(`<!doctype html><meta charset="utf-8"><style>${baseCss}${motionCss}${css}</style>${html}`);
+  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
+  await page.evaluate(() => document.getAnimations().forEach((a) => a.pause()));
+  const seek = (ms) => page.evaluate((t) => document.getAnimations().forEach((a) => (a.currentTime = t)), ms);
+  if (stills) {
+    for (const t of stills.times) {
+      await seek(t * 1000);
+      await page.screenshot({ path: path.join(stills.dir, `t${String(t).replace(".", "_")}.png`) });
+    }
+    return b.close();
+  }
+  const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps), "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out], { stdio: ["pipe", "inherit", "inherit"] });
+  const frames = Math.round(duration * fps);
+  for (let f = 0; f < frames; f++) {
+    await seek((f / fps) * 1000);
+    const png = await page.screenshot({ type: "png" });
+    if (!ff.stdin.write(png)) await new Promise((r) => ff.stdin.once("drain", r));
+    if (f % (fps * 5) === 0) process.stdout.write(`${(f / fps).toFixed(0)}s `);
+  }
+  ff.stdin.end();
+  await new Promise((r, j) => ff.on("close", (c) => (c === 0 ? r() : j(new Error(`ffmpeg exited ${c}`)))));
+  await b.close();
+}
+
+module.exports = { sized, stockLogo, guilloche, orbitScene, baseCss, motionCss, render, renderVideo };

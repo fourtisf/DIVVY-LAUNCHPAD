@@ -17,3 +17,5 @@ dump.rdb
 # Playwright
 playwright-report/
 test-results/
+
+__pycache__/
