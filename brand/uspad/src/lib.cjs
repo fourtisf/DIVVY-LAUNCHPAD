@@ -71,35 +71,72 @@ const motionCss = `.scene{position:absolute;inset:0;opacity:0;animation:sc var(-
  * Renders `html` (width x height, CSS animations timed from 0 s) to an H.264 MP4 at `out`. Every
  * animation is paused and seeked with the Web Animations API, so each frame is exact however slow the
  * screenshot. With `stills` (a folder and a list of times), it saves those frames as PNGs instead.
+ *
+ * For WebGL: `args` go to Chromium, `prepare(page)` runs once the page is set up (e.g. to start a
+ * three.js scene), and `frameHook` names a window function called with each frame's time in seconds
+ * after the seek. `workers` render that many slices of the video at once, joined without re-encoding.
  */
-async function renderVideo({ out, width, height, fps, duration, css, html, stills }) {
+async function renderVideo({ out, width, height, fps, duration, css, html, stills, args = [], prepare, frameHook, workers = 1, crf = 18 }) {
   const { chromium } = require("playwright");
-  const { spawn } = require("child_process");
-  const b = await chromium.launch();
-  const page = await b.newPage({ viewport: { width, height } });
-  await page.setContent(`<!doctype html><meta charset="utf-8"><style>${baseCss}${motionCss}${css}</style>${html}`);
-  await page.evaluate(() => document.fonts.ready);
-  await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
-  await page.evaluate(() => document.getAnimations().forEach((a) => a.pause()));
-  const seek = (ms) => page.evaluate((t) => document.getAnimations().forEach((a) => (a.currentTime = t)), ms);
+  const { spawn, spawnSync } = require("child_process");
+  const open = async () => {
+    const b = await chromium.launch({ args });
+    const page = await b.newPage({ viewport: { width, height } });
+    await page.setContent(`<!doctype html><meta charset="utf-8"><style>${baseCss}${motionCss}${css}</style>${html}`);
+    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
+    if (prepare) await prepare(page);
+    await page.evaluate(() => document.getAnimations().forEach((a) => a.pause()));
+    const seek = (ms) =>
+      page.evaluate(
+        ([t, hook]) => {
+          document.getAnimations().forEach((a) => (a.currentTime = t));
+          if (hook) window[hook](t / 1000);
+        },
+        [ms, frameHook || null],
+      );
+    return { b, page, seek };
+  };
   if (stills) {
+    const { b, page, seek } = await open();
     for (const t of stills.times) {
       await seek(t * 1000);
       await page.screenshot({ path: path.join(stills.dir, `t${String(t).replace(".", "_")}.png`) });
     }
     return b.close();
   }
-  const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps), "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out], { stdio: ["pipe", "inherit", "inherit"] });
   const frames = Math.round(duration * fps);
-  for (let f = 0; f < frames; f++) {
-    await seek((f / fps) * 1000);
-    const png = await page.screenshot({ type: "png" });
-    if (!ff.stdin.write(png)) await new Promise((r) => ff.stdin.once("drain", r));
-    if (f % (fps * 5) === 0) process.stdout.write(`${(f / fps).toFixed(0)}s `);
-  }
-  ff.stdin.end();
-  await new Promise((r, j) => ff.on("close", (c) => (c === 0 ? r() : j(new Error(`ffmpeg exited ${c}`)))));
-  await b.close();
+  const n = Math.max(1, workers);
+  const per = Math.ceil(frames / n);
+  const parts = Array.from({ length: n }, (_, w) => (n === 1 ? out : `${out}.part${w}.mp4`));
+  let done = 0;
+  await Promise.all(
+    parts.map(async (part, w) => {
+      const from = w * per;
+      const to = Math.min(frames, from + per);
+      const { b, page, seek } = await open();
+      const ff = spawn(
+        "ffmpeg",
+        ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps), "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", String(crf), "-pix_fmt", "yuv420p", "-g", String(fps * 2), "-movflags", "+faststart", part],
+        { stdio: ["pipe", "inherit", "inherit"] },
+      );
+      for (let f = from; f < to; f++) {
+        await seek((f / fps) * 1000);
+        const png = await page.screenshot({ type: "png" });
+        if (!ff.stdin.write(png)) await new Promise((r) => ff.stdin.once("drain", r));
+        if (++done % (fps * 5) === 0) process.stdout.write(`${(done / fps).toFixed(0)}s `);
+      }
+      ff.stdin.end();
+      await new Promise((r, j) => ff.on("close", (c) => (c === 0 ? r() : j(new Error(`ffmpeg exited ${c}`)))));
+      await b.close();
+    }),
+  );
+  if (n === 1) return;
+  const list = `${out}.parts.txt`;
+  fs.writeFileSync(list, parts.map((p) => `file '${path.resolve(p).replace(/'/g, "'\\''")}'`).join("\n"));
+  const r = spawnSync("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", out], { stdio: "inherit" });
+  [list, ...parts].forEach((p) => fs.rmSync(p, { force: true }));
+  if (r.status !== 0) throw new Error(`ffmpeg concat exited ${r.status}`);
 }
 
 module.exports = { sized, stockLogo, guilloche, orbitScene, baseCss, motionCss, render, renderVideo };

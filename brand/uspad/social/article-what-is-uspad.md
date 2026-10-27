@@ -16,8 +16,8 @@ Memecoins are fun to trade, but holding one pays nothing. On uspad, every trade 
 ## 1. Launching a coin
 
 - Pick a name, a ticker, a picture, and the stock your holders will earn: NVDAx, SPYx, TSLAx, AAPLx, QQQx, GOOGLx, AMZNx, MSTRx, COINx, HOODx or CRCLx. The stock is fixed once the coin is live.
-- Copies are refused. A ticker has to be new on uspad, with case, spaces, lookalike letters and leetspeak folded together. Recycled pictures and a second coin from the same X account are turned away too.
-- uspad's launcher creates the coin on a Raydium LaunchLab bonding curve, in a private Jito bundle. Its address isn't public before it lands, so nobody can buy in the block it's created in. There is no dev buy and no team allocation: the whole supply goes to the curve and the pool.
+- Any name and any ticker can be used, so the contract address is what tells two coins apart. Every coin page shows it: check it against the address the project posts.
+- Your wallet signs and pays for the create, so the coin's creator on chain is you. uspad sends it to a Raydium LaunchLab bonding curve in a private Jito bundle. Its address isn't public before it lands, so nobody can buy in the block it's created in. There is no dev buy and no team allocation: the whole supply goes to the curve and the pool.
 
 ## 2. Where the trading fee goes
 
@@ -53,7 +53,7 @@ Per $1,000 traded after graduation: holders $1.72, creator $0.52, uspad $0.34, R
 
 ## Why it's built this way
 
-- Fair launches: private bundles, no dev buy, no copycats.
+- Fair launches: private bundles, no dev buy.
 - Yield in real assets: dividends are tokenized stocks, not points.
 - Liquidity that can't be pulled.
 - Everything on chain and checkable: fees, payouts and receipts.

@@ -43,7 +43,7 @@ below matches the site (How it works) and docs/VERIFIED.md.
 >
 > Every coin is created in a private Jito bundle, so nobody can snipe it. No dev buy, no team allocation.
 >
-> Copycat tickers, lookalike names and recycled pictures are refused.
+> Your own wallet signs the create, so the coin's creator on chain is you.
 
 **4/**
 > At 85 SOL a coin graduates to a Raydium pool.

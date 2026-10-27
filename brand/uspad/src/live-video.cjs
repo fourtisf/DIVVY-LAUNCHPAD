@@ -101,7 +101,8 @@ const css = `
 .cap.a{animation:capA var(--d) linear var(--s) both}.cap.b{animation:capB var(--d) linear var(--s) both}
 @keyframes capA{0%,6%{opacity:0;transform:translateY(20px)}12%,50%{opacity:1;transform:none}56%,100%{opacity:0;transform:translateY(-14px)}}
 @keyframes capB{0%,54%{opacity:0;transform:translateY(20px)}62%,100%{opacity:1;transform:none}}
-@keyframes camCreate{from{transform:translate(0,0) scale(1)}to{transform:translate(-90px,-70px) scale(1.12)}}
+/* camCreate: the form, then the dividend picker; never the demo's "Cost to launch" box (bottom right). */
+@keyframes camCreate{from{transform:translate(-104px,0) scale(1.2)}to{transform:translate(-124px,-364px) scale(1.8)}}
 @keyframes camLaunched{0%,15%{transform:translate(0,0) scale(1)}70%,100%{transform:translate(-434px,-271px) scale(1.7)}}
 @keyframes camCoin{0%,30%{transform:translate(0,0) scale(1)}45%,58%{transform:translate(-53px,-125px) scale(1.5)}72%,100%{transform:translate(-780px,-143px) scale(1.6)}}
 @keyframes camPayouts{from{transform:translate(0,0) scale(1)}to{transform:translate(-60px,-110px) scale(1.18)}}
@@ -137,7 +138,7 @@ const html = `<div class="stage">
     `<div style="position:absolute;left:110px;top:250px;width:640px">
        <p class="kicker in" style="${at(0.1)}">Launch</p>
        <p class="h2 in" style="${at(0.2)}">Launch a coin<br>in seconds.</p>
-       ${points(["Pick the stock your holders earn", "Copycats and lookalikes refused", "A private bundle: no snipers", "No dev buy, no team tokens"], 0.7)}
+       ${points(["Pick the stock your holders earn", "Your wallet signs the create", "A private bundle: no snipers", "No dev buy, no team tokens"], 0.7)}
      </div>
      ${browser({ x: 800, y: 175, w: 1040, url: "uspad.fun/create", img: shot("create"), cam: "camCreate" })}`,
   )}

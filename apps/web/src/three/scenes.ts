@@ -531,3 +531,6 @@ export async function coinScene(host: HTMLElement, src: string, back: StockArt |
   };
   return () => dispose(S);
 }
+
+/** The coin's parts, for the brand videos (brand/uspad/src/coins3d.ts), which render these coins frame by frame. */
+export { buildCoin, logoFace, makeEnv, softDot, stockFace };
