@@ -19,3 +19,7 @@ playwright-report/
 test-results/
 
 __pycache__/
+
+# renderVideo segments while a video renders (brand/uspad/src/lib.cjs), joined and deleted at the end
+*.mp4.part*.mp4
+*.mp4.parts.txt
