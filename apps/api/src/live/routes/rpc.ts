@@ -43,6 +43,7 @@ export async function liveRpcRoutes(app: FastifyInstance, { d }: { d: LiveDeps }
     } catch {
       return sendError(reply, 502, "RPC_UNAVAILABLE", "Solana's RPC didn't answer. Try again.");
     }
+    req.log.info({ rpcMethod: body.data.method, status: res.status }, "rpc relay");
     return reply
       .code(res.status)
       .header("cache-control", "no-store")

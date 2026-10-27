@@ -29,6 +29,8 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   const [amt, setAmt] = useState(side === "buy" ? "0.5" : sellPreset);
   const [bal, setBal] = useState<{ sol: number | null; tokens: number | null; tokensRaw: bigint | null }>({ sol: null, tokens: null, tokensRaw: null });
   const [busy, setBusy] = useState(false);
+  // What a trade in progress is waiting for, on the button: the wallet's approval, then the network.
+  const [stage, setStage] = useState<"wallet" | "confirming">("wallet");
   const [slippageBps, setSlippageBps] = useState(100);
   const wallet = publicKey?.toBase58() ?? null;
   const solUsd = config.quote.priceUsd;
@@ -67,6 +69,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   const trade = async () => {
     if (!wallet) return setVisible(true);
     setBusy(true);
+    setStage("wallet");
     try {
       const amountIn = toBaseUnits(amt, side === "buy" ? 9 : 6);
       if (!amountIn) return toast("Enter an amount like 0.5");
@@ -80,7 +83,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       const shownEstimate = side === "buy" ? ((v * solUsd * 0.99) / price) * (1 - Math.min(0.25, v / 40)) : (v * price * 0.99) / solUsd;
       if (r.expectedOut.ui < shownEstimate * 0.85 && !window.confirm(`You'd get about ${num(r.expectedOut.ui)} ${unit} (at least ${num(r.minOut.ui)}), less than shown. Continue?`)) return;
       if (r.priceImpactBps > 1500 && !window.confirm(`This trade moves the price by about ${(r.priceImpactBps / 100).toFixed(1)}%. Continue?`)) return;
-      await signAndSend(walletCtx, connection, r.tx, { network: config.network, kind: "trade", coinMint: coin.mint });
+      await signAndSend(walletCtx, connection, r.tx, { network: config.network, kind: "trade", coinMint: coin.mint }, () => setStage("confirming"));
       toast(side === "buy" ? `Bought ${num(r.expectedOut.ui)} $${coin.ticker}` : `Sold for ${sol(r.expectedOut.ui)}`);
     } catch (e) {
       // Errors after sending come back with their own wording; this one is only for before.
@@ -153,7 +156,15 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
         disabled={(!!wallet && !(v > 0)) || busy}
         onClick={trade}
       >
-        {wallet ? (side === "buy" ? `Buy $${coin.ticker}` : `Sell $${coin.ticker}`) : "Connect wallet to trade"}
+        {!wallet
+          ? "Connect wallet to trade"
+          : busy
+            ? stage === "confirming"
+              ? "Confirming on Solana…"
+              : "Approve in your wallet…"
+            : side === "buy"
+              ? `Buy $${coin.ticker}`
+              : `Sell $${coin.ticker}`}
       </button>
       {graduated ? (
         <p className="note">Graduated. Trades go to the Raydium pool.</p>

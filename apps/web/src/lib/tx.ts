@@ -22,6 +22,8 @@ export async function signAndSend(
   connection: Connection,
   base64: string,
   check: { network: "mainnet-beta" | "devnet"; kind: TxKind; coinMint?: string },
+  /** Called once the wallet has signed and the transaction is out, before confirmation. */
+  onSent?: (signature: string) => void,
 ): Promise<string> {
   if (!wallet.publicKey) throw new Error("Connect a wallet first");
   const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
@@ -36,6 +38,7 @@ export async function signAndSend(
   } else {
     sig = await wallet.sendTransaction(tx, connection, { maxRetries: 3 });
   }
+  onSent?.(sig);
   // From here on the transaction is out: never tell the user "nothing was spent".
   // Confirmation by polling, not a websocket subscription: the browser's RPC is uspad's HTTP relay.
   try {

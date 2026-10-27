@@ -58,7 +58,16 @@ export function CoinView({ coin, initialMeter, initialPayouts }: { coin: CoinDet
   const [tf, setTf] = useState<(typeof TF_LABELS)[number]>("All");
   const cq = candleQuery(tf, ageMin);
   const { data: candles } = useSWR<CandleList>(`/api/coins/${m}/candles` + qs({ tf: cq.tf, unit: "mcap", limit: cq.limit }));
-  const chartData = useMemo(() => (candles?.items ?? []).map((c) => ({ t: c.t, v: c.c })), [candles]);
+  // The line needs two points, and a new coin has one candle or none: it starts at launch, at the first
+  // candle's open (or today's market cap with no trades yet), and ends now.
+  const chartData = useMemo(() => {
+    const pts = (candles?.items ?? []).map((c) => ({ t: c.t, v: c.c }));
+    const launched = Math.floor(new Date(coin.createdAt).getTime() / 1000);
+    const first = candles?.items[0];
+    if (!first || first.t > launched) pts.unshift({ t: launched, v: first?.o ?? coin.marketCapUsd });
+    if (pts.length < 2) pts.push({ t: Math.floor(Date.now() / 1000), v: coin.marketCapUsd });
+    return pts;
+  }, [candles, coin.createdAt, coin.marketCapUsd]);
 
   const [tab, setTab] = useState<"payouts" | "holders" | "trades">("payouts");
   const { data: payouts } = useSWR<List<PayoutRound>>(`/api/coins/${m}/payouts?limit=10`, { fallbackData: initialPayouts });
