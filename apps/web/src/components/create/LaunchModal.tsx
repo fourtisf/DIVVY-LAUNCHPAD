@@ -68,9 +68,8 @@ export function LaunchModal({
         if (i < 0) return onDone(s);
         setK(i);
         if (i >= STEPS.length) {
-          const coin = await api<CoinDetail>(
-            `/api/coins/${encodeURIComponent(s.ticker)}`,
-          ).catch(() => null);
+          // By mint: coins can share a ticker.
+          const coin = s.mint ? await api<CoinDetail>(`/api/coins/${s.mint}`).catch(() => null) : null;
           if (!stop)
             setLive({ status: s, mcapUsd: coin?.marketCapUsd ?? null });
           return;

@@ -94,7 +94,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       for (const ms of [2_500, 7_000]) {
         setTimeout(() => {
           setBalTick((t) => t + 1);
-          void mutate((k) => typeof k === "string" && (k.startsWith(`/api/coins/${coin.mint}`) || k === `/api/coins/${encodeURIComponent(coin.ticker)}`));
+          void mutate((k) => typeof k === "string" && k.startsWith(`/api/coins/${coin.mint}`));
         }, ms);
       }
     } catch (e) {

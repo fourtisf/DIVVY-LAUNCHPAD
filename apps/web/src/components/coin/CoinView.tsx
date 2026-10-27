@@ -49,7 +49,7 @@ const defaultInterval = (ageMin: number): CandleTf => (ageMin <= 360 ? "1m" : ag
 const LIVE_MS = 8_000;
 
 export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { coin: CoinDetail; initialMeter: Meter; initialPayouts: List<PayoutRound> }) {
-  const { data: coin = initialCoin } = useSWR<CoinDetail>(`/api/coins/${encodeURIComponent(initialCoin.ticker)}`, { fallbackData: initialCoin, refreshInterval: LIVE_MS });
+  const { data: coin = initialCoin } = useSWR<CoinDetail>(`/api/coins/${initialCoin.mint}`, { fallbackData: initialCoin, refreshInterval: LIVE_MS });
   const config = useConfig();
   const assets = useAssets();
   const toast = useToast();
