@@ -27,7 +27,7 @@ step 3, live in one private bundle (the coin page, its launch card and the coin 
 coins drop in: its holders get paid in US stocks, every hour → creators earn 0.15% of every trade on the
 curve, and the 1.25% split → "Launch yours." uspad.fun.
 
-## Post (under 280 characters)
+## Post (under 280 characters as X counts them)
 
 ```text
 uspad.fun is live. 🟢
@@ -42,17 +42,45 @@ Its holders get paid in US stocks, every hour. Creators earn 0.15% of every trad
 Launch yours → uspad.fun
 ```
 
+## Reply under it
+
+```text
+Every trade pays 1.25%:
+
+• 0.50% to holders, paid in stock
+• 0.35% to uspad
+• 0.25% to Raydium
+• 0.15% to the creator
+
+Hold $10 or more of a coin and its stock lands in your wallet every hour.
+
+Tokenized stocks aren't available to US persons. Not financial advice.
+```
+
 ## Versi Indonesia
 
 ```text
 uspad.fun sudah live. 🟢
 
 Siapa pun bisa launch koin:
-1. Beri nama, pilih sahamnya
+1. Beri nama, pilih saham
 2. Setujui sekali di wallet
 3. Live lewat private bundle
 
-Holder-nya dibayar saham Amerika setiap jam. Creator dapat 0,15% dari setiap trade.
+Holder-nya dibayar saham AS tiap jam. Creator dapat 0,15% dari tiap trade.
 
-Launch sekarang → uspad.fun
+Launch punyamu → uspad.fun
+```
+
+```text
+Setiap trade kena fee 1,25%:
+
+• 0,50% ke holder, dibayar dalam saham
+• 0,35% ke uspad
+• 0,25% ke Raydium
+• 0,15% ke creator
+
+Pegang $10 ke atas dari sebuah koin, sahamnya masuk ke wallet-mu setiap jam.
+
+Saham tokenisasi tidak tersedia untuk warga AS. Bukan saran keuangan.
 ```
