@@ -401,9 +401,13 @@ describe.skipIf(!run)("launch pipeline", () => {
       meta: { err: null, fee: 5000, preBalances: [], postBalances: [], loadedAddresses: { writable: [], readonly: [] }, innerInstructions: [{ index: 0, instructions: [ev(POOL_CREATE_EVENT_DISC, createBody), ev(TRADE_EVENT_DISC, body)] }] },
     } as unknown as VersionedTransactionResponse;
 
+    // A fresh indexer: the new pool isn't in its pool set yet, as for a create that lands in the tick its
+    // launch started. The creator's buy in the create must still be read the first time (audit).
     const indexer = new Indexer(deps({}));
     const touched = new Set<string>();
     await indexer.onPlatformTx("sig1", tx, touched);
+    expect(await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } })).toMatchObject({ devBuyLamports: 1_000_000_000n, devBuyTokens: 35_000_000_000_000n });
+    expect(await prisma.trade.count()).toBe(1);
     await indexer.onPlatformTx("sig1", tx, touched); // replay: no duplicates
 
     expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("indexed");

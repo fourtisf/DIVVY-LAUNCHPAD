@@ -76,7 +76,7 @@ export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats
             <Link className="btn btn-ghost btn-lg" href="/how">How it works</Link>
           </div>
           <div className="promises">
-            <Link className="tag" href="/how"><Icon name="gift" />{config.launchFee.to ? "No snipers" : "Free, no snipers"}</Link>
+            <Link className="tag" href="/how"><Icon name="gift" />{config.launchFee.to ? "Dev buys shown" : "Free, dev buys shown"}</Link>
             <Link className="tag" href="/how"><Icon name="lock" />Liquidity locked for good</Link>
             <Link className="tag" href="/how"><Icon name="shield" />No sniper in block 0</Link>
             <Link className="tag" href="/payouts"><Icon name="receipt" />Every payout on chain</Link>

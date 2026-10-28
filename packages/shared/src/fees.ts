@@ -56,10 +56,29 @@ export function splitByWeights<K extends string>(
 export const DEV_BUY_MAX_LAMPORTS = 80_000_000_000n;
 /** The least a dev buy may spend, so its fee and its tokens are never rounding dust. */
 export const DEV_BUY_MIN_LAMPORTS = 10_000_000n;
+/**
+ * What a dev buy needs on top of its SOL: the rent of the creator's account for the coin (Token-2022,
+ * kept) and of the WSOL account the buy goes through (closed again inside the create), about 0.0021 each.
+ */
+export const DEV_BUY_ACCOUNTS_LAMPORTS = 4_200_000n;
 /** The empty curve's virtual reserves: 1B supply, 793.1M sold for 85 SOL (docs/verified/launchlab.md, curve math). */
 const START_VIRTUAL_A = 1_073_025_605_596_382n;
 const START_VIRTUAL_B = 30_000_852_951n;
-const COIN_SUPPLY = 1_000_000_000_000_000n;
+/** Every uspad coin's supply in base units: 1B tokens, 6 decimals (LAUNCHLAB_DEFAULT_CURVE). */
+export const COIN_SUPPLY = 1_000_000_000_000_000n;
+
+/** A share (0..1) of a coin's supply, from base units. */
+export const supplyShare = (tokens: bigint): number => Math.min(1, Number((tokens * 1_000_000n) / COIN_SUPPLY) / 1_000_000);
+
+/** Why the API refuses a dev buy of `lamports`, or null when it takes it. */
+export function devBuyProblem(lamports: bigint): { code: "DEV_BUY_TOO_SMALL" | "DEV_BUY_TOO_BIG"; message: string } | null {
+  if (lamports > 0n && lamports < DEV_BUY_MIN_LAMPORTS) return { code: "DEV_BUY_TOO_SMALL", message: `A dev buy starts at ${Number(DEV_BUY_MIN_LAMPORTS) / 1e9} SOL` };
+  if (lamports > DEV_BUY_MAX_LAMPORTS) return { code: "DEV_BUY_TOO_BIG", message: `A dev buy can be up to ${Number(DEV_BUY_MAX_LAMPORTS) / 1e9} SOL: the curve fills at 85` };
+  return null;
+}
+
+/** The API's answer when a name leaves no room for the dev buy in the create (both modes). */
+export const DEV_BUY_TOO_LONG = "This name is too long to fit a dev buy in the create. Shorten it, or launch without a dev buy.";
 
 /**
  * About what a dev buy of `lamports` gets on the empty curve once the trade fee is taken: tokens in
@@ -69,7 +88,7 @@ export function devBuyEstimate(lamports: bigint, tradeFeeBps: number): { tokens:
   if (lamports <= 0n) return { tokens: 0n, pct: 0 };
   const net = lamports - (lamports * BigInt(tradeFeeBps) + 9_999n) / 10_000n;
   const tokens = (net * START_VIRTUAL_A) / (START_VIRTUAL_B + net);
-  return { tokens, pct: Number((tokens * 1_000_000n) / COIN_SUPPLY) / 1_000_000 };
+  return { tokens, pct: supplyShare(tokens) };
 }
 
 /** The holders' and uspad's weights in the platform fee. */

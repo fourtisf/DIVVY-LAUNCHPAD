@@ -306,7 +306,7 @@ describe.skipIf(!run)("live mode", () => {
       const devShort = await launch({ ...(await coin("Gold Fish", "GFISH")), devBuyLamports: "1000000000" });
       expect(devShort.json()).toMatchObject({
         code: "NOT_ENOUGH_SOL",
-        message: "Your wallet needs at least 1.0362 SOL to launch: the 0.02 SOL launch fee, about 0.009 SOL to create the coin plus your 1 SOL dev buy.",
+        message: "Your wallet needs at least 1.0362 SOL to launch: the 0.02 SOL launch fee, about 0.009 SOL to create the coin plus your 1 SOL dev buy with about 0.0042 SOL for its token accounts.",
       });
       balance = 2_000_000_000;
 

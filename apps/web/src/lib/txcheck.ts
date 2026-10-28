@@ -102,7 +102,8 @@ const MAX_PRIORITY_LAMPORTS = 1_000_000n;
  *
  * With `devBuyLamports` (owner decision 2026-10-28) it also holds the dev buy the creator typed, and
  * only that: exactly that much SOL wrapped into their own WSOL account, one buy of this coin for that
- * amount into their own token account, and the WSOL account closed back to them.
+ * amount into their own token account, after the create and in its pool, with no share fee to anyone,
+ * and the WSOL account closed back to them.
  */
 export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network: "mainnet-beta" | "devnet", fee: { to: string | null; lamports: bigint }, devBuyLamports = 0n): void {
   const msg = tx.message;
@@ -120,6 +121,8 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
   let tips = 0;
   let buys = 0;
   let wraps = 0;
+  // The create's own accounts: 2 global config, 3 platform config, 4 auth, 5 pool, 8 and 9 its vaults.
+  let created: { accountKeyIndexes: number[] } | null = null;
   const myWsol = wsolAta(wallet);
   const myCoin = ataOf(wallet, TOKEN_2022, mint);
   // Without a limit instruction a transaction may use up to 1.4M compute units.
@@ -135,8 +138,15 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
       continue;
     }
     if (prog === LAUNCHLAB[network] && devBuyLamports > 0n && startsWith(data, BUY_EXACT_IN)) {
-      // Accounts: 0 buyer, 5 their coin account, 6 their WSOL account, 9 the coin's mint; amount_in at 8.
+      // buy_exact_in (docs/VERIFIED.md item 29): amount_b, min_amount_a, share_fee_rate; 18 accounts
+      // without a share-fee receiver. 0 buyer, 1 auth, 2 config, 3 platform, 4 pool, 5 their coin
+      // account, 6 their WSOL account, 7 and 8 the vaults, 9 the coin's mint.
+      if (!created) throw new UnsafeTransaction("a dev buy before the coin's create");
+      const c = created;
+      const same = (i: number, j: number) => at(ix, i)?.equals(at(c, j)!) === true;
       if (buys++ || !at(ix, 0)?.equals(wallet) || !at(ix, 5)?.equals(myCoin) || !at(ix, 6)?.equals(myWsol) || !at(ix, 9)?.equals(mint)) throw new UnsafeTransaction("a dev buy for someone else or another coin");
+      if (!same(1, 4) || !same(2, 2) || !same(3, 3) || !same(4, 5) || !same(7, 8) || !same(8, 9)) throw new UnsafeTransaction("a dev buy outside the new coin's pool");
+      if (data.length !== 32 || ix.accountKeyIndexes.length !== 18 || u64(data, 24) !== 0n) throw new UnsafeTransaction("a dev buy that pays a share of it to someone else");
       if (u64(data, 8) !== devBuyLamports) throw new UnsafeTransaction("a dev buy that isn't the amount you typed");
       continue;
     }
@@ -146,6 +156,7 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
       if (!at(ix, 0)?.equals(wallet) || !at(ix, 1)?.equals(wallet)) throw new UnsafeTransaction("a coin create for someone else");
       if (!at(ix, 6)?.equals(mint)) throw new UnsafeTransaction("a coin create for another mint");
       creates++;
+      created = ix;
       continue;
     }
     if (prog === SystemProgram.programId.toBase58()) {

@@ -10,9 +10,9 @@ import {
   checkName,
   checkTicker,
   checkX,
-  DEV_BUY_MAX_LAMPORTS,
-  DEV_BUY_MIN_LAMPORTS,
+  DEV_BUY_TOO_LONG,
   devBuyEstimate,
+  devBuyProblem,
   displayTicker,
   IMAGE_MAX_BYTES,
   imageOk,
@@ -127,8 +127,8 @@ export async function createRoutes(app: FastifyInstance, { store, session }: { s
     const asset = ASSET[b.dividendAsset];
     if (!asset) return sendError(reply, 422, "ASSET_UNKNOWN", "Pick a stock from the list");
     const devBuy = BigInt(b.devBuyLamports);
-    if (devBuy > 0n && devBuy < DEV_BUY_MIN_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_SMALL", `A dev buy starts at ${Number(DEV_BUY_MIN_LAMPORTS) / 1e9} SOL`);
-    if (devBuy > DEV_BUY_MAX_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_BIG", `A dev buy can be up to ${Number(DEV_BUY_MAX_LAMPORTS) / 1e9} SOL: the curve fills at 85`);
+    const devBad = devBuyProblem(devBuy);
+    if (devBad) return sendError(reply, 422, devBad.code, devBad.message);
 
     const ticker = displayTicker(b.ticker);
     const wallet = session(req)?.wallet ?? DEMO_WALLET;
@@ -153,23 +153,24 @@ export async function createRoutes(app: FastifyInstance, { store, session }: { s
       links: { x: null, telegram: b.telegram || null, website: b.website || null },
       devBuy: devBuyEstimate(devBuy, FEES.tradeFeeBps).pct,
     };
-    // Reserve the identity now so a second launch can't race this one (unique indexes do this in Postgres).
-    store.sha256s.set(ticker, up.sha256);
-    store.phashes.set(ticker, up.phash);
-    const id = store.newId();
     // A signed-in wallet signs its coin's create, as in live mode; the demo's walletless launch doesn't.
+    // Built before anything is reserved: a name too long for the dev buy leaves nothing behind (audit).
     let sign: { creator: string; unsigned: string; signedAt: null; refused: boolean } | undefined;
     if (wallet !== DEMO_WALLET) {
       let c: ReturnType<typeof mockCreate>;
       try {
         c = mockCreate(new PublicKey(wallet), ticker, coin.name, devBuy);
       } catch (e) {
-        if (e instanceof CreateTooLargeError) return sendError(reply, 422, "DEV_BUY_TOO_LONG", "This name is too long to fit a dev buy in the create. Shorten it, or launch without a dev buy.");
+        if (e instanceof CreateTooLargeError) return sendError(reply, 422, "DEV_BUY_TOO_LONG", DEV_BUY_TOO_LONG);
         throw e;
       }
       coin.mint = c.mint;
       sign = { creator: wallet, unsigned: c.unsigned, signedAt: null, refused: false };
     }
+    // Reserve the identity now so a second launch can't race this one (unique indexes do this in Postgres).
+    store.sha256s.set(ticker, up.sha256);
+    store.phashes.set(ticker, up.phash);
+    const id = store.newId();
     store.launches.set(id, { id, startedAt: Date.now(), ticker, coin, indexed: false, sign });
     return reply.code(201).send({ launchId: id });
   });

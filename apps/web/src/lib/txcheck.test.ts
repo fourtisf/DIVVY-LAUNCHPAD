@@ -156,9 +156,11 @@ describe("checkCreate with a dev buy (owner decision 2026-10-28)", () => {
   const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
   const ata22 = (owner: PublicKey, m: PublicKey) => PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_2022.toBuffer(), m.toBuffer()], ATA)[0];
   const meta = (pubkey: PublicKey, isSigner = false, isWritable = false) => ({ pubkey, isSigner, isWritable });
+  // The create's accounts the buy shares: 2 config, 3 platform, 4 auth, 5 pool, 8 and 9 the vaults.
+  const [config, platform, auth, pool, vaultA, vaultB] = Array.from({ length: 6 }, () => Keypair.generate().publicKey);
   const create = new TransactionInstruction({
     programId: LAUNCHLAB,
-    keys: [me, me, ...Array.from({ length: 4 }, () => Keypair.generate().publicKey), mint].map((k, i) => meta(k, i === 0 || i === 6, i === 0 || i >= 5)),
+    keys: [me, me, config!, platform!, auth!, pool!, mint, WSOL, vaultA!, vaultB!].map((k, i) => meta(k, i === 0 || i === 6, i === 0 || i >= 5)),
     data: Buffer.concat([Buffer.from("25be7ede2c9aab11", "hex"), Buffer.alloc(40)]),
   });
   const ataIx = (m: PublicKey, prog: PublicKey, owner = me) =>
@@ -173,13 +175,14 @@ describe("checkCreate with a dev buy (owner decision 2026-10-28)", () => {
     return b;
   };
   // buy_exact_in: 0 buyer, 5 their coin account, 6 their WSOL account, 9 the mint (raydium-sdk-v2 buyExactInInstruction).
-  const buy = (lamports: bigint, o: { coinAccount?: PublicKey; m?: PublicKey } = {}) => {
+  const buy = (lamports: bigint, o: { coinAccount?: PublicKey; m?: PublicKey; pool?: PublicKey; shareFee?: bigint; receiver?: PublicKey } = {}) => {
     const k = Array.from({ length: 18 }, () => Keypair.generate().publicKey);
-    [k[0], k[5], k[6], k[9]] = [me, o.coinAccount ?? ata22(me, mint), ata(me, WSOL), o.m ?? mint];
+    [k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7], k[8], k[9]] = [me, auth!, config!, platform!, o.pool ?? pool!, o.coinAccount ?? ata22(me, mint), ata(me, WSOL), vaultA!, vaultB!, o.m ?? mint];
+    if (o.receiver) k.splice(15, 0, o.receiver);
     return new TransactionInstruction({
       programId: LAUNCHLAB,
       keys: k.map((x, i) => meta(x, i === 0, i === 0 || i === 5 || i === 6)),
-      data: Buffer.concat([Buffer.from([250, 234, 13, 123, 213, 156, 19, 236]), u64(lamports), u64(1n), u64(0n)]),
+      data: Buffer.concat([Buffer.from([250, 234, 13, 123, 213, 156, 19, 236]), u64(lamports), u64(1n), u64(o.shareFee ?? 0n)]),
     });
   };
   const wrapIx = (lamports: number) => SystemProgram.transfer({ fromPubkey: me, toPubkey: ata(me, WSOL), lamports });
@@ -215,6 +218,13 @@ describe("checkCreate with a dev buy (owner decision 2026-10-28)", () => {
     expect(check(devBuy({ buy: buy(1_000_000_000n, { m: Keypair.generate().publicKey }) }), 1_000_000_000n)).toThrow(/another coin/);
     expect(check(devBuy({ close: close(other) }), 1_000_000_000n)).toThrow(/isn't part of a dev buy/);
     expect(check([ataIx(mint, TOKEN_2022, other), ...devBuy()], 1_000_000_000n)).toThrow(/token account for someone else/);
+  });
+
+  it("refuses a dev buy that pays a share fee, trades another pool, or comes before the create (audit)", () => {
+    expect(check(devBuy({ buy: buy(1_000_000_000n, { shareFee: 10_000n, receiver: other }) }), 1_000_000_000n)).toThrow(/share of it to someone else/);
+    expect(check(devBuy({ buy: buy(1_000_000_000n, { shareFee: 10_000n }) }), 1_000_000_000n)).toThrow(/share of it to someone else/);
+    expect(check(devBuy({ buy: buy(1_000_000_000n, { pool: Keypair.generate().publicKey }) }), 1_000_000_000n)).toThrow(/outside the new coin's pool/);
+    expect(() => checkCreate(build([...devBuy(), create, tip]), me, "mainnet-beta", fee, 1_000_000_000n)).toThrow(/before the coin's create/);
   });
 });
 

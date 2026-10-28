@@ -206,7 +206,19 @@ export class Indexer {
   }
 
   async onPlatformTx(sig: string, tx: VersionedTransactionResponse, touched: Set<string>): Promise<void> {
-    const parsed = parseLaunchLabTransaction(tx, this.d.programs.launchLab, this.d.programs.cpmm, (pool) => this.pools.has(pool));
+    const parse = () => parseLaunchLabTransaction(tx, this.d.programs.launchLab, this.d.programs.cpmm, (pool) => this.pools.has(pool));
+    let parsed = parse();
+    // A create carries its creator's dev buy (owner decision 2026-10-28). A pool newer than this tick's
+    // refresh isn't in `pools` yet, which filtered that buy out: add uspad's new pools and read it again.
+    let added = false;
+    for (const pc of parsed.poolCreates) {
+      const pool = pc.poolState.toBase58();
+      if (!this.pools.has(pool) && (await this.coinByPool(pool))) {
+        this.pools.add(pool);
+        added = true;
+      }
+    }
+    if (added) parsed = parse();
     const ts = new Date((tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000);
 
     for (const pc of parsed.poolCreates) {

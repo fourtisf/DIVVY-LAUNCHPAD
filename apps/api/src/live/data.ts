@@ -4,6 +4,7 @@ import {
   foldTicker,
   short,
   splitPlatformFee,
+  supplyShare,
   type Amount,
   type CoinDetail,
   type CoinSummary,
@@ -15,7 +16,6 @@ import type { LiveDeps } from "./deps";
 export const HOUR = 3_600_000;
 export const topOfHour = (t: number) => Math.floor(t / HOUR) * HOUR;
 const COIN_SUPPLY_TOKENS = 1e9;
-const COIN_SUPPLY_BASE = 1_000_000_000_000_000n;
 
 export function amount(raw: bigint | number | string, decimals: number): Amount {
   const r = BigInt(raw);
@@ -49,7 +49,7 @@ export function toSummary(c: CoinRow, solUsd: number): CoinSummary {
     paid24h: amount(s?.paid24hAsset ?? 0n, a.decimals),
     progress: c.status === "graduated" ? 1 : Math.min(1, (s?.progressBps ?? 0) / 10_000),
     spark: Array.isArray(s?.spark) ? (s!.spark as number[]).filter((n) => typeof n === "number") : [],
-    devBuyPct: Math.min(1, Number((c.devBuyTokens * 1_000_000n) / COIN_SUPPLY_BASE) / 1_000_000),
+    devBuyPct: supplyShare(c.devBuyTokens),
   };
 }
 

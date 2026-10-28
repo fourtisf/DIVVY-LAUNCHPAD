@@ -1,4 +1,4 @@
-import { DEV_BUY_MAX_LAMPORTS, DEV_BUY_MIN_LAMPORTS } from "@divvy/shared";
+import { devBuyProblem } from "@divvy/shared";
 
 /**
  * The create form's dev buy field in lamports: 0n when empty, null when it isn't an amount the server
@@ -10,8 +10,7 @@ export function parseDevBuy(input: string): bigint | null {
   const m = /^(\d{1,3})(?:\.(\d{0,9}))?$/.exec(v);
   if (!m) return null;
   const lamports = BigInt(m[1]!) * 1_000_000_000n + BigInt((m[2] ?? "").padEnd(9, "0"));
-  if (lamports === 0n) return 0n;
-  return lamports >= DEV_BUY_MIN_LAMPORTS && lamports <= DEV_BUY_MAX_LAMPORTS ? lamports : null;
+  return devBuyProblem(lamports) ? null : lamports;
 }
 
 /** A share of supply (0..1) as "3.4%", or "<0.1%" for a sliver. */

@@ -4,8 +4,9 @@ import { PublicKey } from "@solana/web3.js";
 import { Prisma } from "@divvy/db";
 import {
   checkImageFile,
-  DEV_BUY_MAX_LAMPORTS,
-  DEV_BUY_MIN_LAMPORTS,
+  DEV_BUY_ACCOUNTS_LAMPORTS,
+  DEV_BUY_TOO_LONG,
+  devBuyProblem,
   checkName,
   checkTicker,
   checkX,
@@ -30,7 +31,7 @@ import { sendCheckFailure, sendError } from "../../errors";
 import { processImage } from "../../media";
 import type { LiveDeps } from "../deps";
 import { invalidateBoard } from "../data";
-import { CREATE_BALANCE_LAMPORTS, CREATE_COST_LAMPORTS, DEV_BUY_ACCOUNTS_LAMPORTS, launchFee } from "../launchfee";
+import { CREATE_BALANCE_LAMPORTS, CREATE_COST_LAMPORTS, launchFee } from "../launchfee";
 import { getViewer, refuseBlockedCountry, requireViewer } from "../viewer";
 
 /**
@@ -157,8 +158,8 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     if (!tg.success) return sendError(reply, 422, "BAD_TELEGRAM", "Use a t.me link or @group for Telegram");
     // The creator's dev buy, inside the create (owner decision 2026-10-28: no cap but the curve's own).
     const devBuy = BigInt(b.devBuyLamports);
-    if (devBuy > 0n && devBuy < DEV_BUY_MIN_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_SMALL", `A dev buy starts at ${Number(DEV_BUY_MIN_LAMPORTS) / 1e9} SOL`);
-    if (devBuy > DEV_BUY_MAX_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_BIG", `A dev buy can be up to ${Number(DEV_BUY_MAX_LAMPORTS) / 1e9} SOL: the curve fills at 85`);
+    const devBad = devBuyProblem(devBuy);
+    if (devBad) return sendError(reply, 422, devBad.code, devBad.message);
     // Creator-paid launches (LAUNCH_FEE_LAMPORTS): the fee stands in for the free-launch limits. Admins
     // don't pay; the fee goes to the wallet they run.
     const paid = d.env.LAUNCH_FEE_LAMPORTS > 0n && !v.isAdmin;
@@ -208,9 +209,11 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
             uri: d.storage.publicUrl(`meta/${"c".repeat(25)}.json`),
             devBuyLamports: devBuy,
             feeLamports: feeDue,
+            // As the worker builds it: a Jito tip on mainnet, a priority fee elsewhere.
             tip: d.sol.cluster === "mainnet-beta",
+            cuPriceMicroLamports: d.sol.cluster === "mainnet-beta" ? undefined : 1,
           });
-        if (!fits) return sendError(reply, 422, "DEV_BUY_TOO_LONG", "This name is too long to fit a dev buy in the create. Shorten it, or launch without a dev buy.");
+        if (!fits) return sendError(reply, 422, "DEV_BUY_TOO_LONG", DEV_BUY_TOO_LONG);
       }
       const need = CREATE_BALANCE_LAMPORTS + feeDue + (devBuy > 0n ? devBuy + DEV_BUY_ACCOUNTS_LAMPORTS : 0n);
       const balance = await d.conn.getBalance(new PublicKey(v.wallet), "confirmed").catch(() => null);
@@ -218,7 +221,7 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
         const parts = [
           feeDue > 0n ? `the ${Number(feeDue) / 1e9} SOL launch fee` : null,
           `about ${Number(CREATE_COST_LAMPORTS) / 1e9} SOL to create the coin`,
-          devBuy > 0n ? `your ${Number(devBuy) / 1e9} SOL dev buy` : null,
+          devBuy > 0n ? `your ${Number(devBuy) / 1e9} SOL dev buy with about ${Number(DEV_BUY_ACCOUNTS_LAMPORTS) / 1e9} SOL for its token accounts` : null,
         ].filter(Boolean);
         const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} plus ${parts[parts.length - 1]}` : parts[0];
         return sendError(reply, 402, "NOT_ENOUGH_SOL", `Your wallet needs at least ${Number(need) / 1e9} SOL to launch: ${list}.`);

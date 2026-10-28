@@ -197,7 +197,12 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
   } catch (e) {
     if (e instanceof LaunchError) return failLaunch(d, launchId, e.code, e.message);
     // The API checks this before the launch; a longer metadata link than it assumed can still tip it over.
-    if (e instanceof CreateTooLargeError) return failLaunch(d, launchId, "DEV_BUY_TOO_LONG", "The coin's name is too long to fit a dev buy in its create. Shorten it, or launch without a dev buy. Nothing was charged.");
+    if (e instanceof CreateTooLargeError) {
+      const devBuy = BigInt((launch.request as { devBuyLamports?: string }).devBuyLamports ?? "0") > 0n;
+      return devBuy
+        ? failLaunch(d, launchId, "DEV_BUY_TOO_LONG", "The coin's name is too long to fit a dev buy in its create. Shorten it, or launch without a dev buy. Nothing was charged.")
+        : failLaunch(d, launchId, "NAME_TOO_LONG", "The coin's name is too long for its create. Shorten it. Nothing was charged.");
+    }
     if (e instanceof MainnetDisabledError) return failLaunch(d, launchId, "LAUNCHES_PAUSED", "Launches aren't open yet");
     d.log("launch: unexpected error", { launchId, error: e instanceof Error ? e.message : String(e) });
     // Unknown state: if a create was sent, the reconciler decides once its blockhash expires.

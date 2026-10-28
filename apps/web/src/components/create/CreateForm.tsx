@@ -9,6 +9,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import {
   avatarDataUri,
   bpsLabel,
+  DEV_BUY_ACCOUNTS_LAMPORTS,
   devBuyEstimate,
   displayTicker,
   pct,
@@ -144,7 +145,7 @@ export function CreateForm() {
   };
 
   const ready = !stale && ct.s === "ok" && cn.s === "ok" && cx.s !== "fail" && ci.s === "ok" && devBuy !== null;
-  const costs = [feeSol ? `the ${feeSol} SOL fee` : null, createSol ? `about ${createSol} SOL to create the coin` : null, devSol ? `your ${devSol} SOL dev buy` : null].filter(Boolean) as string[];
+  const costs = [feeSol ? `the ${feeSol} SOL fee` : null, createSol ? `about ${createSol} SOL to create the coin` : null, devSol ? `your ${devSol} SOL dev buy with about ${Number(DEV_BUY_ACCOUNTS_LAMPORTS) / 1e9} SOL for its token accounts` : null].filter(Boolean) as string[];
   const hint =
     ct.s !== "ok"
       ? "Fix the ticker to continue."
@@ -344,7 +345,7 @@ export function CreateForm() {
               <span className="n">4</span>
               <div>
                 <h2>Dev buy</h2>
-                <p>Optional. Buy your own coin inside its create, at the starting price, before anyone else can.</p>
+                <p>Optional. Your buy goes inside the create, so it&apos;s the coin&apos;s first trade, before anyone else can buy.</p>
               </div>
             </div>
             <div className="fld">
