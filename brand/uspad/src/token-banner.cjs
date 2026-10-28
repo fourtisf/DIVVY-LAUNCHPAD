@@ -1,11 +1,11 @@
 // Header banner for $USPAD's token pages (3:1, 1500 x 500 and 3000 x 1000, as DEX Screener and the like
-// ask for): the ticker, what it is, and the $USPAD coin with the six stock coins in orbit, the trailer's
-// shot (token3d.ts). It names the ticker only: no contract address (owner request 2026-10-28).
+// ask for): the ticker, what it is, and the uspad mark with the six stock coins in orbit around it, the
+// trailer's shot (token3d.ts). It names the ticker only: no contract address (owner request 2026-10-28).
 // Usage (repo root): node brand/uspad/src/token-banner.cjs brand/uspad
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
-const { stockArt, bundle3d, guilloche } = require("./lib.cjs");
+const { sized, stockArt, bundle3d, guilloche } = require("./lib.cjs");
 
 const DIR = process.argv[2];
 const OUT = path.join(DIR, "social");
@@ -32,6 +32,7 @@ const css = `*{box-sizing:border-box}html,body{margin:0;background:#050806}body{
 .sub b{font-weight:600;background:linear-gradient(100deg,#B6FFD2,#4ADE80 45%,#D9F99D);-webkit-background-clip:text;background-clip:text;color:transparent}
 .pill{display:inline-flex;align-items:center;gap:11px;margin-top:26px;font:500 19px Inter;color:#C9E8D6;border:1px solid rgba(134,239,172,.24);background:rgba(74,222,128,.07);padding:8px 18px;border-radius:999px}
 .pill i{width:9px;height:9px;border-radius:50%;background:#4ADE80;box-shadow:0 0 12px #4ADE80}
+.mark{position:absolute;left:${CX}px;top:${CY}px;transform:translate(-50%,-50%);line-height:0;filter:drop-shadow(0 30px 60px rgba(74,222,128,.38)) drop-shadow(0 0 26px rgba(74,222,128,.2))}
 .vignette{position:absolute;inset:0;background:radial-gradient(130% 120% at 50% 50%,transparent 62%,rgba(0,0,0,.55))}`;
 
 const html = `<div class="bn">
@@ -39,6 +40,7 @@ const html = `<div class="bn">
   <div class="ring" style="width:620px;height:620px"></div>
   <div class="ring" style="width:470px;height:470px;border-color:rgba(134,239,172,.14)"></div>
   <div class="c3d"><canvas id="c3d" width="${C3.w * 2}" height="${C3.h * 2}"></canvas><canvas id="c3dGlow" class="glow" width="${C3.w / 2}" height="${C3.h / 2}"></canvas></div>
+  <div class="mark">${sized(fs.readFileSync(path.join(DIR, "mark.svg"), "utf8"), 300)}</div>
   <div class="vignette"></div>
   <div class="txt">
     <p class="tk">$USPAD</p>
@@ -54,9 +56,9 @@ const html = `<div class="bn">
   const page = await b.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 2 });
   await page.setContent(`<!doctype html><meta charset="utf-8"><style>${css}</style>${html}`);
   await page.addScriptTag({ content: js });
-  // The trailer's orbit, 3 s in: every stock coin in, $USPAD turned a little to the light.
+  // The trailer's orbit, 3 s in, every stock coin in, around the mark.
   await page.evaluate(async ({ stocks, zoom }) => {
-    const frame = await window.token3d.init(document.getElementById("c3d"), stocks, { macro: [-40, 1], reveal: [-30, 1], orbit: [0, 6], end: [-20, 1] }, { glow: document.getElementById("c3dGlow"), zoom });
+    const frame = await window.token3d.init(document.getElementById("c3d"), stocks, { macro: [-40, 1], reveal: [-30, 1], orbit: [0, 6], end: [-20, 1] }, { glow: document.getElementById("c3dGlow"), zoom, main: false });
     frame(3.0);
   }, { stocks: stockArt(DIR), zoom: ZOOM });
   const big = path.join(OUT, "uspad-token-header-3000x1000.png");

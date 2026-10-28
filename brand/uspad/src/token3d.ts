@@ -6,7 +6,8 @@
  *
  * With `glow`, each frame is also drawn at half size into that 2D canvas, which the page blurs and
  * screens over the coins: a soft bloom without the banding of 8-bit render targets. A `zoom` under 1
- * widens every shot, for a canvas bigger than the frame it fills (token-banner.cjs).
+ * widens every shot, for a canvas bigger than the frame it fills, and `main: false` leaves out the
+ * $USPAD coin, for a page that puts the uspad mark in its place (token-banner.cjs).
  */
 import * as THREE from "three";
 import { buildCoin, logoFace, makeEnv, softDot, stockFace, type StockArt } from "../../../apps/web/src/three/scenes";
@@ -26,7 +27,7 @@ const inOutCubic = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x
 const outBack = (x: number) => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);
 const within = (t: number, [s, d]: [number, number]) => t >= s && t < s + d;
 
-async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, { glow, zoom = 1 }: { glow?: HTMLCanvasElement; zoom?: number } = {}) {
+async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, { glow, zoom = 1, main: withMain = true }: { glow?: HTMLCanvasElement; zoom?: number; main?: boolean } = {}) {
   const glowCtx = glow?.getContext("2d") ?? null;
   await document.fonts.ready;
   const faces = await Promise.all(stocks.map(stockFace));
@@ -90,7 +91,7 @@ async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, 
     let exposure = 1.1;
     dust.rotation.y = t * 0.015;
     sweep.intensity = 0;
-    main.visible = true;
+    main.visible = withMain;
     sats.forEach((m) => (m.visible = false));
 
     if (within(t, T.macro)) {

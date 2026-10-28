@@ -1,65 +1,62 @@
-# Token launch copy, with a CA template
+# $USPAD live copy, with a CA template
 
-For the day the uspad token launches. Replace the two placeholders before posting:
+For the post that $USPAD is live. Replace the two placeholders before posting:
 
-- `[CA]`: the token's mint address. Post it only after the coin is live: uspad keeps a mint secret until
-  its create lands, and the "is live" panel shows it (copy it from there).
+- `[CA]`: $USPAD's official mint address. Post it only after the coin is live: uspad keeps a mint
+  secret until its create lands, and the "is live" panel shows it (copy it from there).
 - `[STOCK]`: the stock its holders earn, picked on the create form (NVDAx, SPYx, …).
 
-The ticker is written as $USPAD; change it if the token uses another one. Then put the CA on the site:
-`/root/go-live.sh token-ca <CA>` (the hero's "CA: coming soon" becomes the address, with a copy button).
+Tickers can repeat on uspad and the board shows more than one $USPAD, so every post says where the
+official address comes from. Then put the CA on the site: `/root/go-live.sh token-ca <CA>` (the hero's
+"CA: coming soon" becomes the address, with a copy button).
 
-## Launch post (under 280 characters)
+Every post is under 280 characters as X counts them with a 44-character CA (the longest a Solana
+address gets). Video: `uspad-token-1920x1080.mp4`; banner for token pages: `uspad-token-header-3000x1000.png`.
+
+## Main post
 
 ```text
 $USPAD is live. 🟢
 
-The uspad token, launched on uspad itself: its holders get [STOCK] every hour from its trading fees.
+The token of uspad.fun, where every memecoin pays its holders in US stocks, every hour.
+
+$USPAD holders get [STOCK] every hour from its trading fees.
 
 CA: [CA]
-
-No presale. No dev buy. No team tokens.
 
 Trade → uspad.fun
 ```
 
-## Reply to pin under it
+## Reply 1, right under it (pin this one)
 
 ```text
-There is only one official CA:
+Only one $USPAD is official:
 
 [CA]
 
-It's posted only by @uspadfun and on uspad.fun. Any other address is fake. Check it before you buy.
+Tickers can repeat on uspad, so check the address before you buy. The CA is posted only by @uspadfun and on uspad.fun.
 ```
 
-## Short CA post
+## Reply 2
+
+```text
+How $USPAD pays:
+
+• Every buy and sell pays 1.25%
+• 0.50% of it buys [STOCK] every hour
+• It goes to every wallet holding $10+ of $USPAD
+• At 85 SOL it graduates to Raydium, its liquidity locked for good
+
+Tokenized stocks aren't available to US persons. Not financial advice.
+```
+
+## Short CA post (to quote or pin)
 
 ```text
 $USPAD
 CA: [CA]
 
-uspad.fun
-```
-
-## Long version (X, Telegram)
-
-```text
-$USPAD is live on Solana. 🟢
-
-The uspad token launched the way every coin on uspad does:
-• A private bundle, so nobody bought in its first block
-• No presale, no dev buy, no team tokens: the whole supply went to the curve
-• 1.25% per trade, and 0.50% of it buys [STOCK] for holders, every hour
-• At 85 SOL it graduates to Raydium, with its liquidity locked forever
-
-CA: [CA]
-
-Only trust the CA from @uspadfun and uspad.fun.
-
-Trade → uspad.fun
-
-Tokenized stocks are issued by third parties and aren't available to US persons. Not financial advice.
+Only from @uspadfun · uspad.fun
 ```
 
 ## Versi Indonesia
@@ -67,11 +64,30 @@ Tokenized stocks are issued by third parties and aren't available to US persons.
 ```text
 $USPAD sudah live. 🟢
 
-Token resmi uspad, di-launch di uspad sendiri: holder-nya dapat [STOCK] setiap jam dari fee trading.
+Token resmi uspad.fun, tempat setiap memecoin membayar holder-nya dengan saham AS, setiap jam.
+
+Holder $USPAD dapat [STOCK] setiap jam dari fee trading.
 
 CA: [CA]
 
-Tanpa presale. Tanpa dev buy. Tanpa jatah tim.
-
 Trade → uspad.fun
+```
+
+```text
+Hanya satu $USPAD yang resmi:
+
+[CA]
+
+Ticker bisa sama di uspad, jadi cek alamatnya sebelum beli. CA resmi hanya dari @uspadfun dan uspad.fun.
+```
+
+```text
+Cara $USPAD membayar:
+
+• Tiap beli dan jual kena fee 1,25%
+• 0,50% darinya membeli [STOCK] setiap jam
+• Dikirim ke wallet yang pegang $10+ $USPAD
+• Di 85 SOL graduate ke Raydium, likuiditas dikunci selamanya
+
+Saham tokenisasi tidak tersedia untuk warga AS. Bukan saran keuangan.
 ```
