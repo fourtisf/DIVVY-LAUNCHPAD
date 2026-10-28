@@ -372,7 +372,8 @@ async function bundle3d() {
     html,
     crf: 16,
     workers: 3,
-    shutter: { samples: 4, angle: 180 },
+    // Two renders per frame: half the render time of four, with the same blur on fast moves.
+    shutter: { samples: 2, angle: 180 },
     // WebGL in headless Chromium without a GPU.
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
     prepare: async (page) => {
