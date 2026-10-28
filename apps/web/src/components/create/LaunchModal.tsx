@@ -68,8 +68,20 @@ export function LaunchModal({
     mcapUsd: number | null;
   } | null>(null);
   const wallet = useWallet();
+  // The polling loop outlives this render: it reads the wallet as it is now, not as it was at the start.
+  const walletNow = useRef(wallet);
+  walletNow.current = wallet;
   // The create the wallet was last asked to sign: a new attempt brings a new one.
   const asked = useRef<string | null>(null);
+  // While the wallet is asked: since when (for the "open your wallet" hint) and what it last said.
+  const [askedAt, setAskedAt] = useState<number | null>(null);
+  const [walletSaid, setWalletSaid] = useState<string | null>(null);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (askedAt === null) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [askedAt]);
 
   /**
    * The creator signs their coin's create (owner decision 2026-10-27): checked here before the wallet
@@ -86,10 +98,13 @@ export function LaunchModal({
       return;
     }
     busy.current = true;
+    const wallet = walletNow.current;
     try {
       if (!wallet.publicKey || !wallet.signTransaction) throw new UnsafeTransaction("this wallet can't sign the launch");
       const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
       checkCreate(tx, wallet.publicKey, config.network, { to: config.launchFee.to, lamports: BigInt(config.launchFee.amount.raw) });
+      setWalletSaid(null);
+      setAskedAt(Date.now());
       const signed = await wallet.signTransaction(tx);
       let bin = "";
       for (const b of signed.serialize()) bin += String.fromCharCode(b);
@@ -104,13 +119,19 @@ export function LaunchModal({
         }
       }
     } catch (e) {
+      console.error("launch: the wallet didn't sign", e);
       // Only a refusal ends the launch: the creator turned it down, or the create failed the page's
-      // check. Any other wallet error (a prompt still open, a dropped connection) waits for the next ask.
+      // check. Any other wallet error (a prompt still open, a dropped connection) waits for the next ask,
+      // and says what the wallet answered so it can be fixed.
       if (e instanceof UnsafeTransaction || rejected(e)) {
         if (e instanceof UnsafeTransaction) toast(e.message);
         await sign({ refused: true }).catch(() => {});
-      } else toast("Your wallet didn't sign the launch. It will ask again in a moment.");
+      } else {
+        const x = e as { message?: string; error?: { message?: string } } | null;
+        setWalletSaid(x?.error?.message || x?.message || "no answer");
+      }
     } finally {
+      setAskedAt(null);
       busy.current = false;
       const next = queued.current;
       queued.current = null;
@@ -240,6 +261,11 @@ export function LaunchModal({
                 </li>
               ))}
             </ul>
+            {k === 1 && walletSaid ? (
+              <p className="note" role="status">Your wallet didn&apos;t sign it ({walletSaid}). It will ask again in a moment.</p>
+            ) : k === 1 && askedAt !== null && Date.now() - askedAt > 8000 ? (
+              <p className="note" role="status">Don&apos;t see your wallet? Open it from your browser&apos;s toolbar: the request is waiting there.</p>
+            ) : null}
           </div>
         )}
       </div>
