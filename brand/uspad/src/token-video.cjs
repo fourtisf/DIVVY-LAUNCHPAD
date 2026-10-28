@@ -10,6 +10,7 @@
 //   node brand/uspad/src/token-video.cjs brand/uspad [--stills <dir>]
 //   node brand/uspad/src/token-video.cjs brand/uspad --only 0-12,28-34   # re-renders just those seconds
 //                                                                         # into the existing video
+//   add --samples 1 for no motion blur, at half the render time
 //   python3 brand/uspad/src/token-music.py brand/uspad          # the soundtrack
 const fs = require("fs");
 const path = require("path");
@@ -357,7 +358,7 @@ function splice(out, fresh, only) {
     crf: 16,
     workers: 3,
     // Two renders per frame: half the render time of four, with the same blur on fast moves.
-    shutter: { samples: 2, angle: 180 },
+    shutter: { samples: process.argv.includes("--samples") ? Number(process.argv[process.argv.indexOf("--samples") + 1]) : 2, angle: 180 },
     // WebGL in headless Chromium without a GPU.
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
     prepare: async (page) => {
