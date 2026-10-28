@@ -115,7 +115,11 @@ test.describe("creator-signed launch", () => {
   test("a dev buy rides in the create the wallet signs, and the coin shows it (owner decision 2026-10-28)", async ({ page }) => {
     await walletSignedIn(page);
     const ticker = await fillCreate(page);
-    await page.locator("#fDev").fill("1");
+    // The quick picks fill the field (owner request 2026-10-28).
+    await page.locator("#devQuick").getByRole("button", { name: "0.5 SOL", exact: true }).click();
+    await expect(page.locator("#devSum")).toContainText("0.5 SOL, about 1.7%");
+    await page.locator("#devQuick").getByRole("button", { name: "1 SOL", exact: true }).click();
+    await expect(page.locator("#fDev")).toHaveValue("1");
     await expect(page.locator("#devSum")).toContainText("1 SOL, about 3.4%");
     await page.locator("#launchBtn").click();
     // The page checked the create holds exactly this dev buy before the wallet saw it.

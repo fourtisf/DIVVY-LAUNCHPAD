@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import useSWR from "swr";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import {
   avatarDataUri,
@@ -27,7 +27,7 @@ import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 import { LaunchModal } from "./LaunchModal";
 import { coinHref } from "@/lib/links";
-import { parseDevBuy, shareLabel } from "@/lib/devbuy";
+import { DEV_BUY_PICKS, maxDevBuy, parseDevBuy, shareLabel, solText } from "@/lib/devbuy";
 
 interface Draft {
   name: string;
@@ -81,6 +81,7 @@ export function CreateForm() {
   const toast = useToast();
   const router = useRouter();
   const { publicKey } = useWallet();
+  const { connection } = useConnection();
   const { setVisible } = useWalletModal();
   const { me, ensureSignedIn } = useSession();
   const [d, setD] = useState<Draft>(saved);
@@ -141,6 +142,23 @@ export function CreateForm() {
       setImgCheck({ s: r.check.status, m: r.check.message });
     } catch (e) {
       setImgCheck({ s: "fail", m: e instanceof ApiRequestError ? e.message : "The upload failed. Try again." });
+    }
+  };
+
+  // "Max": what the wallet holds less what the launch itself costs (owner request 2026-10-28).
+  const [maxBusy, setMaxBusy] = useState(false);
+  const pickMax = async () => {
+    if (!publicKey) return setVisible(true);
+    setMaxBusy(true);
+    try {
+      const lamports = await connection.getBalance(publicKey, "confirmed");
+      const max = maxDevBuy(BigInt(lamports), config.launchFee.to ? BigInt(config.launchFee.amount.raw) : 0n, BigInt(config.launchFee.createCost.raw));
+      if (max === null) toast("Your wallet doesn't hold enough SOL for a dev buy on top of the launch");
+      else setD((p) => ({ ...p, dev: solText(max) }));
+    } catch {
+      toast("Couldn't read your balance. Type the amount instead.");
+    } finally {
+      setMaxBusy(false);
     }
   };
 
@@ -351,6 +369,16 @@ export function CreateForm() {
             <div className="fld">
               <label className="lbl" htmlFor="fDev">Amount in SOL <em>optional</em></label>
               <input className={"tinput" + (devBuy === null ? " bad" : "")} id="fDev" inputMode="decimal" autoComplete="off" placeholder="0" value={d.dev} onChange={set("dev")} />
+              <div className="quick" id="devQuick">
+                {DEV_BUY_PICKS.map((q) => (
+                  <button type="button" key={q} aria-pressed={d.dev === q} onClick={() => (setLaunchError(null), setD((p) => ({ ...p, dev: q })))}>
+                    {q} SOL
+                  </button>
+                ))}
+                <button type="button" id="devMax" disabled={maxBusy} title="Your balance, less what the launch itself costs" onClick={() => void pickMax()}>
+                  {maxBusy ? "…" : "Max"}
+                </button>
+              </div>
             </div>
             <p className="note" id="devNote">
               {devBuy === null
