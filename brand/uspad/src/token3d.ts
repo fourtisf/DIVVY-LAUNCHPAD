@@ -5,7 +5,8 @@
  * sweeping light, the six stock coins orbiting it, and a closing push in.
  *
  * With `glow`, each frame is also drawn at half size into that 2D canvas, which the page blurs and
- * screens over the coins: a soft bloom without the banding of 8-bit render targets.
+ * screens over the coins: a soft bloom without the banding of 8-bit render targets. A `zoom` under 1
+ * widens every shot, for a canvas bigger than the frame it fills (token-banner.cjs).
  */
 import * as THREE from "three";
 import { buildCoin, logoFace, makeEnv, softDot, stockFace, type StockArt } from "../../../apps/web/src/three/scenes";
@@ -25,7 +26,7 @@ const inOutCubic = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x
 const outBack = (x: number) => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);
 const within = (t: number, [s, d]: [number, number]) => t >= s && t < s + d;
 
-async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, { glow }: { glow?: HTMLCanvasElement } = {}) {
+async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, { glow, zoom = 1 }: { glow?: HTMLCanvasElement; zoom?: number } = {}) {
   const glowCtx = glow?.getContext("2d") ?? null;
   await document.fonts.ready;
   const faces = await Promise.all(stocks.map(stockFace));
@@ -37,6 +38,8 @@ async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, 
   const scene = new THREE.Scene();
   scene.environment = makeEnv(renderer);
   const cam = new THREE.PerspectiveCamera(30, canvas.width / canvas.height, 0.05, 100);
+  cam.zoom = zoom;
+  cam.updateProjectionMatrix();
 
   // A dim key, two green rims, and a hard white light that sweeps across the coin for the glints.
   const key = new THREE.DirectionalLight(0xffffff, 1.0);

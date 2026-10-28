@@ -8,6 +8,33 @@ const sized = (svg, w) => svg.replace(/ width="[^"]*" height="[^"]*"/, "").repla
 const stockLogo = (dir, symbol) =>
   `data:image/png;base64,${fs.readFileSync(path.join(dir, "../../apps/web/public/stocks", `${symbol}.png`)).toString("base64")}`;
 
+/** The six featured stocks as the 3D scenes take them, with the colours the site gives them (apps/api/src/mock/data.ts). */
+const stockArt = (dir) =>
+  [
+    ["NVDAx", "NV", "Nvidia", "#76B900", "#0D2200"],
+    ["SPYx", "SPY", "S&P 500", "#6D88FF", "#0B1440"],
+    ["TSLAx", "TS", "Tesla", "#EF5A65", "#3A0A10"],
+    ["AAPLx", "AP", "Apple", "#E1E5EA", "#1B1F27"],
+    ["QQQx", "QQQ", "Nasdaq 100", "#3CCBEB", "#06303A"],
+    ["MSTRx", "MS", "Strategy", "#F7931A", "#331A00"],
+  ].map(([symbol, mono, name, bg, fg]) => ({ symbol, mono, name, bg, fg, logo: stockLogo(dir, symbol) }));
+
+/** A three.js scene in this folder (token3d.ts), bundled for the page with the repo's esbuild and the web app's three. */
+async function bundle3d(file) {
+  const root = path.resolve(__dirname, "../../..");
+  const esbuild = require(path.join(root, "node_modules/.pnpm/node_modules/esbuild"));
+  const r = await esbuild.build({
+    entryPoints: [path.join(__dirname, file)],
+    bundle: true,
+    write: false,
+    format: "iife",
+    target: "es2020",
+    nodePaths: [path.join(root, "apps/web/node_modules")],
+    logLevel: "error",
+  });
+  return r.outputFiles[0].text;
+}
+
 /** Engraved wave lines, like the background of a share certificate. */
 function guilloche(width, height, lines, amp, opacity) {
   let d = "";
@@ -149,4 +176,4 @@ async function renderVideo({ out, width, height, fps, duration, css, html, still
   if (r.status !== 0) throw new Error(`ffmpeg concat exited ${r.status}`);
 }
 
-module.exports = { sized, stockLogo, guilloche, orbitScene, baseCss, motionCss, render, renderVideo };
+module.exports = { sized, stockLogo, stockArt, bundle3d, guilloche, orbitScene, baseCss, motionCss, render, renderVideo };

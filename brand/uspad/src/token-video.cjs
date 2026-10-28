@@ -11,10 +11,9 @@
 //   python3 brand/uspad/src/token-music.py brand/uspad          # the soundtrack
 const fs = require("fs");
 const path = require("path");
-const { stockLogo, renderVideo } = require("./lib.cjs");
+const { stockArt, bundle3d, renderVideo } = require("./lib.cjs");
 
 const DIR = process.argv[2];
-const ROOT = path.resolve(DIR, "../..");
 const W = 1920;
 const H = 1080;
 const FPS = 30;
@@ -34,15 +33,7 @@ const keyed = (name, spanSec, stops) => {
   return `animation:${name} ${spanSec[1]}s cubic-bezier(.45,0,.2,1) ${spanSec[0]}s both`;
 };
 
-// The six stocks, with the colours the site gives them (apps/api/src/mock/data.ts).
-const STOCKS = [
-  ["NVDAx", "NV", "Nvidia", "#76B900", "#0D2200"],
-  ["SPYx", "SPY", "S&P 500", "#6D88FF", "#0B1440"],
-  ["TSLAx", "TS", "Tesla", "#EF5A65", "#3A0A10"],
-  ["AAPLx", "AP", "Apple", "#E1E5EA", "#1B1F27"],
-  ["QQQx", "QQQ", "Nasdaq 100", "#3CCBEB", "#06303A"],
-  ["MSTRx", "MS", "Strategy", "#F7931A", "#331A00"],
-].map(([symbol, mono, name, bg, fg]) => ({ symbol, mono, name, bg, fg, logo: stockLogo(DIR, symbol) }));
+const STOCKS = stockArt(DIR);
 
 /* ---------- type ---------- */
 
@@ -319,22 +310,9 @@ const html = `<div class="stage">
   <div class="vignette"></div>
 </div>`;
 
-async function bundle3d() {
-  const esbuild = require(path.join(ROOT, "node_modules/.pnpm/node_modules/esbuild"));
-  const r = await esbuild.build({
-    entryPoints: [path.join(__dirname, "token3d.ts")],
-    bundle: true,
-    write: false,
-    format: "iife",
-    target: "es2020",
-    nodePaths: [path.join(ROOT, "apps/web/node_modules")],
-    logLevel: "error",
-  });
-  return r.outputFiles[0].text;
-}
 
 (async () => {
-  const js = await bundle3d();
+  const js = await bundle3d("token3d.ts");
   const stillsAt = process.argv.indexOf("--stills");
   await renderVideo({
     out: path.join(DIR, "social", "uspad-token-1920x1080.mp4"),
