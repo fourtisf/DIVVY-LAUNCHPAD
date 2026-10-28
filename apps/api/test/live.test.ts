@@ -200,6 +200,11 @@ describe.skipIf(!run)("live mode", () => {
     // Coin pages open by mint (links) or by ticker (the first coin launched with it).
     const chip = await prisma.coin.findFirstOrThrow({ where: { tickerNorm: "CHIPDOG" } });
     expect(((await get(`/api/coins/${chip.mint}`)).json() as { ticker: string }).ticker).toBe("CHIPDOG");
+    // The board's search finds it by CA, by a piece of the CA, by ticker and by name.
+    for (const q of [chip.mint!, chip.mint!.slice(3, 12), "$chipdog", "chip dog"]) {
+      const found = (await get(`/api/coins?q=${encodeURIComponent(q)}`)).json() as { items: { ticker: string }[] };
+      expect(found.items.map((c) => c.ticker)).toContain("CHIPDOG");
+    }
   });
 
   it("signs in with a DB-backed session and flags admins", async () => {

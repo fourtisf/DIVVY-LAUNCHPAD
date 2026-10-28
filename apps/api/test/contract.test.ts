@@ -76,6 +76,12 @@ describe("read endpoints", () => {
     expect(nv.items.every((c) => c.dividendAsset === "NVDAx")).toBe(true);
     const q = expectShape(CoinListSchema, (await get("/api/coins?q=tesla")).body) as z.infer<typeof CoinListSchema>;
     expect(q.items.every((c) => c.dividendAsset === "TSLAx")).toBe(true);
+    // By CA: the whole address, or a piece of it, finds the coin.
+    const one = (expectShape(CoinListSchema, (await get("/api/coins?limit=1")).body) as z.infer<typeof CoinListSchema>).items[0]!;
+    for (const needle of [one.mint, `$${one.mint.slice(4, 14)}`]) {
+      const byCa = expectShape(CoinListSchema, (await get(`/api/coins?q=${encodeURIComponent(needle)}`)).body) as z.infer<typeof CoinListSchema>;
+      expect(byCa.items.map((c) => c.mint)).toContain(one.mint);
+    }
     const p1 = expectShape(CoinListSchema, (await get("/api/coins?limit=10")).body) as z.infer<typeof CoinListSchema>;
     expect(p1.nextCursor).toBe("10");
     expect((await get("/api/coins?sort=nope")).status).toBe(400);

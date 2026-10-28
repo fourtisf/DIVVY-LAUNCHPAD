@@ -174,7 +174,7 @@ export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats
             list.map((c) => <CoinCard key={c.mint} c={toCard(c, now)} />)
           ) : data ? (
             <div className="empty">
-              No coin matches “{q}”. Try a ticker or a stock like NVDAx, or <Link className="link" href="/create">create it yourself</Link>.
+              No coin matches “{q}”. Try a ticker, a name, a CA or a stock like NVDAx, or <Link className="link" href="/create">create it yourself</Link>.
             </div>
           ) : null}
         </div>

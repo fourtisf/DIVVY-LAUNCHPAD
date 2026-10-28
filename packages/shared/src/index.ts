@@ -7,3 +7,4 @@ export * from "./random";
 export * from "./api";
 export * from "./params";
 export * from "./jobs";
+export * from "./search";

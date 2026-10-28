@@ -20,6 +20,8 @@ import {
   type PayoutList,
   type Stats,
   type TradeListSchema,
+  coinMatches,
+  parseCoinSearch,
 } from "@divvy/shared";
 import { LAUNCHLAB_DEFAULT_CURVE, WSOL_MINT } from "@divvy/solana";
 import { sendError } from "../errors";
@@ -181,9 +183,9 @@ export async function publicRoutes(app: FastifyInstance, { store }: { store: Moc
     store.tick();
     const now = Date.now();
     const { sort, pays, cursor = 0, limit } = q.data;
-    const needle = q.data.q?.trim().toLowerCase();
+    const search = parseCoinSearch(q.data.q);
     let list = store.coins;
-    if (needle) list = list.filter((c) => [c.name, c.ticker, c.pays, ASSET[c.pays]!.name].some((s) => s.toLowerCase().includes(needle)));
+    list = list.filter((c) => coinMatches({ mint: c.mint, name: c.name, ticker: c.ticker, stocks: [c.pays, ASSET[c.pays]!.name] }, search));
     if (q.data.ticker) list = list.filter((c) => foldTicker(c.ticker) === foldTicker(q.data.ticker!));
     if (pays && pays !== "all") list = list.filter((c) => c.pays === pays);
     const sorted = sortCoins(list, sort, now);

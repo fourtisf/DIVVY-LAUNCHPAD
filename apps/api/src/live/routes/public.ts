@@ -16,6 +16,8 @@ import {
   type Meter,
   type PayoutList,
   type Stats,
+  coinMatches,
+  parseCoinSearch,
 } from "@divvy/shared";
 import { getLaunchSettings } from "@divvy/server";
 import { graduationFdvLamports, LAUNCHLAB_DEFAULT_CURVE, WSOL_MINT } from "@divvy/solana";
@@ -191,9 +193,9 @@ export async function livePublicRoutes(app: FastifyInstance, { d }: { d: LiveDep
       .safeParse(req.query);
     if (!q.success) return sendError(reply, 400, "BAD_QUERY", "That isn't a valid coin query");
     const [rows, prices] = await Promise.all([boardRows(d), d.prices()]);
-    const needle = q.data.q?.trim().toLowerCase();
-    let list = rows;
-    if (needle) list = list.filter((c) => [c.name, c.ticker, c.dividendAsset.symbol, c.dividendAsset.name].some((s) => s.toLowerCase().includes(needle)));
+    // By ticker, name, CA or stock (packages/shared search.ts).
+    const search = parseCoinSearch(q.data.q);
+    let list = rows.filter((c) => coinMatches({ mint: c.mint, name: c.name, ticker: c.ticker, stocks: [c.dividendAsset.symbol, c.dividendAsset.name] }, search));
     if (q.data.ticker) {
       const norm = foldTicker(q.data.ticker);
       list = list.filter((c) => c.tickerNorm === norm);

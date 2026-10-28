@@ -104,7 +104,7 @@ export function Header() {
           <span className="ico">
             <Icon name="search" size={15} />
           </span>
-          <input ref={input} id="search" type="search" placeholder="Search coins or stocks" autoComplete="off" value={q} onChange={(e) => onSearch(e.target.value)} />
+          <input ref={input} id="search" type="search" placeholder="Search coins, stocks or a CA" autoComplete="off" value={q} onChange={(e) => onSearch(e.target.value)} />
           <kbd>/</kbd>
         </label>
         <Link className="btn btn-g" href="/create" id="createTop">
