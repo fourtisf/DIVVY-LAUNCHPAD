@@ -3,8 +3,9 @@
  *   1. write the token metadata JSON,
  *   2. generate the mint keypair in memory (only the public key is stored, never returned by the API
  *      until the create lands),
- *   3. build initialize_with_token_2022 paid by the creator's wallet, with uspad's launch fee and the
- *      Jito tip inside, and sign it with the mint,
+ *   3. build initialize_with_token_2022 paid by the creator's wallet, with uspad's launch fee, the
+ *      creator's dev buy if they asked for one (owner decision 2026-10-28) and the Jito tip inside, and
+ *      sign it with the mint,
  *   4. hand it to the creator's wallet to sign (owner decision 2026-10-27: the creator, not uspad, signs
  *      and pays, so explorers show them as the coin's dev). The wallet gets it without the mint's
  *      signature, so it can't go out without this process,
@@ -19,7 +20,7 @@ import { ComputeBudgetProgram, Keypair, PublicKey, TransactionMessage, Versioned
 import { MINT_SIZE, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { publishLive, getLaunchSettings } from "@divvy/server";
 import { LAUNCHLAB_DEFAULT_CURVE } from "@divvy/solana";
-import { assertCanSend, createTransaction, decodePool, MainnetDisabledError, poolAddresses, poolPriceSol, signatureOf } from "@divvy/solana/live";
+import { assertCanSend, createTransaction, CreateTooLargeError, decodePool, MainnetDisabledError, poolAddresses, poolPriceSol, signatureOf } from "@divvy/solana/live";
 import type { WorkerDeps } from "./deps";
 
 /** Creates sent per launch (each needs the creator's signature). */
@@ -79,6 +80,8 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
     await d.prisma.coin.update({ where: { id: coin.id }, data: { metadataUri, mint: mint.publicKey.toBase58(), poolState: poolId.toBase58() } });
     await d.prisma.launch.update({ where: { id: launchId }, data: { mintPubkey: mint.publicKey.toBase58(), feeLamports } });
 
+    // The creator's dev buy, as the API validated it.
+    const devBuyLamports = BigInt((launch.request as { devBuyLamports?: string }).devBuyLamports ?? "0");
     const { platform } = await d.chain();
     let landedSig: string | null = null;
     let sentAny = false;
@@ -118,6 +121,7 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
         cuPriceMicroLamports: useJito ? undefined : d.env.CU_PRICE_MICRO_LAMPORTS,
         tip: useJito ? { account: await d.jito.randomTipAccount(), lamports: d.sol.jitoTipLamports } : undefined,
         fee: feeLamports > 0n ? { to: new PublicKey(d.env.LAUNCH_FEE_WALLET!), lamports: feeLamports } : undefined,
+        devBuyLamports,
       });
 
       // 4. The creator signs in their wallet.
@@ -192,6 +196,8 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
     await markLanded(d, launchId, landedSig);
   } catch (e) {
     if (e instanceof LaunchError) return failLaunch(d, launchId, e.code, e.message);
+    // The API checks this before the launch; a longer metadata link than it assumed can still tip it over.
+    if (e instanceof CreateTooLargeError) return failLaunch(d, launchId, "DEV_BUY_TOO_LONG", "The coin's name is too long to fit a dev buy in its create. Shorten it, or launch without a dev buy. Nothing was charged.");
     if (e instanceof MainnetDisabledError) return failLaunch(d, launchId, "LAUNCHES_PAUSED", "Launches aren't open yet");
     d.log("launch: unexpected error", { launchId, error: e instanceof Error ? e.message : String(e) });
     // Unknown state: if a create was sent, the reconciler decides once its blockhash expires.

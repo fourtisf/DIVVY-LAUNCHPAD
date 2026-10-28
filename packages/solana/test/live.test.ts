@@ -4,11 +4,12 @@ import { join } from "node:path";
 import BN from "bn.js";
 import bs58 from "bs58";
 import { describe, expect, it, vi } from "vitest";
-import { Connection, Keypair, MessageV0, PublicKey, VersionedTransaction, type VersionedTransactionResponse } from "@solana/web3.js";
+import { Connection, Keypair, MessageV0, PublicKey, SystemProgram, VersionedTransaction, type VersionedTransactionResponse } from "@solana/web3.js";
 import { Curve, LaunchpadPool, PlatformConfig } from "@raydium-io/raydium-sdk-v2";
 import {
   assertCanSend,
   createTransaction,
+  CreateTooLargeError,
   decodeTradeEvent,
   EVENT_IX_TAG_LE,
   EventLayoutError,
@@ -285,6 +286,60 @@ describe("create transaction", () => {
     const { poolId } = poolAddresses(P.launchLab, mint.publicKey);
     expect(msg.staticAccountKeys.map((k) => k.toBase58())).toContain(poolId.toBase58());
     expect(VersionedTransaction.deserialize(tx.serialize()).signatures).toHaveLength(2);
+  });
+
+  const creatorCreate = (o: { name: string; devBuyLamports?: bigint }) => {
+    const creator = Keypair.generate().publicKey;
+    const mint = Keypair.generate();
+    const c = LAUNCHLAB_DEFAULT_CURVE;
+    const tx = createTransaction({
+      programId: P.launchLab,
+      payer: creator,
+      creator,
+      globalConfig: P.defaultGlobalConfig,
+      platformId: Keypair.generate().publicKey,
+      platform: PlatformConfig.decode(Buffer.alloc(PlatformConfig.span)),
+      mint: mint.publicKey,
+      mintKeypair: mint,
+      name: o.name,
+      symbol: "ABCDEFGHIJ",
+      // A local-storage metadata link as the worker writes it (meta/<coin id>.json).
+      uri: "https://uspad.fun/api/media/files/meta/cmhaaaaaaaaaaaaaaaaaaaaaa.json",
+      supply: new BN(c.supply.toString()),
+      totalSellA: new BN(c.totalSellA.toString()),
+      totalFundRaisingB: new BN(c.totalFundRaisingB.toString()),
+      recentBlockhash: bs58.encode(Buffer.alloc(32, 7)),
+      tip: { account: Keypair.generate().publicKey, lamports: 100_000 },
+      fee: { to: Keypair.generate().publicKey, lamports: 100_000_000n },
+      devBuyLamports: o.devBuyLamports,
+    });
+    return { tx, creator, mint: mint.publicKey };
+  };
+
+  it("puts the creator's dev buy right after the create, in the same transaction", () => {
+    const { tx, creator, mint } = creatorCreate({ name: "A".repeat(32), devBuyLamports: 1_500_000_000n });
+    const msg = tx.message;
+    const keys = msg.staticAccountKeys;
+    expect(keys[0]!.equals(creator)).toBe(true);
+    // The longest ASCII name and ticker still fit (1219 bytes), with room for a wallet's 12-byte priority fee.
+    expect(tx.serialize().length).toBeLessThanOrEqual(1232 - 12);
+    const progs = msg.compiledInstructions.map((i) => keys[i.programIdIndex]!.toBase58());
+    const create = progs.indexOf(P.launchLab.toBase58());
+    const buy = progs.lastIndexOf(P.launchLab.toBase58());
+    expect(buy).toBeGreaterThan(create);
+    const ix = msg.compiledInstructions[buy]!;
+    // buy_exact_in: amount_b (u64) at 8, min_amount_a at 16; account 0 the buyer, 9 the coin's mint.
+    expect(Buffer.from(ix.data).readBigUInt64LE(8)).toBe(1_500_000_000n);
+    expect(keys[ix.accountKeyIndexes[0]!]!.equals(creator)).toBe(true);
+    expect(keys[ix.accountKeyIndexes[9]!]!.equals(mint)).toBe(true);
+    // The SOL goes into the creator's own WSOL account, which is closed again after the buy.
+    const transfers = msg.compiledInstructions.filter((i) => keys[i.programIdIndex]!.equals(SystemProgram.programId) && Buffer.from(i.data).readUInt32LE(0) === 2);
+    expect(transfers.map((i) => Buffer.from(i.data).readBigUInt64LE(4))).toContain(1_500_000_000n);
+  });
+
+  it("refuses a create with a dev buy that doesn't fit one transaction", () => {
+    expect(() => creatorCreate({ name: "🚀".repeat(32), devBuyLamports: 1_000_000_000n })).toThrow(CreateTooLargeError);
+    expect(() => creatorCreate({ name: "🚀".repeat(32) })).not.toThrow();
   });
 });
 

@@ -298,6 +298,18 @@ describe.skipIf(!run)("live mode", () => {
       expect(short.json()).toMatchObject({ code: "NOT_ENOUGH_SOL", message: "Your wallet needs at least 0.032 SOL to launch: the 0.02 SOL launch fee plus about 0.009 SOL to create the coin." });
       balance = 2_000_000_000;
 
+      // A dev buy (owner decision 2026-10-28): from 0.01 SOL to 80, and the wallet covers it and its two
+      // token accounts too.
+      expect((await launch({ ...(await coin("Gold Fish", "GFISH")), devBuyLamports: "5000000" })).json()).toMatchObject({ code: "DEV_BUY_TOO_SMALL" });
+      expect((await launch({ ...(await coin("Gold Fish", "GFISH")), devBuyLamports: "80000000001" })).json()).toMatchObject({ code: "DEV_BUY_TOO_BIG" });
+      balance = 1_000_000_000;
+      const devShort = await launch({ ...(await coin("Gold Fish", "GFISH")), devBuyLamports: "1000000000" });
+      expect(devShort.json()).toMatchObject({
+        code: "NOT_ENOUGH_SOL",
+        message: "Your wallet needs at least 1.0362 SOL to launch: the 0.02 SOL launch fee, about 0.009 SOL to create the coin plus your 1 SOL dev buy.",
+      });
+      balance = 2_000_000_000;
+
       // No separate payment any more: the launch is queued straight away, past the cooldown and daily cap.
       const ids: string[] = [];
       for (const [name, ticker] of [["Gold Fish", "GFISH"], ["Rocket Cat", "RCAT"], ["Sky Whale", "SWHALE"]] as const) {

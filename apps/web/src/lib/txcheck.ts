@@ -33,8 +33,9 @@ const u32 = (b: Uint8Array, o: number): number | null => (b.length >= o + 4 ? vi
 const u64 = (b: Uint8Array, o: number): bigint | null => (b.length >= o + 8 ? view(b).getBigUint64(o, true) : null);
 const startsWith = (b: Uint8Array, prefix: Uint8Array) => b.length >= prefix.length && prefix.every((x, i) => b[i] === x);
 
-const wsolAta = (owner: PublicKey) =>
-  PublicKey.findProgramAddressSync([owner.toBuffer(), new PublicKey(TOKEN).toBuffer(), new PublicKey(WSOL).toBuffer()], new PublicKey(ATA))[0];
+const ataOf = (owner: PublicKey, program: string, mint: PublicKey) =>
+  PublicKey.findProgramAddressSync([owner.toBuffer(), new PublicKey(program).toBuffer(), mint.toBuffer()], new PublicKey(ATA))[0];
+const wsolAta = (owner: PublicKey) => ataOf(owner, TOKEN, new PublicKey(WSOL));
 
 export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, network: "mainnet-beta" | "devnet", kind: TxKind, coinMint?: PublicKey): void {
   const msg = tx.message;
@@ -86,6 +87,8 @@ export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, ne
 
 /** initialize_with_token_2022's discriminator, the create's own (Anchor sighash; packages/solana createInstruction). */
 const INITIALIZE_WITH_TOKEN_2022 = Uint8Array.from([0x25, 0xbe, 0x7e, 0xde, 0x2c, 0x9a, 0xab, 0x11]);
+/** buy_exact_in's discriminator (raydium-sdk-v2 launchpad/instrument.ts anchorDataBuf.buyExactIn), the dev buy's. */
+const BUY_EXACT_IN = Uint8Array.from([250, 234, 13, 123, 213, 156, 19, 236]);
 /** The Jito tip is a small transfer; anything bigger to an address the page can't check is refused. */
 const MAX_TIP_LAMPORTS = 1_000_000n;
 /** The most the create's priority fee (compute unit price × limit) may cost the creator (audit). */
@@ -96,8 +99,12 @@ const MAX_PRIORITY_LAMPORTS = 1_000_000n;
  * spend the creator's SOL on the new coin's accounts (inside LaunchLab's create), uspad's launch fee to
  * uspad's fee wallet, and one small Jito tip; nothing else. The payer and the coin's creator must both
  * be this wallet, the only other signer is the new mint, and no account comes from a lookup table.
+ *
+ * With `devBuyLamports` (owner decision 2026-10-28) it also holds the dev buy the creator typed, and
+ * only that: exactly that much SOL wrapped into their own WSOL account, one buy of this coin for that
+ * amount into their own token account, and the WSOL account closed back to them.
  */
-export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network: "mainnet-beta" | "devnet", fee: { to: string | null; lamports: bigint }): void {
+export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network: "mainnet-beta" | "devnet", fee: { to: string | null; lamports: bigint }, devBuyLamports = 0n): void {
   const msg = tx.message;
   const keys = msg.staticAccountKeys;
   if (msg.addressTableLookups.length) throw new UnsafeTransaction("this launch loads accounts from elsewhere");
@@ -111,6 +118,10 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
   let creates = 0;
   let fees = 0;
   let tips = 0;
+  let buys = 0;
+  let wraps = 0;
+  const myWsol = wsolAta(wallet);
+  const myCoin = ataOf(wallet, TOKEN_2022, mint);
   // Without a limit instruction a transaction may use up to 1.4M compute units.
   let cuPrice = 0n;
   let cuLimit = 1_400_000n;
@@ -121,6 +132,12 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
       // SetComputeUnitLimit (2, u32) and SetComputeUnitPrice (3, u64 micro-lamports).
       if (data[0] === 2 && data.length >= 5) cuLimit = BigInt(u32(data, 1)!);
       else if (data[0] === 3 && data.length >= 9) cuPrice = u64(data, 1)!;
+      continue;
+    }
+    if (prog === LAUNCHLAB[network] && devBuyLamports > 0n && startsWith(data, BUY_EXACT_IN)) {
+      // Accounts: 0 buyer, 5 their coin account, 6 their WSOL account, 9 the coin's mint; amount_in at 8.
+      if (buys++ || !at(ix, 0)?.equals(wallet) || !at(ix, 5)?.equals(myCoin) || !at(ix, 6)?.equals(myWsol) || !at(ix, 9)?.equals(mint)) throw new UnsafeTransaction("a dev buy for someone else or another coin");
+      if (u64(data, 8) !== devBuyLamports) throw new UnsafeTransaction("a dev buy that isn't the amount you typed");
       continue;
     }
     if (prog === LAUNCHLAB[network]) {
@@ -135,15 +152,31 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
       if (data.length !== 12 || u32(data, 0) !== 2 || !at(ix, 0)?.equals(wallet)) throw new UnsafeTransaction("a SOL transfer that isn't the launch fee or the tip");
       const to = at(ix, 1)?.toBase58();
       const lamports = u64(data, 4)!;
-      if (fee.to && to === fee.to && fees === 0) {
+      if (devBuyLamports > 0n && to === myWsol.toBase58() && wraps === 0) {
+        if (lamports !== devBuyLamports) throw new UnsafeTransaction("a dev buy that isn't the amount you typed");
+        wraps++;
+      } else if (fee.to && to === fee.to && fees === 0) {
         if (lamports > fee.lamports) throw new UnsafeTransaction("a launch fee above uspad's");
         fees++;
       } else if (tips === 0 && lamports <= MAX_TIP_LAMPORTS) tips++;
       else throw new UnsafeTransaction("a SOL transfer that isn't the launch fee or the tip");
       continue;
     }
+    if (devBuyLamports > 0n && prog === ATA) {
+      // Create-idempotent of the creator's own account for this coin or for WSOL: 0 payer, 2 owner, 3 mint.
+      const m = at(ix, 3);
+      if (data[0] !== 1 || !at(ix, 0)?.equals(wallet) || !at(ix, 2)?.equals(wallet) || !(m?.equals(mint) || m?.toBase58() === WSOL)) throw new UnsafeTransaction("a token account for someone else");
+      continue;
+    }
+    if (devBuyLamports > 0n && prog === TOKEN) {
+      // SyncNative on the creator's WSOL account, and closing it back to them after the buy.
+      if (data[0] === 17 && at(ix, 0)?.equals(myWsol)) continue;
+      if (data[0] === 9 && at(ix, 0)?.equals(myWsol) && at(ix, 1)?.equals(wallet)) continue;
+      throw new UnsafeTransaction(`token instruction ${data[0]} isn't part of a dev buy`);
+    }
     throw new UnsafeTransaction(`unexpected program ${prog}`);
   }
   if (creates !== 1) throw new UnsafeTransaction("this isn't a coin create");
+  if (devBuyLamports > 0n && (buys !== 1 || wraps !== 1)) throw new UnsafeTransaction("the dev buy you asked for is missing");
   if ((cuPrice * cuLimit) / 1_000_000n > MAX_PRIORITY_LAMPORTS) throw new UnsafeTransaction("a priority fee above 0.001 SOL");
 }

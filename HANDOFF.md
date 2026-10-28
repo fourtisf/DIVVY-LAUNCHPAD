@@ -37,7 +37,7 @@ Divvy was designed after reverse-engineering uselaunch.fun, a launcher on top of
 Kept from uselaunch:
 - **Anti-vamp checks:** ticker, name, picture and X account.
 - **No sniper in block 0:** the create is sent as a private Jito bundle and the mint address stays hidden until it lands.
-- **Free launch with no dev buy:** the launcher wallet pays rent.
+- **Free launch with no dev buy:** the launcher wallet pays rent. *Owner decisions since: the creator's wallet signs and pays (2026-10-27), and may add a dev buy to the create, with no cap but the curve's own, shown on the coin (2026-10-28).*
 
 ---
 
@@ -91,7 +91,7 @@ Shared UI pieces:
      - Quote mint: SOL.
      - `migrate_type = CPMM`.
      - Zero vesting.
-     - **No dev buy.**
+     - **No dev buy.** *Since 2026-10-28 (owner decision) the creator may add one to the create, shown on the coin (docs/VERIFIED.md item 29).*
    - **Payer/signer:** the Divvy **launcher wallet** (hot wallet) pays rent.
    - **Creator account:** the user's wallet, if LaunchLab allows a creator that is not the payer and does not sign, so creator fees accrue to the user on-chain. If the creator must sign, there are two options: (a) the user partially signs the transaction in their wallet, or (b) the launcher is the creator and Divvy forwards the creator share from its own claims. **VERIFY** which applies and pick (a) if possible.
 5. **Send as a private Jito bundle** with a tip. Never send through the public RPC.

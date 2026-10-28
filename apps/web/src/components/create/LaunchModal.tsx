@@ -49,6 +49,7 @@ export function LaunchModal({
   ticker,
   img,
   pays,
+  devBuy,
   onDone,
   onAnother,
 }: {
@@ -56,6 +57,8 @@ export function LaunchModal({
   ticker: string;
   img: string;
   pays: string;
+  /** The dev buy the creator typed, in lamports (0 for none): the create must hold exactly that. */
+  devBuy: bigint;
   onDone: (s: LaunchStatus) => void;
   onAnother: () => void;
 }) {
@@ -108,7 +111,7 @@ export function LaunchModal({
     try {
       if (!wallet.publicKey || !wallet.signTransaction) throw new UnsafeTransaction("this wallet can't sign the launch");
       const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
-      checkCreate(tx, wallet.publicKey, config.network, { to: config.launchFee.to, lamports: BigInt(config.launchFee.amount.raw) });
+      checkCreate(tx, wallet.publicKey, config.network, { to: config.launchFee.to, lamports: BigInt(config.launchFee.amount.raw) }, devBuy);
       setAskedAt(Date.now());
       console.info("launch: asking the wallet to sign the create", wallet.wallet?.adapter.name);
       const signed = await wallet.signTransaction(tx);

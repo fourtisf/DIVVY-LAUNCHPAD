@@ -14,6 +14,8 @@ export interface Storage {
   readonly driver: "local" | "s3";
   /** Stores the object and returns its public URL. Keys are content-addressed by the callers. */
   put(key: string, body: Buffer, contentType: string): Promise<string>;
+  /** The public URL `put` returns for `key`, without storing anything. */
+  publicUrl(key: string): string;
   /** Local driver only: read back for serving. */
   read?(key: string): Promise<{ body: Buffer; contentType: string } | null>;
 }
@@ -34,13 +36,15 @@ export function localStorage(dir: string, publicBase: string): Storage {
     if (!p.startsWith(root + sep)) throw new Error("invalid storage key");
     return p;
   };
+  const publicUrl = (key: string) => publicBase.replace(/\/$/, "") + "/" + key;
   return {
     driver: "local",
+    publicUrl,
     async put(key, body) {
       const p = path(key);
       await mkdir(dirname(p), { recursive: true });
       await writeFile(p, body, { mode: 0o644 });
-      return publicBase.replace(/\/$/, "") + "/" + key;
+      return publicUrl(key);
     },
     async read(key) {
       try {
@@ -60,12 +64,14 @@ export function s3Storage(cfg: { endpoint?: string; region: string; bucket: stri
     forcePathStyle: !!cfg.endpoint,
     credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
   });
+  const publicUrl = (key: string) => cfg.publicBase.replace(/\/$/, "") + "/" + key;
   return {
     driver: "s3",
+    publicUrl,
     async put(key, body, contentType) {
       assertKey(key);
       await client.send(new PutObjectCommand({ Bucket: cfg.bucket, Key: key, Body: body, ContentType: contentType, CacheControl: "public, max-age=31536000, immutable" }));
-      return cfg.publicBase.replace(/\/$/, "") + "/" + key;
+      return publicUrl(key);
     },
   };
 }

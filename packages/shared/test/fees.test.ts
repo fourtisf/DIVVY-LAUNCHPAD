@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyBps, assertSplit, bpsLabel, proRata, splitByWeights, splitClaim } from "../src/fees";
+import { applyBps, assertSplit, bpsLabel, DEV_BUY_MAX_LAMPORTS, devBuyEstimate, proRata, splitByWeights, splitClaim } from "../src/fees";
 
 describe("fee split", () => {
   it("accepts the target split and rejects one that doesn't add up", () => {
@@ -54,5 +54,19 @@ describe("proRata", () => {
 
   it("carries everything when nobody is eligible", () => {
     expect(proRata(50n, [])).toEqual({ items: [], dust: 50n });
+  });
+});
+
+describe("devBuyEstimate", () => {
+  it("prices a dev buy on the empty curve after the 1.25% fee", () => {
+    expect(devBuyEstimate(0n, 125)).toEqual({ tokens: 0n, pct: 0 });
+    // 1 SOL less 1.25% at the start price (about 2.8e-8 SOL a token): about 3.4% of supply.
+    const one = devBuyEstimate(1_000_000_000n, 125);
+    expect(one.pct).toBeGreaterThan(0.033);
+    expect(one.pct).toBeLessThan(0.035);
+    // Each SOL buys less than the one before.
+    expect(devBuyEstimate(2_000_000_000n, 125).pct).toBeLessThan(2 * one.pct);
+    // Even the most a dev buy may spend leaves the curve unfilled (793.1M of 1B are sold on it).
+    expect(devBuyEstimate(DEV_BUY_MAX_LAMPORTS, 125).pct).toBeLessThan(0.7931);
   });
 });

@@ -139,8 +139,24 @@ export function createInstruction(p: CreateParams): TransactionInstruction {
   return ix;
 }
 
+/** The most a transaction may be, signatures included (PACKET_DATA_SIZE). */
+export const MAX_TX_BYTES = 1232;
+
+/** The create plus its dev buy doesn't fit one transaction (long names in multi-byte characters). */
+export class CreateTooLargeError extends Error {
+  constructor(readonly bytes: number) {
+    super(`the create is ${bytes} bytes, over ${MAX_TX_BYTES}`);
+  }
+}
+
 export interface CreateTxParams extends CreateParams {
   mintKeypair: Keypair;
+  /**
+   * The creator's dev buy: buy_exact_in for this many lamports right after the create, in the same
+   * transaction, as the SDK's createLaunchpad does with createOnly false (launchpad.ts:460-490). The
+   * pool is new and nothing can trade before it, so the outcome is fixed and needs no slippage limit.
+   */
+  devBuyLamports?: bigint;
   /** Signs as the payer here. Without it only the mint signs: the payer (the creator's wallet) signs later. */
   payerKeypair?: Keypair;
   /** uspad's launch fee, from the payer, inside the create (it lands with the coin or not at all). */
@@ -155,15 +171,60 @@ export interface CreateTxParams extends CreateParams {
 export function createTransaction(p: CreateTxParams): VersionedTransaction {
   if (!p.mintKeypair.publicKey.equals(p.mint)) throw new Error("mint keypair mismatch");
   if (p.payerKeypair && !p.payerKeypair.publicKey.equals(p.payer)) throw new Error("payer keypair mismatch");
-  const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: p.cuLimit ?? 400_000 })];
+  const devBuy = p.devBuyLamports ?? 0n;
+  const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: p.cuLimit ?? (devBuy > 0n ? 600_000 : 400_000) })];
   if (p.cuPriceMicroLamports) ixs.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: p.cuPriceMicroLamports }));
   ixs.push(createInstruction(p));
+  if (devBuy > 0n) {
+    const { poolId, vaultA, vaultB } = poolAddresses(p.programId, p.mint);
+    ixs.push(
+      ...buyIxs(
+        { programId: p.programId, owner: p.creator, poolId, configId: p.globalConfig, platformId: p.platformId, creator: p.creator, mintA: p.mint, vaultA, vaultB, mintProgramA: TOKEN_2022_PROGRAM_ID },
+        new BN(devBuy.toString()),
+        new BN(1),
+      ),
+    );
+  }
   if (p.fee && p.fee.lamports > 0n) ixs.push(SystemProgram.transfer({ fromPubkey: p.payer, toPubkey: p.fee.to, lamports: p.fee.lamports }));
   if (p.tip) ixs.push(SystemProgram.transfer({ fromPubkey: p.payer, toPubkey: p.tip.account, lamports: p.tip.lamports }));
   const msg = new TransactionMessage({ payerKey: p.payer, recentBlockhash: p.recentBlockhash, instructions: ixs }).compileToV0Message();
   const tx = new VersionedTransaction(msg);
+  const bytes = tx.serialize().length;
+  if (bytes > MAX_TX_BYTES) throw new CreateTooLargeError(bytes);
   tx.sign(p.payerKeypair ? [p.payerKeypair, p.mintKeypair] : [p.mintKeypair]);
   return tx;
+}
+
+/**
+ * Whether a create with these strings, fee and dev buy fits one transaction: built with throwaway
+ * keys, as the worker builds it (the API asks before a launch is reserved).
+ */
+export function createFits(
+  p: Pick<CreateParams, "programId" | "globalConfig" | "platformId" | "platform" | "name" | "symbol" | "uri"> & { devBuyLamports: bigint; feeLamports: bigint; tip: boolean; cuPriceMicroLamports?: number },
+): boolean {
+  const key = () => Keypair.generate().publicKey;
+  const mint = Keypair.generate();
+  const creator = key();
+  try {
+    createTransaction({
+      ...p,
+      payer: creator,
+      creator,
+      mint: mint.publicKey,
+      mintKeypair: mint,
+      // Fixed-size fields: their values don't change the size.
+      supply: new BN(1),
+      totalSellA: new BN(1),
+      totalFundRaisingB: new BN(1),
+      recentBlockhash: PublicKey.default.toBase58(),
+      fee: p.feeLamports > 0n ? { to: key(), lamports: p.feeLamports } : undefined,
+      tip: p.tip ? { account: key(), lamports: 1 } : undefined,
+    });
+    return true;
+  } catch (e) {
+    if (e instanceof CreateTooLargeError) return false;
+    throw e;
+  }
 }
 
 /* ---------- quotes ---------- */
@@ -239,37 +300,60 @@ export interface TradeIxParams {
   mintProgramA: PublicKey;
 }
 
-function tradeAccounts(p: TradeIxParams) {
-  const userA = getAssociatedTokenAddressSync(p.pool.mintA, p.owner, false, p.mintProgramA);
+/** The pool's accounts a trade names: from its PoolState, or derived for a pool created in the same transaction. */
+interface TradePool {
+  programId: PublicKey;
+  owner: PublicKey;
+  poolId: PublicKey;
+  configId: PublicKey;
+  platformId: PublicKey;
+  creator: PublicKey;
+  mintA: PublicKey;
+  vaultA: PublicKey;
+  vaultB: PublicKey;
+  mintProgramA: PublicKey;
+}
+
+const tradePool = (p: TradeIxParams): TradePool => ({
+  programId: p.programId, owner: p.owner, poolId: p.poolId, configId: p.pool.configId, platformId: p.pool.platformId, creator: p.pool.creator,
+  mintA: p.pool.mintA, vaultA: p.pool.vaultA, vaultB: p.pool.vaultB, mintProgramA: p.mintProgramA,
+});
+
+function tradeAccounts(p: TradePool) {
+  const userA = getAssociatedTokenAddressSync(p.mintA, p.owner, false, p.mintProgramA);
   const userB = getAssociatedTokenAddressSync(NATIVE_MINT, p.owner, false, TOKEN_PROGRAM_ID);
   return {
     userA,
     userB,
     auth: getPdaLaunchpadAuth(p.programId).publicKey,
-    platformVault: platformFeeVault(p.programId, p.pool.platformId, p.pool.mintB),
-    creatorVault: creatorFeeVault(p.programId, p.pool.creator, p.pool.mintB),
+    platformVault: platformFeeVault(p.programId, p.platformId, NATIVE_MINT),
+    creatorVault: creatorFeeVault(p.programId, p.creator, NATIVE_MINT),
   };
 }
 
-/** Wrap SOL, buy with exact SOL in, unwrap leftovers. */
-export function buyInstructions(p: TradeIxParams & { lamportsIn: BN; minTokensOut: BN }): TransactionInstruction[] {
+function buyIxs(p: TradePool, lamportsIn: BN, minTokensOut: BN): TransactionInstruction[] {
   const a = tradeAccounts(p);
   return [
-    createAssociatedTokenAccountIdempotentInstruction(p.owner, a.userA, p.owner, p.pool.mintA, p.mintProgramA, ASSOCIATED_TOKEN_PROGRAM_ID),
+    createAssociatedTokenAccountIdempotentInstruction(p.owner, a.userA, p.owner, p.mintA, p.mintProgramA, ASSOCIATED_TOKEN_PROGRAM_ID),
     createAssociatedTokenAccountIdempotentInstruction(p.owner, a.userB, p.owner, NATIVE_MINT, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID),
-    SystemProgram.transfer({ fromPubkey: p.owner, toPubkey: a.userB, lamports: BigInt(p.lamportsIn.toString()) }),
+    SystemProgram.transfer({ fromPubkey: p.owner, toPubkey: a.userB, lamports: BigInt(lamportsIn.toString()) }),
     createSyncNativeInstruction(a.userB, TOKEN_PROGRAM_ID),
     buyExactInInstruction(
-      p.programId, p.owner, a.auth, p.pool.configId, p.pool.platformId, p.poolId, a.userA, a.userB, p.pool.vaultA, p.pool.vaultB,
-      p.pool.mintA, p.pool.mintB, p.mintProgramA, TOKEN_PROGRAM_ID, a.platformVault, a.creatorVault, p.lamportsIn, p.minTokensOut,
+      p.programId, p.owner, a.auth, p.configId, p.platformId, p.poolId, a.userA, a.userB, p.vaultA, p.vaultB,
+      p.mintA, NATIVE_MINT, p.mintProgramA, TOKEN_PROGRAM_ID, a.platformVault, a.creatorVault, lamportsIn, minTokensOut,
     ),
     createCloseAccountInstruction(a.userB, p.owner, p.owner, [], TOKEN_PROGRAM_ID),
   ];
 }
 
+/** Wrap SOL, buy with exact SOL in, unwrap leftovers. */
+export function buyInstructions(p: TradeIxParams & { lamportsIn: BN; minTokensOut: BN }): TransactionInstruction[] {
+  return buyIxs(tradePool(p), p.lamportsIn, p.minTokensOut);
+}
+
 /** Sell exact tokens in for SOL; the WSOL account is closed so the user gets native SOL. */
 export function sellInstructions(p: TradeIxParams & { tokensIn: BN; minLamportsOut: BN }): TransactionInstruction[] {
-  const a = tradeAccounts(p);
+  const a = tradeAccounts(tradePool(p));
   return [
     createAssociatedTokenAccountIdempotentInstruction(p.owner, a.userB, p.owner, NATIVE_MINT, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID),
     sellExactInInstruction(

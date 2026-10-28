@@ -205,6 +205,10 @@ model Coin {
   graduatedAt     DateTime?
   /// { x?: string, telegram?: string, website?: string }
   links           Json          @default("{}")
+  /// The creator's dev buy, inside the create (owner decision 2026-10-28): what it spent and got, from the
+  /// create's own trade as the indexer read it. 0 for none.
+  devBuyLamports  BigInt        @default(0)
+  devBuyTokens    BigInt        @default(0)
 
   launch           Launch?
   stats            CoinStats?

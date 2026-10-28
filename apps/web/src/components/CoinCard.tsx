@@ -5,6 +5,7 @@ import { agoMin, pct, usd } from "@divvy/shared";
 import { Coupon } from "./Coupon";
 import { Spark } from "./Spark";
 import { coinHref } from "@/lib/links";
+import { shareLabel } from "@/lib/devbuy";
 
 export interface CardCoin {
   name: string;
@@ -23,6 +24,8 @@ export interface CardCoin {
   paidUsd: number;
   holders: number;
   spark: number[];
+  /** Share of supply the creator bought in the create (owner decision 2026-10-28); 0 or absent for none. */
+  devBuyPct?: number;
 }
 
 /** Board card (prototype `card`). `asDiv` renders the create-page preview, which isn't a link. */
@@ -39,6 +42,11 @@ export function CoinCard({ c, asDiv = false }: { c: CardCoin; asDiv?: boolean })
             <span className="tk">${c.ticker}</span>
             {isNew && <span className="badge badge-new">New</span>}
             {c.graduated && <span className="badge badge-grad">Graduated</span>}
+            {c.devBuyPct ? (
+              <span className="badge badge-dev" title={`The creator bought ${shareLabel(c.devBuyPct)} of the supply in the create`}>
+                Dev {shareLabel(c.devBuyPct)}
+              </span>
+            ) : null}
           </div>
           <div className="card-sub" suppressHydrationWarning>
             {agoMin(c.ageMin)} by {c.creatorLabel}

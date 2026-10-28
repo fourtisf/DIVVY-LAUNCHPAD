@@ -9,6 +9,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import {
   avatarDataUri,
   bpsLabel,
+  devBuyEstimate,
   displayTicker,
   pct,
   type CheckResponse,
@@ -25,6 +26,7 @@ import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 import { LaunchModal } from "./LaunchModal";
 import { coinHref } from "@/lib/links";
+import { parseDevBuy, shareLabel } from "@/lib/devbuy";
 
 interface Draft {
   name: string;
@@ -34,13 +36,15 @@ interface Draft {
   x: string;
   tg: string;
   web: string;
+  /** The creator's dev buy in SOL, as typed (owner decision 2026-10-28). */
+  dev: string;
   /** Local preview URL and the server's answer for the uploaded picture. */
   imgPreview: string | null;
   upload: UploadResponse | null;
 }
 
 // Kept across page changes, like the prototype's `draft`.
-let saved: Draft = { name: "", ticker: "", desc: "", pays: "NVDAx", x: "", tg: "", web: "", imgPreview: null, upload: null };
+let saved: Draft = { name: "", ticker: "", desc: "", pays: "NVDAx", x: "", tg: "", web: "", dev: "", imgPreview: null, upload: null };
 
 type Check = { s: "idle" | "ok" | "fail"; m: string };
 const toCheck = (r: { status: Check["s"]; message: string } | undefined, idle: string): Check => (r ? { s: r.status, m: r.message } : { s: "idle", m: idle });
@@ -81,7 +85,7 @@ export function CreateForm() {
   const [d, setD] = useState<Draft>(saved);
   const [imgCheck, setImgCheck] = useState<Check>(() => (saved.upload ? { s: saved.upload.check.status, m: saved.upload.check.message } : { s: "idle", m: "Upload a picture" }));
   const [over, setOver] = useState(false);
-  const [launch, setLaunch] = useState<{ id: string; ticker: string; img: string; pays: string } | null>(null);
+  const [launch, setLaunch] = useState<{ id: string; ticker: string; img: string; pays: string; devBuy: bigint } | null>(null);
   // Why the last launch didn't happen, kept under the button: a toast alone is gone in 2.6 s.
   const [launchError, setLaunchError] = useState<string | null>(null);
   // The creator's wallet pays for the coin's create (owner decision 2026-10-27): uspad's fee inside it,
@@ -109,6 +113,10 @@ export function CreateForm() {
   const cx = d.x.trim() ? toCheck(checks?.x, "Checking…") : { s: "ok" as const, m: "Optional" };
   const stale = dq.ticker !== d.ticker || dq.name !== d.name || dq.x !== d.x;
   const ci = imgCheck;
+  // The dev buy: none when empty; about what it gets on the empty curve, after the trade fee.
+  const devBuy = parseDevBuy(d.dev);
+  const devSol = devBuy ? Number(devBuy) / 1e9 : 0;
+  const devShare = devBuy ? devBuyEstimate(devBuy, config.fees.tradeFeeBps).pct : 0;
 
   const handleFile = async (f: File | undefined) => {
     if (!f) return;
@@ -135,7 +143,8 @@ export function CreateForm() {
     }
   };
 
-  const ready = !stale && ct.s === "ok" && cn.s === "ok" && cx.s !== "fail" && ci.s === "ok";
+  const ready = !stale && ct.s === "ok" && cn.s === "ok" && cx.s !== "fail" && ci.s === "ok" && devBuy !== null;
+  const costs = [feeSol ? `the ${feeSol} SOL fee` : null, createSol ? `about ${createSol} SOL to create the coin` : null, devSol ? `your ${devSol} SOL dev buy` : null].filter(Boolean) as string[];
   const hint =
     ct.s !== "ok"
       ? "Fix the ticker to continue."
@@ -145,10 +154,10 @@ export function CreateForm() {
           ? "Add a picture to continue."
           : cx.s === "fail"
             ? "Fix the X account to continue."
-            : feeSol
-              ? `Ready. Your wallet approves the ${feeSol} SOL fee and about ${createSol} SOL to create the coin.`
-              : createSol
-                ? `Ready. Your wallet approves about ${createSol} SOL to create the coin.`
+            : devBuy === null
+              ? "Fix the dev buy to continue."
+              : costs.length
+                ? `Ready. Your wallet approves ${costs.length > 1 ? `${costs.slice(0, -1).join(", ")} and ${costs[costs.length - 1]}` : costs[0]}.`
                 : "Ready. Launching takes a few seconds.";
 
   const t = displayTicker(d.ticker) || "TICKER";
@@ -167,10 +176,13 @@ export function CreateForm() {
       const feeSig = heldFee.get(wallet) ?? undefined;
       const res = await api<{ launchId: string }>("/api/launch", {
         method: "POST",
-        body: JSON.stringify({ name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, x: d.x, telegram: d.tg, website: d.web, feeSig }),
+        body: JSON.stringify({
+          name: d.name, ticker: d.ticker, description: d.desc, imageId: d.upload.imageId, dividendAsset: d.pays, x: d.x, telegram: d.tg, website: d.web, feeSig,
+          devBuyLamports: (devBuy ?? 0n).toString(),
+        }),
       });
       if (feeSig) heldFee.clear(wallet);
-      setLaunch({ id: res.launchId, ticker: t, img: d.upload.url, pays: d.pays });
+      setLaunch({ id: res.launchId, ticker: t, img: d.upload.url, pays: d.pays, devBuy: devBuy ?? 0n });
     } catch (err) {
       const m = errorText(err, "The launch failed. Try again.");
       if (m) {
@@ -180,7 +192,7 @@ export function CreateForm() {
     }
   };
 
-  const blank = (): Draft => ({ name: "", ticker: "", desc: "", pays: d.pays, x: "", tg: "", web: "", imgPreview: null, upload: null });
+  const blank = (): Draft => ({ name: "", ticker: "", desc: "", pays: d.pays, x: "", tg: "", web: "", dev: "", imgPreview: null, upload: null });
   const another = () => {
     setLaunch(null);
     saved = blank();
@@ -218,8 +230,8 @@ export function CreateForm() {
         <h1>Create a coin</h1>
         <p>
           {feeSol || createSol
-            ? `Your wallet signs the create and pays ${feeSol ? `${feeSol} SOL to launch plus ` : ""}about ${createSol} SOL for the coin itself. It goes out in a private bundle, nobody gets a dev buy, and your holders get the dividend.`
-            : "It's free. uspad's launcher creates your coin in a private bundle and pays the rent. Nobody gets a dev buy, and your holders get the dividend."}
+            ? `Your wallet signs the create and pays ${feeSol ? `${feeSol} SOL to launch plus ` : ""}about ${createSol} SOL for the coin itself. It goes out in a private bundle, so nobody buys before you, and your holders get the dividend.`
+            : "It's free. uspad's launcher creates your coin in a private bundle and pays the rent, so nobody buys before it lands, and your holders get the dividend."}
         </p>
       </div>
       <div className="create-grid">
@@ -326,6 +338,27 @@ export function CreateForm() {
               <input className="tinput" id="fWeb" placeholder="https://" value={d.web} onChange={set("web")} />
             </div>
           </section>
+
+          <section className="fsec">
+            <div className="fsec-h">
+              <span className="n">4</span>
+              <div>
+                <h2>Dev buy</h2>
+                <p>Optional. Buy your own coin inside its create, at the starting price, before anyone else can.</p>
+              </div>
+            </div>
+            <div className="fld">
+              <label className="lbl" htmlFor="fDev">Amount in SOL <em>optional</em></label>
+              <input className={"tinput" + (devBuy === null ? " bad" : "")} id="fDev" inputMode="decimal" autoComplete="off" placeholder="0" value={d.dev} onChange={set("dev")} />
+            </div>
+            <p className="note" id="devNote">
+              {devBuy === null
+                ? "Use an amount from 0.01 to 80 SOL."
+                : devBuy
+                  ? `About ${shareLabel(devShare)} of the supply. Your coin's page shows everyone how much you bought.`
+                  : "Leave it empty for no dev buy. Your coin's page shows everyone how much you bought."}
+            </p>
+          </section>
         </form>
 
         <aside className="sticky stack">
@@ -351,7 +384,7 @@ export function CreateForm() {
             <div className="sumline"><span>Cost to launch</span><b>{feeSol || createSol ? `${feeSol ? `${feeSol} + ` : ""}~${createSol} SOL` : "Free"}</b></div>
             <div className="sumline"><span>Your share of every trade</span><b>{bpsLabel(config.fees.creatorBps)}</b></div>
             <div className="sumline"><span>Holders&apos; share</span><b id="holdShare">{bpsLabel(config.fees.holdersBps)} in {d.pays}</b></div>
-            <div className="sumline"><span>Dev buy</span><b>None, for anyone</b></div>
+            <div className="sumline"><span>Dev buy</span><b id="devSum">{devSol ? `${devSol} SOL, about ${shareLabel(devShare)}` : "None"}</b></div>
             <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
               Launch coin
             </button>
@@ -369,7 +402,7 @@ export function CreateForm() {
           </div>
         </aside>
       </div>
-      {launch && <LaunchModal launchId={launch.id} ticker={launch.ticker} img={launch.img} pays={launch.pays} onDone={done} onAnother={another} />}
+      {launch && <LaunchModal launchId={launch.id} ticker={launch.ticker} img={launch.img} pays={launch.pays} devBuy={launch.devBuy} onDone={done} onAnother={another} />}
     </>
   );
 }

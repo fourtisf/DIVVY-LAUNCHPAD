@@ -119,7 +119,7 @@ function deps(params: DivvyParams, envOverrides: Record<string, string> = {}): W
     params,
     prisma,
     redis,
-    storage: { driver: "local", put: async () => "" },
+    storage: { driver: "local", put: async () => "", publicUrl: () => "" },
     sol: { cluster: "devnet", mainnetEnabled: false, rpcUrl: "https://rpc.invalid", platformConfig: Keypair.generate().publicKey, globalConfig: p.defaultGlobalConfig, jitoUrl: "", jitoTipLamports: 1000, jupBaseUrl: "" },
     conn,
     jito: {} as WorkerDeps["jito"],

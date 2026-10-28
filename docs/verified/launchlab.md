@@ -171,7 +171,7 @@ The optional allow-config and curve-rule PDAs are appended after these (`:316-31
   - `poolId = PDA(["pool", mintA, mintB])` (`pda.ts:28`; IDL `:2569`)
   - `vault = PDA(["pool_vault", pool, mint])` (`pda.ts:32`)
   - `auth = PDA(["vault_auth_seed"])` (`pda.ts:15`)
-- **High-level equivalents:** the mint keypair goes in `extraSigners` (`launchpad.ts:459`). `createOnly: true` skips the dev buy (`launchpad.ts:460`; `type.ts:41`), although `buyAmount` is still a required field (`type.ts:12`). Calling the builder directly adds no buy instruction at all.
+- **High-level equivalents:** the mint keypair goes in `extraSigners` (`launchpad.ts:459`). `createOnly: true` skips the dev buy (`launchpad.ts:460`; `type.ts:41`), although `buyAmount` is still a required field (`type.ts:12`). Calling the builder directly adds no buy instruction at all. Since 2026-10-28 (owner decision) uspad adds the creator's optional dev buy after it, the way `createOnly: false` does (docs/VERIFIED.md item 29).
 - **Client-side limits** (`launchpad.ts:235-236`): `symbol.length <= 10` and a non-empty `uri`. `Curve.checkParam` also requires `decimals === 6` (`curve/curve.ts:213`).
 
 **Source:** as cited above, plus raydium-docs-v1 `products/launchlab/instructions.mdx:98-99`:

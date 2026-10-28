@@ -47,6 +47,31 @@ export function splitByWeights<K extends string>(
   return out;
 }
 
+/* ---------- the creator's dev buy ---------- */
+
+/**
+ * The most a dev buy may spend: under the 85 SOL the curve raises, so a create never fills its own
+ * curve. There is no other cap (owner decision 2026-10-28).
+ */
+export const DEV_BUY_MAX_LAMPORTS = 80_000_000_000n;
+/** The least a dev buy may spend, so its fee and its tokens are never rounding dust. */
+export const DEV_BUY_MIN_LAMPORTS = 10_000_000n;
+/** The empty curve's virtual reserves: 1B supply, 793.1M sold for 85 SOL (docs/verified/launchlab.md, curve math). */
+const START_VIRTUAL_A = 1_073_025_605_596_382n;
+const START_VIRTUAL_B = 30_000_852_951n;
+const COIN_SUPPLY = 1_000_000_000_000_000n;
+
+/**
+ * About what a dev buy of `lamports` gets on the empty curve once the trade fee is taken: tokens in
+ * base units and the share of supply (0..1). The coin page shows the real amount once the create lands.
+ */
+export function devBuyEstimate(lamports: bigint, tradeFeeBps: number): { tokens: bigint; pct: number } {
+  if (lamports <= 0n) return { tokens: 0n, pct: 0 };
+  const net = lamports - (lamports * BigInt(tradeFeeBps) + 9_999n) / 10_000n;
+  const tokens = (net * START_VIRTUAL_A) / (START_VIRTUAL_B + net);
+  return { tokens, pct: Number((tokens * 1_000_000n) / COIN_SUPPLY) / 1_000_000 };
+}
+
 /** The holders' and uspad's weights in the platform fee. */
 export type PlatformSplit = Pick<FeeSplitBps, "holdersBps" | "divvyBps">;
 

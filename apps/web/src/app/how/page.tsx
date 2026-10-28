@@ -44,7 +44,7 @@ export default async function HowPage() {
           <span className="n">3</span>
           <div>
             <h3>Your wallet creates it, in a private bundle</h3>
-            <p>Your wallet signs and pays for the create on a Raydium LaunchLab bonding curve, so on chain and on explorers the coin is yours. The create goes out as a private bundle and the address isn&apos;t shown to anyone else before it lands, so nobody can buy in the block it&apos;s created in. There&apos;s no dev buy for anyone.</p>
+            <p>Your wallet signs and pays for the create on a Raydium LaunchLab bonding curve, so on chain and on explorers the coin is yours. The create goes out as a private bundle and the address isn&apos;t shown to anyone else before it lands, so nobody can buy in the block it&apos;s created in. You can add a dev buy to the create, at the starting price, and the coin page shows everyone how much you bought.</p>
           </div>
         </li>
         <li>

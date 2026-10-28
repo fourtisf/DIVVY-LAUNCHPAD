@@ -141,6 +141,7 @@ export function toSummary(c: MockCoin, now: number): CoinSummary {
     paid24h: amount(paid24hUsd / a.priceUsd, a.decimals),
     progress: c.progress,
     spark: spark(c, now),
+    devBuyPct: c.devBuy,
   };
 }
 

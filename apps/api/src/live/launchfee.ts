@@ -20,6 +20,11 @@ type Reply = Parameters<typeof sendError>[0];
  */
 export const CREATE_COST_LAMPORTS = 9_000_000n;
 export const CREATE_BALANCE_LAMPORTS = 12_000_000n;
+/**
+ * What a dev buy needs on top of its SOL: the rent of the creator's account for the coin (Token-2022,
+ * kept) and of the WSOL account the buy goes through (closed again inside the create), about 0.0021 each.
+ */
+export const DEV_BUY_ACCOUNTS_LAMPORTS = 4_200_000n;
 const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 /**
  * A payment older than this can't pay for a launch: it was made for something else. A day, so a

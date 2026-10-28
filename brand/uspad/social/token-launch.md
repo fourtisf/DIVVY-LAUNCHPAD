@@ -134,10 +134,10 @@ CA: [CA]
 uspad.fun
 ```
 
-## X bio for @uspadfun (118 of 160 characters)
+## X bio for @uspadfun (111 of 160 characters)
 
 ```text
-Memecoins that pay their holders in US stocks, every hour. Launch on Solana in seconds: no snipers, no dev buy. $USPAD
+Memecoins that pay their holders in US stocks, every hour. Launch on Solana in seconds, with no snipers. $USPAD
 ```
 
 ## $USPAD's description (token pages such as DEX Screener, 218 of 280 characters with NVDAx)

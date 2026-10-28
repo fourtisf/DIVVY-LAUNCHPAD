@@ -59,7 +59,7 @@ function deps(sol: Partial<SolanaEnv>): WorkerDeps {
     params: loadParams({}),
     prisma,
     redis,
-    storage: { driver: "local", put: async (key: string) => `https://media.test/${key}` },
+    storage: { driver: "local", put: async (key: string) => `https://media.test/${key}`, publicUrl: (key: string) => `https://media.test/${key}` },
     sol: { cluster: "devnet", mainnetEnabled: false, rpcUrl: "", platformConfig: Keypair.generate().publicKey, globalConfig: P.defaultGlobalConfig, jitoUrl: "", jitoTipLamports: 100_000, jupBaseUrl: "", ...sol },
     conn,
     jito,
@@ -229,6 +229,23 @@ describe.skipIf(!run)("launch pipeline", () => {
     await processLaunch(paid(loadParams({ ADMIN_WALLETS: coin.creatorWallet })), admins.id);
     await done();
     expect(transfers(bundles[1]![0]!)).toEqual([{ from: me, to: tipAccount.toBase58(), lamports: 100_000n }]);
+  });
+
+  it("puts the creator's dev buy inside the create, right after it (owner decision 2026-10-28)", async () => {
+    const { launch } = await pendingLaunch("DEV");
+    await prisma.launch.update({ where: { id: launch.id }, data: { request: { name: "DEV coin", ticker: "DEV", devBuyLamports: "1500000000" } } });
+    const done = wallet(launch.id);
+    await processLaunch(deps({ cluster: "mainnet-beta", mainnetEnabled: true }), launch.id);
+    await done();
+    expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("indexed");
+    const tx = VersionedTransaction.deserialize(Buffer.from(bundles[0]![0]!, "base64"));
+    const k = tx.message.staticAccountKeys;
+    const launchLab = tx.message.compiledInstructions.filter((ix) => k[ix.programIdIndex]!.equals(P.launchLab));
+    expect(launchLab).toHaveLength(2);
+    // buy_exact_in for 1.5 SOL, by the creator.
+    expect(Buffer.from(launchLab[1]!.data).readBigUInt64LE(8)).toBe(1_500_000_000n);
+    expect(k[launchLab[1]!.accountKeyIndexes[0]!]!.equals(creatorKp.publicKey)).toBe(true);
+    expect(tx.signatures.filter((s) => s.some((b) => b !== 0))).toHaveLength(2);
   });
 
   it("a creator who turns the create down in their wallet is charged nothing", async () => {
@@ -402,6 +419,8 @@ describe.skipIf(!run)("launch pipeline", () => {
       ["d1", "2026-10-26T00:00:00.000Z", 1_000_000_000n],
     ]);
     expect(touched.has(coin.id)).toBe(true);
+    // The buy came from the coin's creator, in its create: that's their dev buy.
+    expect(await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } })).toMatchObject({ devBuyLamports: 1_000_000_000n, devBuyTokens: 35_000_000_000_000n });
   });
 
   it("walks a stream oldest first, a slice per call, fetching ahead without applying out of order", async () => {

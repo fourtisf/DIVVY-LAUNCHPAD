@@ -4,6 +4,8 @@ import { PublicKey } from "@solana/web3.js";
 import { Prisma } from "@divvy/db";
 import {
   checkImageFile,
+  DEV_BUY_MAX_LAMPORTS,
+  DEV_BUY_MIN_LAMPORTS,
   checkName,
   checkTicker,
   checkX,
@@ -23,11 +25,12 @@ import {
   type UploadResponse,
 } from "@divvy/shared";
 import { getLaunchSettings } from "@divvy/server";
+import { createFits } from "@divvy/solana/live";
 import { sendCheckFailure, sendError } from "../../errors";
 import { processImage } from "../../media";
 import type { LiveDeps } from "../deps";
 import { invalidateBoard } from "../data";
-import { CREATE_BALANCE_LAMPORTS, CREATE_COST_LAMPORTS, launchFee } from "../launchfee";
+import { CREATE_BALANCE_LAMPORTS, CREATE_COST_LAMPORTS, DEV_BUY_ACCOUNTS_LAMPORTS, launchFee } from "../launchfee";
 import { getViewer, refuseBlockedCountry, requireViewer } from "../viewer";
 
 /**
@@ -152,6 +155,10 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     const tg = Telegram.safeParse(b.telegram ?? "");
     if (!web.success) return sendError(reply, 422, "BAD_WEBSITE", "The website must be an http(s) link");
     if (!tg.success) return sendError(reply, 422, "BAD_TELEGRAM", "Use a t.me link or @group for Telegram");
+    // The creator's dev buy, inside the create (owner decision 2026-10-28: no cap but the curve's own).
+    const devBuy = BigInt(b.devBuyLamports);
+    if (devBuy > 0n && devBuy < DEV_BUY_MIN_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_SMALL", `A dev buy starts at ${Number(DEV_BUY_MIN_LAMPORTS) / 1e9} SOL`);
+    if (devBuy > DEV_BUY_MAX_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_BIG", `A dev buy can be up to ${Number(DEV_BUY_MAX_LAMPORTS) / 1e9} SOL: the curve fills at 85`);
     // Creator-paid launches (LAUNCH_FEE_LAMPORTS): the fee stands in for the free-launch limits. Admins
     // don't pay; the fee goes to the wallet they run.
     const paid = d.env.LAUNCH_FEE_LAMPORTS > 0n && !v.isAdmin;
@@ -181,11 +188,40 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
       // The creator's wallet pays for the create and the fee inside it: check it can before anything is
       // reserved (an RPC hiccup doesn't block the launch; the wallet's own check comes before signing).
       const feeDue = paid && !fee ? d.env.LAUNCH_FEE_LAMPORTS : 0n;
-      const need = CREATE_BALANCE_LAMPORTS + feeDue;
+      if (devBuy > 0n) {
+        // A long name in multi-byte characters can leave no room for the buy in the create. The chain
+        // read is cached; without it the worker's own check still stops the launch before anything is sent.
+        const platform = await d
+          .chain()
+          .then((c) => c.platform)
+          .catch(() => null);
+        const fits =
+          !platform ||
+          createFits({
+            programId: d.programs.launchLab,
+            globalConfig: d.sol.globalConfig,
+            platformId: d.sol.platformConfig,
+            platform,
+            name: b.name.trim(),
+            symbol: displayTicker(b.ticker),
+            // The worker writes meta/<coin id>.json; coin ids are 25-character cuids.
+            uri: d.storage.publicUrl(`meta/${"c".repeat(25)}.json`),
+            devBuyLamports: devBuy,
+            feeLamports: feeDue,
+            tip: d.sol.cluster === "mainnet-beta",
+          });
+        if (!fits) return sendError(reply, 422, "DEV_BUY_TOO_LONG", "This name is too long to fit a dev buy in the create. Shorten it, or launch without a dev buy.");
+      }
+      const need = CREATE_BALANCE_LAMPORTS + feeDue + (devBuy > 0n ? devBuy + DEV_BUY_ACCOUNTS_LAMPORTS : 0n);
       const balance = await d.conn.getBalance(new PublicKey(v.wallet), "confirmed").catch(() => null);
       if (balance !== null && BigInt(balance) < need) {
-        const parts = feeDue > 0n ? `the ${Number(feeDue) / 1e9} SOL launch fee plus about ${Number(CREATE_COST_LAMPORTS) / 1e9} SOL to create the coin` : `about ${Number(CREATE_COST_LAMPORTS) / 1e9} SOL to create the coin`;
-        return sendError(reply, 402, "NOT_ENOUGH_SOL", `Your wallet needs at least ${Number(need) / 1e9} SOL to launch: ${parts}.`);
+        const parts = [
+          feeDue > 0n ? `the ${Number(feeDue) / 1e9} SOL launch fee` : null,
+          `about ${Number(CREATE_COST_LAMPORTS) / 1e9} SOL to create the coin`,
+          devBuy > 0n ? `your ${Number(devBuy) / 1e9} SOL dev buy` : null,
+        ].filter(Boolean);
+        const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} plus ${parts[parts.length - 1]}` : parts[0];
+        return sendError(reply, 402, "NOT_ENOUGH_SOL", `Your wallet needs at least ${Number(need) / 1e9} SOL to launch: ${list}.`);
       }
 
       let launchId: string;

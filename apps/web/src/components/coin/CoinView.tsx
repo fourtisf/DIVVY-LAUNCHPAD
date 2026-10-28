@@ -30,6 +30,7 @@ import { useToast } from "../Toasts";
 import { CandleChart } from "./CandleChart";
 import { ReportButton } from "./ReportButton";
 import { TradeBox } from "./TradeBox";
+import { shareLabel } from "@/lib/devbuy";
 
 type List<T> = { items: T[]; nextCursor?: string | null };
 
@@ -104,6 +105,10 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
               {short(coin.mint)}
             </button>
             <span className="tag"><Icon name="shield" />Private bundle launch</span>
+            <span className="tag" id="devBuyTag" title={coin.devBuyPct ? `The creator bought ${shareLabel(coin.devBuyPct)} of the supply inside the create` : "The creator didn't buy any in the create"}>
+              <Icon name="gift" />
+              {coin.devBuyPct ? `Dev bought ${shareLabel(coin.devBuyPct)}` : "No dev buy"}
+            </span>
             <ReportButton mint={coin.mint} ticker={coin.ticker} />
           </div>
         </div>

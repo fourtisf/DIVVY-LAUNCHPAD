@@ -17,4 +17,5 @@ export const toCard = (c: CoinSummary, now = Date.now()): CardCoin => ({
   paidUsd: c.paidUsd,
   holders: c.holders,
   spark: c.spark,
+  devBuyPct: c.devBuyPct,
 });

@@ -149,6 +149,75 @@ describe("checkCreate", () => {
   });
 });
 
+describe("checkCreate with a dev buy (owner decision 2026-10-28)", () => {
+  const me = Keypair.generate().publicKey;
+  const mint = Keypair.generate().publicKey;
+  const other = Keypair.generate().publicKey;
+  const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+  const ata22 = (owner: PublicKey, m: PublicKey) => PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_2022.toBuffer(), m.toBuffer()], ATA)[0];
+  const meta = (pubkey: PublicKey, isSigner = false, isWritable = false) => ({ pubkey, isSigner, isWritable });
+  const create = new TransactionInstruction({
+    programId: LAUNCHLAB,
+    keys: [me, me, ...Array.from({ length: 4 }, () => Keypair.generate().publicKey), mint].map((k, i) => meta(k, i === 0 || i === 6, i === 0 || i >= 5)),
+    data: Buffer.concat([Buffer.from("25be7ede2c9aab11", "hex"), Buffer.alloc(40)]),
+  });
+  const ataIx = (m: PublicKey, prog: PublicKey, owner = me) =>
+    new TransactionInstruction({
+      programId: ATA,
+      keys: [meta(me, true, true), meta(prog.equals(TOKEN) ? ata(owner, m) : ata22(owner, m), false, true), meta(owner), meta(m), meta(SystemProgram.programId), meta(prog)],
+      data: Buffer.from([1]),
+    });
+  const u64 = (n: bigint) => {
+    const b = Buffer.alloc(8);
+    b.writeBigUInt64LE(n);
+    return b;
+  };
+  // buy_exact_in: 0 buyer, 5 their coin account, 6 their WSOL account, 9 the mint (raydium-sdk-v2 buyExactInInstruction).
+  const buy = (lamports: bigint, o: { coinAccount?: PublicKey; m?: PublicKey } = {}) => {
+    const k = Array.from({ length: 18 }, () => Keypair.generate().publicKey);
+    [k[0], k[5], k[6], k[9]] = [me, o.coinAccount ?? ata22(me, mint), ata(me, WSOL), o.m ?? mint];
+    return new TransactionInstruction({
+      programId: LAUNCHLAB,
+      keys: k.map((x, i) => meta(x, i === 0, i === 0 || i === 5 || i === 6)),
+      data: Buffer.concat([Buffer.from([250, 234, 13, 123, 213, 156, 19, 236]), u64(lamports), u64(1n), u64(0n)]),
+    });
+  };
+  const wrapIx = (lamports: number) => SystemProgram.transfer({ fromPubkey: me, toPubkey: ata(me, WSOL), lamports });
+  const sync = new TransactionInstruction({ programId: TOKEN, keys: [meta(ata(me, WSOL), false, true)], data: Buffer.from([17]) });
+  const close = (to = me) => new TransactionInstruction({ programId: TOKEN, keys: [meta(ata(me, WSOL), false, true), meta(to, false, true), meta(me, true)], data: Buffer.from([9]) });
+  const devBuy = (o: { wrap?: number; buy?: TransactionInstruction; close?: TransactionInstruction } = {}) => [
+    ataIx(mint, TOKEN_2022),
+    ataIx(WSOL, TOKEN),
+    wrapIx(o.wrap ?? 1_000_000_000),
+    sync,
+    o.buy ?? buy(1_000_000_000n),
+    o.close ?? close(),
+  ];
+  const build = (ixs: TransactionInstruction[]) =>
+    new VersionedTransaction(new TransactionMessage({ payerKey: me, recentBlockhash: "11111111111111111111111111111111", instructions: ixs }).compileToV0Message());
+  const tip = SystemProgram.transfer({ fromPubkey: me, toPubkey: Keypair.generate().publicKey, lamports: 100_000 });
+  const fee = { to: null, lamports: 0n };
+  const check = (ixs: TransactionInstruction[], typed: bigint) => () => checkCreate(build([create, ...ixs, tip]), me, "mainnet-beta", fee, typed);
+
+  it("passes the dev buy the creator typed, into their own accounts", () => {
+    expect(check(devBuy(), 1_000_000_000n)).not.toThrow();
+  });
+
+  it("refuses a dev buy nobody asked for, or of another amount", () => {
+    expect(check(devBuy(), 0n)).toThrow(UnsafeTransaction);
+    expect(check(devBuy({ buy: buy(2_000_000_000n) }), 1_000_000_000n)).toThrow(/amount you typed/);
+    expect(check(devBuy({ wrap: 2_000_000_000 }), 1_000_000_000n)).toThrow(/amount you typed/);
+    expect(check([], 1_000_000_000n)).toThrow(/missing/);
+  });
+
+  it("refuses a dev buy into someone else's account, of another coin, or that hands the WSOL to someone else", () => {
+    expect(check(devBuy({ buy: buy(1_000_000_000n, { coinAccount: ata22(other, mint) }) }), 1_000_000_000n)).toThrow(/someone else/);
+    expect(check(devBuy({ buy: buy(1_000_000_000n, { m: Keypair.generate().publicKey }) }), 1_000_000_000n)).toThrow(/another coin/);
+    expect(check(devBuy({ close: close(other) }), 1_000_000_000n)).toThrow(/isn't part of a dev buy/);
+    expect(check([ataIx(mint, TOKEN_2022, other), ...devBuy()], 1_000_000_000n)).toThrow(/token account for someone else/);
+  });
+});
+
 describe("in the browser", () => {
   // The browser's Buffer is Next.js's polyfill, without readBigUInt64LE: the checks must not need it
   // (2026-10-28: every creator-signed create failed here before the wallet saw it).

@@ -229,6 +229,19 @@ export class Indexer {
       if (await this.saveTrade(coin, row, BigInt(tx.slot), ts)) touched.add(coin.id);
     }
 
+    // The creator's dev buy: their own buy inside the coin's create (owner decision 2026-10-28). Set, not
+    // added, so reading the create again changes nothing.
+    for (const pc of parsed.poolCreates) {
+      const buys = parsed.trades.filter((t) => t.event.side === "buy" && t.event.poolState.equals(pc.poolState) && t.trader?.equals(pc.creator));
+      const coin = buys.length ? await this.coinByPool(pc.poolState.toBase58()) : null;
+      if (!coin) continue;
+      await this.d.prisma.coin.update({
+        where: { id: coin.id },
+        data: { devBuyLamports: buys.reduce((a, t) => a + t.event.amountIn, 0n), devBuyTokens: buys.reduce((a, t) => a + t.event.amountOut, 0n) },
+      });
+      touched.add(coin.id);
+    }
+
     for (const m of parsed.cpmmPools) {
       const coinMint = m.token0.toBase58() === WSOL_MINT ? m.token1 : m.token0;
       await this.graduate(coinMint.toBase58(), m.lpPool.toBase58(), ts, sig);

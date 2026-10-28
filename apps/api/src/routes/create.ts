@@ -4,12 +4,15 @@ import { z } from "zod";
 import BN from "bn.js";
 import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { LAUNCHLAB_DEFAULT_CURVE } from "@divvy/solana";
-import { createTransaction, programs, type PlatformState } from "@divvy/solana/live";
+import { createTransaction, CreateTooLargeError, programs, type PlatformState } from "@divvy/solana/live";
 import {
   checkImageFile,
   checkName,
   checkTicker,
   checkX,
+  DEV_BUY_MAX_LAMPORTS,
+  DEV_BUY_MIN_LAMPORTS,
+  devBuyEstimate,
   displayTicker,
   IMAGE_MAX_BYTES,
   imageOk,
@@ -22,6 +25,7 @@ import {
 import { sendCheckFailure, sendError } from "../errors";
 import { processImage } from "../media";
 import { ASSET, type MockCoin } from "../mock/data";
+import { FEES } from "./public";
 import { DEMO_WALLET, LAUNCH_STEP_MS, launchClock, type MockStore } from "../mock/store";
 import type { SessionLookup } from "./auth";
 
@@ -32,7 +36,7 @@ const MAX_MOCK_UPLOADS = 500;
  * program, the curve, a Jito tip) and signed by its mint, so the page's checks and the wallet see the
  * real thing. Returned without signatures, as the API hands it over in live mode.
  */
-function mockCreate(creator: PublicKey, ticker: string, name: string): { mint: string; unsigned: string } {
+function mockCreate(creator: PublicKey, ticker: string, name: string, devBuyLamports: bigint): { mint: string; unsigned: string } {
   const mint = Keypair.generate();
   const P = programs("mainnet-beta");
   const tx = createTransaction({
@@ -53,6 +57,7 @@ function mockCreate(creator: PublicKey, ticker: string, name: string): { mint: s
     totalFundRaisingB: new BN(LAUNCHLAB_DEFAULT_CURVE.totalFundRaisingB.toString()),
     recentBlockhash: Keypair.generate().publicKey.toBase58(),
     tip: { account: Keypair.generate().publicKey, lamports: 100_000 },
+    devBuyLamports,
   });
   return { mint: mint.publicKey.toBase58(), unsigned: Buffer.from(new VersionedTransaction(tx.message).serialize()).toString("base64") };
 }
@@ -121,6 +126,9 @@ export async function createRoutes(app: FastifyInstance, { store, session }: { s
     if (!up) return sendError(reply, 422, "IMAGE_EMPTY", "Upload a picture");
     const asset = ASSET[b.dividendAsset];
     if (!asset) return sendError(reply, 422, "ASSET_UNKNOWN", "Pick a stock from the list");
+    const devBuy = BigInt(b.devBuyLamports);
+    if (devBuy > 0n && devBuy < DEV_BUY_MIN_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_SMALL", `A dev buy starts at ${Number(DEV_BUY_MIN_LAMPORTS) / 1e9} SOL`);
+    if (devBuy > DEV_BUY_MAX_LAMPORTS) return sendError(reply, 422, "DEV_BUY_TOO_BIG", `A dev buy can be up to ${Number(DEV_BUY_MAX_LAMPORTS) / 1e9} SOL: the curve fills at 85`);
 
     const ticker = displayTicker(b.ticker);
     const wallet = session(req)?.wallet ?? DEMO_WALLET;
@@ -143,6 +151,7 @@ export async function createRoutes(app: FastifyInstance, { store, session }: { s
       creatorWallet: wallet,
       xHandle: null,
       links: { x: null, telegram: b.telegram || null, website: b.website || null },
+      devBuy: devBuyEstimate(devBuy, FEES.tradeFeeBps).pct,
     };
     // Reserve the identity now so a second launch can't race this one (unique indexes do this in Postgres).
     store.sha256s.set(ticker, up.sha256);
@@ -151,7 +160,13 @@ export async function createRoutes(app: FastifyInstance, { store, session }: { s
     // A signed-in wallet signs its coin's create, as in live mode; the demo's walletless launch doesn't.
     let sign: { creator: string; unsigned: string; signedAt: null; refused: boolean } | undefined;
     if (wallet !== DEMO_WALLET) {
-      const c = mockCreate(new PublicKey(wallet), ticker, coin.name);
+      let c: ReturnType<typeof mockCreate>;
+      try {
+        c = mockCreate(new PublicKey(wallet), ticker, coin.name, devBuy);
+      } catch (e) {
+        if (e instanceof CreateTooLargeError) return sendError(reply, 422, "DEV_BUY_TOO_LONG", "This name is too long to fit a dev buy in the create. Shorten it, or launch without a dev buy.");
+        throw e;
+      }
       coin.mint = c.mint;
       sign = { creator: wallet, unsigned: c.unsigned, signedAt: null, refused: false };
     }

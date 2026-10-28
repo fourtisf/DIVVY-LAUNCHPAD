@@ -96,6 +96,8 @@ export interface MockCoin {
   creatorWallet: string;
   xHandle: string | null;
   links: { x: string | null; telegram: string | null; website: string | null };
+  /** Share of supply (0..1) the creator bought in the create. */
+  devBuy: number;
 }
 
 export const minutesOld = (c: MockCoin, now: number): number => (now - c.createdAt) / 60_000;
@@ -114,6 +116,8 @@ export function seedCoins(bootAt: number): MockCoin[] {
     const ch = (r() - 0.42) * 80;
     const ath = mcap * (1 + r() * 1.8);
     const handle = HANDLES[i % HANDLES.length]!;
+    // About a third of the demo coins had a dev buy, of 1 to 5% (its own stream, so nothing else moves).
+    const db = mulberry32(hashStr(ticker + "devbuy"))();
     return {
       name, ticker, pays, desc,
       mint: addr(mulberry32(hashStr(ticker + "mint"))),
@@ -124,6 +128,7 @@ export function seedCoins(bootAt: number): MockCoin[] {
       creatorWallet: addr(mulberry32(hashStr(handle + "wallet"))),
       xHandle: handle,
       links: { x: "https://x.com/" + handle, telegram: null, website: null },
+      devBuy: db < 0.33 ? Math.round((0.01 + db * 0.12) * 1000) / 1000 : 0,
     };
   });
 }

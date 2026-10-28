@@ -112,6 +112,29 @@ test.describe("creator-signed launch", () => {
     await expect(page.getByText(/Your wallet didn't sign it/)).toHaveCount(0);
   });
 
+  test("a dev buy rides in the create the wallet signs, and the coin shows it (owner decision 2026-10-28)", async ({ page }) => {
+    await walletSignedIn(page);
+    const ticker = await fillCreate(page);
+    await page.locator("#fDev").fill("1");
+    await expect(page.locator("#devSum")).toContainText("1 SOL, about 3.4%");
+    await page.locator("#launchBtn").click();
+    // The page checked the create holds exactly this dev buy before the wallet saw it.
+    await expect(page.getByRole("heading", { name: `$${ticker} is live` })).toBeVisible({ timeout: 20_000 });
+    expect(await page.evaluate(() => (window as unknown as { __wallet: { signed: number } }).__wallet.signed)).toBe(1);
+    // The coin page shows everyone how much the creator bought.
+    await page.getByRole("button", { name: "Open coin page" }).click();
+    // The dev server may compile the coin page first.
+    await expect(page.locator("#devBuyTag")).toContainText(/Dev bought 3\.\d%/, { timeout: 30_000 });
+  });
+
+  test("a dev buy outside 0.01 to 80 SOL can't be launched", async ({ page }) => {
+    await walletSignedIn(page);
+    await fillCreate(page);
+    await page.locator("#fDev").fill("81");
+    await expect(page.locator("#launchBtn")).toBeDisabled();
+    await expect(page.locator("#devNote")).toContainText("from 0.01 to 80 SOL");
+  });
+
   test("turning it down in the wallet ends the launch with nothing charged", async ({ page }) => {
     await walletSignedIn(page);
     await fillCreate(page);

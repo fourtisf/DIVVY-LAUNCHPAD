@@ -188,6 +188,8 @@ export const CoinSummarySchema = z.object({
   progress: z.number().min(0).max(1),
   /** Recent market cap points for the card sparkline (oldest first). Empty for brand-new coins. */
   spark: z.array(z.number()),
+  /** Share of supply (0..1) the creator bought in the create itself, their dev buy; 0 for none. */
+  devBuyPct: z.number().min(0).max(1),
 });
 export type CoinSummary = z.infer<typeof CoinSummarySchema>;
 
@@ -317,6 +319,8 @@ export const LaunchRequestSchema = z.object({
   website: z.string().max(200).optional().default(""),
   /** A launch fee paid on its own earlier (before the fee moved into the create), used as credit. */
   feeSig: z.string().max(100).optional(),
+  /** The creator's dev buy in lamports, inside the create (owner decision 2026-10-28); "0" for none. */
+  devBuyLamports: z.string().regex(/^\d{1,12}$/).optional().default("0"),
 });
 
 /** POST /api/launch/:id/sign: the create as the creator's wallet signed it (base64), or that they turned it down. */
