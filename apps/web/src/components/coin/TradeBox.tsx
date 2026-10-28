@@ -10,7 +10,7 @@ import { api } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { errorText } from "@/lib/session";
 import { poolFees } from "@/lib/poolfees";
-import { explorerTx, SentUnconfirmed, signAndSend } from "@/lib/tx";
+import { explorerTx, FailedOnChain, SentUnconfirmed, signAndSend, TxExpired } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { useToast } from "../Toasts";
 
@@ -39,6 +39,8 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   const [slippageBps, setSlippageBps] = useState(100);
   // A trade that was sent but whose confirmation never came: no new trade until it's checked (audit).
   const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
+  // The last trade that failed on chain or expired: Solscan says why.
+  const [failed, setFailed] = useState<{ sig: string; expired: boolean } | null>(null);
   const wallet = publicKey?.toBase58() ?? null;
   // In SOL, as the coin is priced: the layout's SOL price is only as fresh as the first page load (audit).
   const price = coin.priceSol;
@@ -97,6 +99,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
     if (!wallet) return setVisible(true);
     setBusy(true);
     setStage("wallet");
+    setFailed(null);
     try {
       const amountIn = toBaseUnits(amt, side === "buy" ? 9 : 6);
       if (!amountIn) return toast("Enter an amount like 0.5");
@@ -121,6 +124,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       }
     } catch (e) {
       if (e instanceof SentUnconfirmed) setUnconfirmed(e.signature);
+      if (e instanceof FailedOnChain || e instanceof TxExpired) setFailed({ sig: e.signature, expired: e instanceof TxExpired });
       // Errors after sending come back with their own wording; this one is only for before.
       console.error("trade", e);
       const m = errorText(e, "The trade didn't go through. Nothing was sent.");
@@ -201,6 +205,13 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
               ? `Buy $${coin.ticker}`
               : `Sell $${coin.ticker}`}
       </button>
+      {failed && (
+        <p className="note" role="status" id="tradeFailed">
+          {failed.expired ? "Your last trade didn't land in time. Nothing was spent." : "Your last trade failed on chain; only the network fee was spent."}{" "}
+          <a className="link" href={explorerTx(failed.sig, config.network)} target="_blank" rel="noreferrer">See it on Solscan</a>
+          {failed.expired ? ", then try again." : ". A price that moved more than your max slippage is the usual reason: try again, or raise it."}
+        </p>
+      )}
       {unconfirmed && (
         <p className="note" role="status">
           Your last trade was sent but isn&apos;t confirmed yet.{" "}

@@ -18,7 +18,10 @@ import {
   loadKeypair,
   MainnetDisabledError,
   parseLaunchLabTransaction,
+  pickPriorityPrice,
   poolAddresses,
+  PRIORITY_CAP_MICRO_LAMPORTS,
+  PRIORITY_FLOOR_MICRO_LAMPORTS,
   programs,
   quoteBuy,
   quoteSell,
@@ -468,5 +471,14 @@ describe("CPMM swaps", () => {
   it("derives the pool PDA independent of mint order", () => {
     const cfg = Keypair.generate().publicKey;
     expect(cpmmPoolPda(P.cpmm, cfg, coin, wsol).equals(cpmmPoolPda(P.cpmm, cfg, wsol, coin))).toBe(true);
+  });
+});
+
+describe("pickPriorityPrice", () => {
+  it("pays the recent 75th percentile, between the floor and the cap", () => {
+    expect(pickPriorityPrice([])).toBe(PRIORITY_FLOOR_MICRO_LAMPORTS);
+    expect(pickPriorityPrice([0, 0, 0])).toBe(PRIORITY_FLOOR_MICRO_LAMPORTS);
+    expect(pickPriorityPrice([0, 100_000, 200_000, 300_000, 400_000])).toBe(400_000);
+    expect(pickPriorityPrice([60_000_000])).toBe(PRIORITY_CAP_MICRO_LAMPORTS);
   });
 });

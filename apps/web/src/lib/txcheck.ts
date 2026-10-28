@@ -16,6 +16,9 @@ const WSOL = "So11111111111111111111111111111111111111112";
 
 export type TxKind = "trade" | "claim" | "creator-claim";
 
+/** The most a trade or claim may spend on its priority fee. */
+const MAX_TRADE_PRIORITY_LAMPORTS = 5_000_000n;
+
 export class UnsafeTransaction extends Error {
   override name = "UnsafeTransaction";
   constructor(reason: string) {
@@ -56,6 +59,17 @@ export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, ne
     const k = ix.accountKeyIndexes[i];
     return k === undefined ? null : (keys.get(k) ?? null); // null: a lookup-table account
   };
+
+  // The priority fee (compute unit price × limit; 1.4M units without a limit) is capped, so a bad server
+  // can't spend the wallet's SOL on it (audit). The site's own trades pay at most about 0.001 SOL.
+  let cuPrice = 0n;
+  let cuLimit = 1_400_000n;
+  for (const ix of msg.compiledInstructions) {
+    if (keys.get(ix.programIdIndex)?.toBase58() !== ComputeBudgetProgram.programId.toBase58()) continue;
+    if (ix.data[0] === 2 && ix.data.length >= 5) cuLimit = BigInt(u32(ix.data, 1)!);
+    else if (ix.data[0] === 3 && ix.data.length >= 9) cuPrice = u64(ix.data, 1)!;
+  }
+  if ((cuPrice * cuLimit) / 1_000_000n > MAX_TRADE_PRIORITY_LAMPORTS) throw new UnsafeTransaction("a priority fee above 0.005 SOL");
 
   // A trade must be about the coin you picked (a route via lookup tables may hold it there instead).
   if (coinMint && !msg.addressTableLookups.length && !msg.staticAccountKeys.some((k) => k.equals(coinMint))) throw new UnsafeTransaction("this trade is for a different coin");

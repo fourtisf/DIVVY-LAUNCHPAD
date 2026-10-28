@@ -15,12 +15,18 @@ export class SentUnconfirmed extends Error {
 /** Its blockhash expired and the chain has no trace of it: it can't land any more, and nothing was spent. */
 export class TxExpired extends Error {
   override name = "TxExpired";
-  constructor() {
+  constructor(readonly signature: string) {
     super("The transaction didn't land in time. Nothing was spent; try again.");
   }
 }
 
-const failedOnChain = () => new Error("The transaction failed on chain. Only the network fee was spent.");
+/** It landed and failed (slippage, a price that moved): Solscan shows why. */
+export class FailedOnChain extends Error {
+  override name = "FailedOnChain";
+  constructor(readonly signature: string) {
+    super("The transaction failed on chain. Only the network fee was spent.");
+  }
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -64,22 +70,22 @@ export async function confirmSignature(connection: Connection, sig: string, last
   for (let i = 0; ; i++) {
     try {
       const st = (await connection.getSignatureStatuses([sig])).value[0];
-      if (st?.err) throw failedOnChain();
+      if (st?.err) throw new FailedOnChain(sig);
       if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") return sig;
       if (i % 3 === 2) {
         if ((await connection.getBlockHeight("confirmed")) > lastValidBlockHeight) {
           // It may have landed in the last valid block: look through history before calling it expired.
           const last = (await connection.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0];
-          if (last?.err) throw failedOnChain();
+          if (last?.err) throw new FailedOnChain(sig);
           if (last?.confirmationStatus === "confirmed" || last?.confirmationStatus === "finalized") return sig;
-          if (!last) throw new TxExpired();
+          if (!last) throw new TxExpired(sig);
         } else if (resend) {
           await resend().catch(() => {});
         }
       }
       misses = 0;
     } catch (e) {
-      if (e instanceof TxExpired || (e instanceof Error && e.message.startsWith("The transaction failed on chain"))) throw e;
+      if (e instanceof TxExpired || e instanceof FailedOnChain) throw e;
       // The relay or the RPC didn't answer: keep waiting, up to about half a minute without an answer.
       if (++misses >= 30) throw new SentUnconfirmed(sig);
     }

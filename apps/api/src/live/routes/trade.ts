@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import BN from "bn.js";
 import { z } from "zod";
-import { PublicKey, TransactionMessage, VersionedTransaction, type AccountInfo } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, TransactionMessage, VersionedTransaction, type AccountInfo, type TransactionInstruction } from "@solana/web3.js";
 import {
   ClaimBuildRequestSchema,
   ReportRequestSchema,
@@ -17,6 +17,7 @@ import {
   creatorFeeVault,
   decodePool,
   feeRates,
+  pickPriorityPrice,
   poolPriceSol,
   POOL_STATUS,
   quoteBuy,
@@ -33,6 +34,24 @@ import { amount, coinByMint } from "../data";
 import { getViewer, refuseBlockedCountry, requireViewer } from "../viewer";
 
 const MAX_BUY_LAMPORTS = 1_000n * 1_000_000_000n;
+
+/**
+ * The priority fee for a curve trade, from what recent transactions paid on its pool (packages/solana
+ * priority.ts). Held for 10 s per pool, so trade builds anyone can request don't each cost an RPC call;
+ * an RPC that doesn't answer gives the floor.
+ */
+const PRIORITY_TTL_MS = 10_000;
+const priorityCache = new Map<string, { at: number; price: number }>();
+async function priorityPrice(d: LiveDeps, pool: PublicKey): Promise<number> {
+  const key = pool.toBase58();
+  const hit = priorityCache.get(key);
+  if (hit && Date.now() - hit.at < PRIORITY_TTL_MS) return hit.price;
+  const recent = await d.conn.getRecentPrioritizationFees({ lockedWritableAccounts: [pool] }).catch(() => []);
+  const price = pickPriorityPrice(recent.map((r) => r.prioritizationFee));
+  if (priorityCache.size > 5_000) priorityCache.clear();
+  priorityCache.set(key, { at: Date.now(), price });
+  return price;
+}
 const U64_MAX = 18_446_744_073_709_551_615n;
 const publicKeyOrNull = (s: string) => {
   try {
@@ -79,18 +98,20 @@ export async function liveTradeRoutes(app: FastifyInstance, { d }: { d: LiveDeps
       const mintProgramA = pool.mintProgramFlag & 1 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
       const base = { programId: d.programs.launchLab, owner, poolId: new PublicKey(c.poolState), pool, mintProgramA };
       const spot = poolPriceSol(pool);
+      // A price only, no limit: the default budget can't run short, and the fee stays under about 0.001 SOL.
+      const priority: TransactionInstruction = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: await priorityPrice(d, base.poolId) });
       if (side === "buy") {
         const q = quoteBuy(pool, global, rates, new BN(amountIn.toString()));
         const out = BigInt(q.amountOut.toString());
         if (out <= 0n) return sendError(reply, 422, "CURVE_FULL", "The curve is complete; this coin is graduating");
-        const ixs = buyInstructions({ ...base, lamportsIn: new BN(q.amountIn.toString()), minTokensOut: new BN(keep(out).toString()) });
+        const ixs = [priority, ...buyInstructions({ ...base, lamportsIn: new BN(q.amountIn.toString()), minTokensOut: new BN(keep(out).toString()) })];
         const exec = Number(amountIn) / 1e9 / (Number(out) / 1e6);
         const tx = new VersionedTransaction(new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message());
         return { tx: b64(tx), route: "curve", expectedOut: amount(out, 6), minOut: amount(keep(out), 6), priceImpactBps: spot > 0 ? Math.max(0, Math.round((exec / spot - 1) * 10_000)) : 0 };
       }
       const q = quoteSell(pool, global, rates, new BN(amountIn.toString()));
       const out = BigInt(q.amountOut.toString());
-      const ixs = sellInstructions({ ...base, tokensIn: new BN(amountIn.toString()), minLamportsOut: new BN(keep(out).toString()) });
+      const ixs = [priority, ...sellInstructions({ ...base, tokensIn: new BN(amountIn.toString()), minLamportsOut: new BN(keep(out).toString()) })];
       const exec = Number(out) / 1e9 / (Number(amountIn) / 1e6);
       const tx = new VersionedTransaction(new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message());
       return { tx: b64(tx), route: "curve", expectedOut: amount(out, 9), minOut: amount(keep(out), 9), priceImpactBps: spot > 0 ? Math.max(0, Math.round((1 - exec / spot) * 10_000)) : 0 };

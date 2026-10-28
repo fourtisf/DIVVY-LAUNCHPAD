@@ -93,6 +93,18 @@ describe("checkTransaction", () => {
   });
 });
 
+describe("priority fees on trades (audit)", () => {
+  const buy = () => [wrap(500_000_000)];
+  it("passes the site's priority fee and refuses one that would cost more than 0.005 SOL", () => {
+    // 1M micro-lamports at the 1.4M-unit default: 0.0014 SOL.
+    expect(() => checkTransaction(tx(wallet, [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 }), ...buy()]), wallet, "mainnet-beta", "trade")).not.toThrow();
+    expect(() => checkTransaction(tx(wallet, [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000_000 }), ...buy()]), wallet, "mainnet-beta", "trade")).toThrow(/priority fee/);
+    expect(() =>
+      checkTransaction(tx(wallet, [ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 20_000_000 }), ...buy()]), wallet, "mainnet-beta", "trade"),
+    ).not.toThrow();
+  });
+});
+
 describe("checkCreate", () => {
   const me = Keypair.generate().publicKey;
   const mint = Keypair.generate().publicKey;
