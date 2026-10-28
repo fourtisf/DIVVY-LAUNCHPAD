@@ -2,7 +2,7 @@
 
 For the post that $USPAD is live. Replace the two placeholders before posting:
 
-$USPAD's official CA (from the owner, 2026-10-28): `8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev`.
+$USPAD's official CA (from the owner, 2026-10-28; it replaced 8cxC88…Ucev the same day): `4i3vRWhZ2qF77cqJkY57yWiG4xYWoRHbk4DGhL1t8rUv`.
 
 - `[CA]`: $USPAD's official mint address. Post it only after the coin is live: uspad keeps a mint
   secret until its create lands, and the "is live" panel shows it (copy it from there).
@@ -243,7 +243,7 @@ Hold it, get paid in Nvidia stock.
 
 $10+ of $USPAD in your wallet = NVDAx every hour, bought from its own trading fees and sent on chain.
 
-CA: 8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+CA: 4i3vRWhZ2qF77cqJkY57yWiG4xYWoRHbk4DGhL1t8rUv
 
 uspad.fun
 ```
@@ -253,7 +253,7 @@ Reply 1, right under it (pin it):
 ```text
 ⚠️ Only one $USPAD is official:
 
-8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+4i3vRWhZ2qF77cqJkY57yWiG4xYWoRHbk4DGhL1t8rUv
 
 Tickers can repeat on uspad. Paste the CA into the search on uspad.fun to find the real one. The CA comes only from @uspadfun.
 ```
@@ -287,7 +287,7 @@ Short CA post:
 
 ```text
 $USPAD
-CA: 8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+CA: 4i3vRWhZ2qF77cqJkY57yWiG4xYWoRHbk4DGhL1t8rUv
 
 Paid in NVDAx every hour · uspad.fun
 ```
@@ -301,7 +301,7 @@ Pegang, dapat saham Nvidia.
 
 Pegang $10+ $USPAD = dapat NVDAx tiap jam, dibeli dari fee trading-nya sendiri dan dikirim on-chain.
 
-CA: 8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+CA: 4i3vRWhZ2qF77cqJkY57yWiG4xYWoRHbk4DGhL1t8rUv
 
 uspad.fun
 ```
@@ -309,7 +309,7 @@ uspad.fun
 ```text
 ⚠️ Hanya satu $USPAD yang resmi:
 
-8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+4i3vRWhZ2qF77cqJkY57yWiG4xYWoRHbk4DGhL1t8rUv
 
 Ticker bisa sama di uspad. Paste CA di kolom search uspad.fun untuk menemukan yang asli. CA resmi hanya dari @uspadfun.
 ```
