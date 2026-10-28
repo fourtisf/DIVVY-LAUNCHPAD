@@ -1,6 +1,8 @@
 # "$USPAD is live" video for X
 
-Video: `uspad-token-1920x1080.mp4` (16:9, 48 s, 30 fps with film motion blur, H.264, AAC 192k at -14 LUFS).
+Video: `uspad-token-1920x1080.mp4` (16:9, 44 s, 30 fps with film motion blur, H.264, AAC 192k at -14 LUFS).
+Shot like a trailer, letterboxed, so it looks nothing like the launch videos: the $USPAD coin in 3D
+(`token3d.ts`) and the live site cut into glass panels floating in depth.
 
 It names the ticker only: no contract address anywhere (owner request 2026-10-28). The closing line sends
 people to @uspadfun for $USPAD's address, because tickers can repeat on uspad and the board shows more
@@ -11,15 +13,22 @@ How it's made (repo root):
    (the "CA" pill) and the coin page (its address chip, the chips after it moved left). The owner took
    them on 2026-10-28 (this environment can't reach uspad.fun); `token-shots.cjs` takes the same set
    with the addresses hidden when the site is reachable.
-2. `node brand/uspad/src/token-video.cjs brand/uspad` (`--stills <dir>` for one frame per scene).
-3. `python3 brand/uspad/src/token-music.py brand/uspad` (the soundtrack; needs numpy and ffmpeg).
+2. `node brand/uspad/src/token-video.cjs brand/uspad` (`--stills <dir>` for one frame per scene). It
+   bundles `token3d.ts` with esbuild and renders every frame twice for the motion blur: about 50 minutes
+   without a GPU.
+3. `python3 brand/uspad/src/token-music.py brand/uspad` (the score; needs numpy and ffmpeg).
 
-The shots are real data at that moment, so the windows say "Live on uspad.fun", not "sample data".
+The shots are real data at that moment, so the panels show live numbers, not sample data.
 
-Scenes: the Koin belah mark → "$USPAD is live." over the 3D coins → "Inside uspad.fun" → the board
-(every coin live, sorts and search) → a coin page (the candlestick chart and the trade box) → its
-holders and where the fee goes → holders paid in US stocks, every hour → the payouts page (a receipt
-for every round) → every trade pays 1.25%, split four ways → "Trade $USPAD." uspad.fun.
+Scenes (0 to 44 s, on the bars of the score):
+- 0 s: a macro pass along the coin's reeded rim in the dark, "uspad.fun presents".
+- 6 s: the coin turns to face the camera under a sweeping light; "$USPAD is live." decodes letter by letter.
+- 12 s: the letterbox opens into a flight through the live site, one station every 4 s:
+  01 the board ("Every coin, live."), 02 a coin page's chart and trade box ("Chart it. Trade it."),
+  03 its holders and where the fee goes ("See who gets paid."), 04 the payouts page ("Every payout, on chain.").
+- 28 s: the six stock coins orbit $USPAD: "Every coin pays its holders in US stocks, every hour."
+- 34 s: the fee as a ring: 1.25% on every trade, split four ways.
+- 38 s: $USPAD, uspad.fun, @uspadfun and t.me/uspadfun, and the fine print.
 
 ## Post (under 280 characters as X counts them)
 
