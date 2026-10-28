@@ -145,3 +145,86 @@ Memecoins that pay their holders in US stocks, every hour. Launch on Solana in s
 ```text
 The token of uspad.fun, the Solana launchpad where every memecoin pays its holders in tokenized US stocks, every hour. Every trade pays 1.25%: 0.50% of it buys [STOCK] for holders hourly. Official CA only from @uspadfun.
 ```
+
+## Token live, second set (2026-10-28)
+
+The same placeholders, `[CA]` and `[STOCK]`. Each post is under 280 characters with a 44-character CA.
+
+Post:
+
+```text
+$USPAD is live. 🟢
+
+The token of uspad.fun, where every memecoin pays its holders in US stocks.
+
+Hold $10+ of $USPAD and get [STOCK] every hour, from its own trading fees.
+
+CA: [CA]
+
+Trade → uspad.fun
+```
+
+Reply 1, right under it (pin it):
+
+```text
+The only official $USPAD:
+
+[CA]
+
+Tickers can repeat on uspad, so check the address before you buy. The CA comes only from @uspadfun.
+```
+
+Reply 2:
+
+```text
+How $USPAD pays you:
+
+• Every buy and sell pays 1.25%
+• 0.50% of it buys [STOCK] every hour
+• It goes to every wallet holding $10+ of $USPAD
+• Sent on chain, with a public receipt for every round
+
+Tokenized stocks aren't available to US persons. Not financial advice.
+```
+
+Short CA post:
+
+```text
+$USPAD
+CA: [CA]
+
+uspad.fun
+```
+
+Versi Indonesia:
+
+```text
+$USPAD sudah live. 🟢
+
+Token resmi uspad.fun, tempat setiap memecoin membayar holder-nya dengan saham AS.
+
+Pegang $10+ $USPAD, dapat [STOCK] tiap jam dari fee trading-nya.
+
+CA: [CA]
+
+Trade → uspad.fun
+```
+
+```text
+Satu-satunya $USPAD resmi:
+
+[CA]
+
+Ticker bisa sama di uspad, jadi cek alamatnya sebelum beli. CA resmi hanya dari @uspadfun.
+```
+
+```text
+Cara $USPAD membayarmu:
+
+• Tiap beli dan jual kena fee 1,25%
+• 0,50% darinya membeli [STOCK] setiap jam
+• Dikirim ke setiap wallet yang pegang $10+ $USPAD
+• On-chain, dengan bukti publik tiap putaran
+
+Saham tokenisasi tidak tersedia untuk warga AS. Bukan saran keuangan.
+```
