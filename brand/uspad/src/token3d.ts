@@ -7,10 +7,39 @@
  * With `glow`, each frame is also drawn at half size into that 2D canvas, which the page blurs and
  * screens over the coins: a soft bloom without the banding of 8-bit render targets. A `zoom` under 1
  * widens every shot, for a canvas bigger than the frame it fills, and `main: false` leaves out the
- * $USPAD coin, for a page that puts the uspad mark in its place (token-banner.cjs).
+ * $USPAD coin, for a page that puts the uspad mark in its place (token-banner.cjs). With `mark` (the
+ * mark's SVG), the coin's faces carry the uspad mark instead of the site's "$ uspad".
  */
 import * as THREE from "three";
 import { buildCoin, logoFace, makeEnv, softDot, stockFace, type StockArt } from "../../../apps/web/src/three/scenes";
+
+/** The site's coin face (logoFace) with the uspad mark (brand/uspad/mark.svg) in place of its "$ uspad". */
+async function markFace(svg: string): Promise<HTMLCanvasElement> {
+  const mark = await new Promise<HTMLImageElement>((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = `data:image/svg+xml;base64,${btoa(svg)}`;
+  });
+  const c = logoFace();
+  const g = c.getContext("2d")!;
+  g.save();
+  // logoFace leaves its 2x scale on the context; set it rather than add to it.
+  g.setTransform(c.width / 512, 0, 0, c.height / 512, 0, 0);
+  const bg = g.createRadialGradient(180, 160, 30, 256, 256, 270);
+  bg.addColorStop(0, "#1f5236");
+  bg.addColorStop(0.65, "#0d2819");
+  bg.addColorStop(1, "#06150d");
+  g.fillStyle = bg;
+  g.beginPath();
+  g.arc(256, 256, 186, 0, 7);
+  g.fill();
+  g.shadowColor = "rgba(74,222,128,.7)";
+  g.shadowBlur = 36;
+  g.drawImage(mark, 256 - 150, 256 - 150, 300, 300);
+  g.restore();
+  return c;
+}
 
 /** Scene times in seconds, the same as token-video.cjs's S. */
 export interface Timeline {
@@ -27,7 +56,7 @@ const inOutCubic = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x
 const outBack = (x: number) => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);
 const within = (t: number, [s, d]: [number, number]) => t >= s && t < s + d;
 
-async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, { glow, zoom = 1, main: withMain = true }: { glow?: HTMLCanvasElement; zoom?: number; main?: boolean } = {}) {
+async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, { glow, zoom = 1, main: withMain = true, mark }: { glow?: HTMLCanvasElement; zoom?: number; main?: boolean; mark?: string } = {}) {
   const glowCtx = glow?.getContext("2d") ?? null;
   await document.fonts.ready;
   const faces = await Promise.all(stocks.map(stockFace));
@@ -52,7 +81,8 @@ async function init(canvas: HTMLCanvasElement, stocks: StockArt[], T: Timeline, 
   const sweep = new THREE.PointLight(0xffffff, 0, 14);
   scene.add(key, rimL, rimR, sweep, new THREE.AmbientLight(0xffffff, 0.08));
 
-  const main = buildCoin(logoFace(), logoFace(), { r: 1.5 });
+  const face = mark ? await markFace(mark) : logoFace();
+  const main = buildCoin(face, face, { r: 1.5 });
   scene.add(main);
   const sats = stocks.map((s, i) => {
     const m = buildCoin(faces[i]!, faces[i]!, { r: 0.55, metal: new THREE.Color(s.bg).lerp(new THREE.Color(0xffffff), 0.2).getHex() });

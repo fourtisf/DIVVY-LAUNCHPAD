@@ -1,5 +1,5 @@
 // "$USPAD is live" video for X (16:9, 1920 x 1080, 30 fps with motion blur, H.264), shot like a product
-// film: letterboxed, a macro pass along the $USPAD coin's rim in the dark, the coin turning to face the
+// film: letterboxed, a macro pass along the $USPAD coin's rim in the dark (the uspad mark on its faces), the coin turning to face the
 // camera under a sweeping light (token3d.ts), then a flight through the live site with its pages cut
 // into panels floating in depth, the stock coins orbiting, the fee as a ring, and a closing push in.
 // It names the ticker only: no contract address anywhere (owner request 2026-10-28), and the closing line
@@ -8,6 +8,8 @@
 // that moment.
 // Usage (repo root):
 //   node brand/uspad/src/token-video.cjs brand/uspad [--stills <dir>]
+//   node brand/uspad/src/token-video.cjs brand/uspad --only 0-12,28-34   # re-renders just those seconds
+//                                                                         # into the existing video
 //   python3 brand/uspad/src/token-music.py brand/uspad          # the soundtrack
 const fs = require("fs");
 const path = require("path");
@@ -311,11 +313,41 @@ const html = `<div class="stage">
 </div>`;
 
 
+/** Puts the re-rendered spans (`only`, back to back in `fresh`) into the video at `out`, in place of the old ones. */
+function splice(out, fresh, only) {
+  const f = (t) => Math.round(t * FPS);
+  const cuts = [];
+  let at = 0;
+  let k = 0;
+  for (const [a, b] of [...only].sort((x, y) => x[0] - y[0])) {
+    if (f(a) > at) cuts.push([0, at, f(a)]);
+    cuts.push([1, k, k + f(b) - f(a)]);
+    k += f(b) - f(a);
+    at = f(b);
+  }
+  if (at < f(DURATION)) cuts.push([0, at, f(DURATION)]);
+  const graph = cuts.map(([i, s, e], j) => `[${i}:v]trim=start_frame=${s}:end_frame=${e},setpts=PTS-STARTPTS[s${j}]`).join(";");
+  const tmp = `${out}.new.mp4`;
+  const r = require("child_process").spawnSync(
+    "ffmpeg",
+    ["-y", "-loglevel", "error", "-i", out, "-i", fresh, "-filter_complex", `${graph};${cuts.map((_, j) => `[s${j}]`).join("")}concat=n=${cuts.length}:v=1:a=0[v]`, "-map", "[v]", "-an",
+      "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p", "-g", String(FPS * 2), "-movflags", "+faststart", tmp],
+    { stdio: "inherit" },
+  );
+  if (r.status !== 0) throw new Error(`ffmpeg splice exited ${r.status}`);
+  fs.renameSync(tmp, out);
+  fs.rmSync(fresh);
+}
+
 (async () => {
   const js = await bundle3d("token3d.ts");
   const stillsAt = process.argv.indexOf("--stills");
+  const onlyAt = process.argv.indexOf("--only");
+  const only = onlyAt > 0 ? process.argv[onlyAt + 1].split(",").map((s) => s.split("-").map(Number)) : undefined;
+  const out = path.join(DIR, "social", "uspad-token-1920x1080.mp4");
   await renderVideo({
-    out: path.join(DIR, "social", "uspad-token-1920x1080.mp4"),
+    out: only ? `${out}.only.mp4` : out,
+    only,
     width: W,
     height: H,
     fps: FPS,
@@ -331,15 +363,16 @@ const html = `<div class="stage">
     prepare: async (page) => {
       await page.addScriptTag({ content: js });
       await page.evaluate(
-        async ({ stocks, T }) => {
-          window.__coins = await window.token3d.init(document.getElementById("c3d"), stocks, T, { glow: document.getElementById("c3dGlow") });
+        async ({ stocks, T, mark }) => {
+          window.__coins = await window.token3d.init(document.getElementById("c3d"), stocks, T, { glow: document.getElementById("c3dGlow"), mark });
         },
-        { stocks: STOCKS, T: { macro: S.macro, reveal: S.reveal, orbit: S.orbit, end: S.end } },
+        { stocks: STOCKS, T: { macro: S.macro, reveal: S.reveal, orbit: S.orbit, end: S.end }, mark: fs.readFileSync(path.join(DIR, "mark.svg"), "utf8") },
       );
     },
     frameHook: "__coins",
     stills: stillsAt > 0 ? { dir: process.argv[stillsAt + 1], times: [1.5, 3.5, 7.0, 8.4, 10.5, 13.4, 15.6, 17.6, 21.6, 25.8, 31, 36, 40.6, 43] } : undefined,
   });
+  if (only) splice(out, `${out}.only.mp4`, only);
   console.log(stillsAt > 0 ? "stills done" : "video done");
 })().catch((e) => {
   console.error(e);
