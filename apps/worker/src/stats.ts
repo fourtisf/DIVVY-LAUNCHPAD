@@ -10,6 +10,20 @@ import type { WorkerDeps } from "./deps";
 import { changePct, sparkline, TF_MS } from "./market";
 
 const SUPPLY_TOKENS = 1e9;
+
+type StatsData = Omit<Prisma.CoinStatsUncheckedCreateInput, "coinId">;
+
+/**
+ * Creates a coin's stats row if it has none, then applies `update`. Not Prisma's upsert: that one reads
+ * and then writes, so two writers at once both try to insert and one fails on the unique coinId. The
+ * launch and the indexer do write at once since the create carries the dev buy's trade, and on
+ * 2026-10-28 that left a landed launch short of "indexed" (and the indexer reads a unique failure as a
+ * trade it already has). INSERT … ON CONFLICT DO NOTHING can't fail that way. Works in a transaction.
+ */
+export async function putCoinStats(db: { coinStats: Pick<Prisma.TransactionClient["coinStats"], "createMany" | "update"> }, coinId: string, create: StatsData, update: StatsData = create): Promise<void> {
+  await db.coinStats.createMany({ data: [{ coinId, ...create }], skipDuplicates: true });
+  if (Object.keys(update).length) await db.coinStats.update({ where: { coinId }, data: update });
+}
 const DAY = 86_400_000;
 
 interface ChainState {
@@ -117,7 +131,7 @@ export async function refreshMarketStats(d: WorkerDeps, coinIds?: string[]): Pro
       ...(st.progressBps !== undefined ? { progressBps: st.progressBps } : {}),
       ...(st.realBase !== undefined ? { realBase: st.realBase, realQuote: st.realQuote } : {}),
     };
-    await d.prisma.coinStats.upsert({ where: { coinId: c.id }, create: { coinId: c.id, ...data }, update: data });
+    await putCoinStats(d.prisma, c.id, data);
   }
   return { migrating };
 }
@@ -150,6 +164,6 @@ export async function refreshPaidStats(d: WorkerDeps, coinIds: string[]): Promis
   for (const id of coinIds) {
     const a = agg.get(id) ?? { all: 0n, allUsd: 0, day: 0n, dayUsd: 0 };
     const data = { paidAsset: a.all, paidUsd: a.allUsd, paid24hAsset: a.day, paid24hUsd: a.dayUsd };
-    await d.prisma.coinStats.upsert({ where: { coinId: id }, create: { coinId: id, ...data }, update: data });
+    await putCoinStats(d.prisma, id, data);
   }
 }

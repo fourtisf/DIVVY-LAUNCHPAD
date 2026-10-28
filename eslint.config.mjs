@@ -29,6 +29,21 @@ export default tseslint.config(
     rules: { "no-restricted-globals": ["error", { name: "Buffer", message: "Buffer in the browser is Next.js's polyfill, without Node's BigInt reads: use Uint8Array and DataView." }] },
   },
   {
+    // Prisma's upsert with an empty update reads, then inserts: two at once fail on the unique key. One
+    // stopped a landed launch short of "indexed" on 2026-10-28. INSERT … ON CONFLICT DO NOTHING can't.
+    files: ["apps/**/*.ts", "packages/**/*.ts"],
+    ignores: ["**/*.test.ts", "**/test/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.property.name='upsert'] Property[key.name='update'] > ObjectExpression[properties.length=0]",
+          message: "An upsert with an empty update races on its unique key. Use createMany({ data, skipDuplicates: true }), or putCoinStats for CoinStats.",
+        },
+      ],
+    },
+  },
+  {
     // Phase 0 scripts are CommonJS so their `require.main === module` entry checks work.
     files: ["packages/solana/scripts/**"],
     rules: { "@typescript-eslint/no-require-imports": "off" },

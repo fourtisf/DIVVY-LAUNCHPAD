@@ -15,7 +15,8 @@ import { EVENT_IX_TAG_LE, POOL_CREATE_EVENT_DISC, programs, TRADE_EVENT_DISC, ty
 import type { WorkerDeps } from "../src/deps";
 import { loadWorkerEnv } from "../src/env";
 import { Indexer } from "../src/indexer";
-import { failLaunch, mintCreated, processLaunch, reconcileLaunches, signing } from "../src/launch";
+import { failLaunch, markLanded, mintCreated, processLaunch, reconcileLaunches, signing } from "../src/launch";
+import { putCoinStats } from "../src/stats";
 import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 
 const BASE_DB = process.env.DATABASE_URL;
@@ -425,6 +426,63 @@ describe.skipIf(!run)("launch pipeline", () => {
     expect(touched.has(coin.id)).toBe(true);
     // The buy came from the coin's creator, in its create: that's their dev buy.
     expect(await prisma.coin.findUniqueOrThrow({ where: { id: coin.id } })).toMatchObject({ devBuyLamports: 1_000_000_000n, devBuyTokens: 35_000_000_000_000n });
+  });
+
+  /** A create with its creator's dev buy in the same transaction, as the indexer reads it. */
+  function createWithDevBuy(pool: PublicKey, creator: PublicKey, sig: string): VersionedTransactionResponse {
+    const body = Buffer.alloc(139);
+    pool.toBuffer().copy(body, 0);
+    [793_100_000_000_000n, 1_073_025_605_596_382n, 30_000_852_951n, 0n, 0n, 35_000_000_000_000n, 990_000_000n, 1_000_000_000n, 35_000_000_000_000n, 2_500_000n, 6_000_000n, 1_500_000n, 0n].forEach((v, i) =>
+      body.writeBigUInt64LE(v, 32 + i * 8),
+    );
+    body[138] = 1;
+    const message = new MessageV0({
+      header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 1 },
+      staticAccountKeys: [creator, P.launchLab, pool],
+      recentBlockhash: bs58.encode(Buffer.alloc(32, 1)),
+      compiledInstructions: [{ programIdIndex: 1, accountKeyIndexes: [0, 2], data: Buffer.concat([Buffer.from([250, 234, 13, 123, 213, 156, 19, 236]), Buffer.alloc(24)]) }],
+      addressTableLookups: [],
+    });
+    const ev = (disc: Buffer, b: Buffer) => ({ programIdIndex: 1, accounts: [1], data: bs58.encode(Buffer.concat([EVENT_IX_TAG_LE, disc, b])) });
+    const createBody = Buffer.concat([pool.toBuffer(), creator.toBuffer(), Buffer.alloc(64)]);
+    return {
+      slot: 42,
+      blockTime: Math.floor(Date.parse("2026-10-28T12:36:48Z") / 1000),
+      transaction: { message, signatures: [sig] },
+      meta: { err: null, fee: 5000, preBalances: [], postBalances: [], loadedAddresses: { writable: [], readonly: [] }, innerInstructions: [{ index: 0, instructions: [ev(POOL_CREATE_EVENT_DISC, createBody), ev(TRADE_EVENT_DISC, body)] }] },
+    } as unknown as VersionedTransactionResponse;
+  }
+
+  it("a launch and the indexer landing the same create at once both finish, and the dev buy's trade is kept (2026-10-28)", async () => {
+    // The worker confirms the create while the indexer reads it, dev buy and all: both write the coin's
+    // stats row. Prisma's upsert raced there and stopped the launch at "landed". Many rounds, for the race.
+    for (let i = 0; i < 12; i++) {
+      const { coin, launch } = await pendingLaunch(`RACE${i}`);
+      const pool = Keypair.generate().publicKey;
+      await prisma.coin.update({ where: { id: coin.id }, data: { poolState: pool.toBase58(), mint: Keypair.generate().publicKey.toBase58() } });
+      await prisma.launch.update({ where: { id: launch.id }, data: { step: "bundling" } });
+      const d = deps({});
+      await Promise.all([markLanded(d, launch.id, `sig-${i}`), new Indexer(d).onPlatformTx(`sig-${i}`, createWithDevBuy(pool, new PublicKey(coin.creatorWallet), `sig-${i}`), new Set())]);
+      expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("indexed");
+      expect(await prisma.trade.count({ where: { coinId: coin.id } })).toBe(1);
+      expect(await prisma.coinStats.count({ where: { coinId: coin.id } })).toBe(1);
+    }
+  });
+
+  it("stats writes that meet never fail on the unique coin row", async () => {
+    const { coin } = await pendingLaunch("STATS");
+    await Promise.all(Array.from({ length: 20 }, (_, i) => putCoinStats(prisma, coin.id, { holders: i })));
+    expect(await prisma.coinStats.count({ where: { coinId: coin.id } })).toBe(1);
+  });
+
+  it("the reconciler finishes a launch cut off at \"landed\" (2026-10-28)", async () => {
+    const { coin, launch } = await pendingLaunch("HALF");
+    await prisma.coin.update({ where: { id: coin.id }, data: { status: "live", mint: Keypair.generate().publicKey.toBase58() } });
+    await prisma.launch.update({ where: { id: launch.id }, data: { step: "landed", signature: "sig-half" } });
+    await prisma.$executeRaw`UPDATE "Launch" SET "updatedAt" = now() - interval '2 minutes' WHERE id = ${launch.id}`;
+    await reconcileLaunches(deps({}), async () => {});
+    expect((await prisma.launch.findUniqueOrThrow({ where: { id: launch.id } })).step).toBe("indexed");
+    expect(await prisma.coinStats.count({ where: { coinId: coin.id } })).toBe(1);
   });
 
   it("walks a stream oldest first, a slice per call, fetching ahead without applying out of order", async () => {

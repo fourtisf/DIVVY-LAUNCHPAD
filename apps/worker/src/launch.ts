@@ -22,6 +22,7 @@ import { publishLive, getLaunchSettings } from "@divvy/server";
 import { LAUNCHLAB_DEFAULT_CURVE } from "@divvy/solana";
 import { assertCanSend, createTransaction, CreateTooLargeError, decodePool, MainnetDisabledError, poolAddresses, poolPriceSol, signatureOf } from "@divvy/solana/live";
 import type { WorkerDeps } from "./deps";
+import { putCoinStats } from "./stats";
 
 /** Creates sent per launch (each needs the creator's signature). */
 const MAX_ATTEMPTS = 3;
@@ -340,27 +341,33 @@ async function waitForMint(conn: Connection, mint: PublicKey, ms: number): Promi
   return false;
 }
 
-/** The create is on chain: the coin goes live and appears on the board. */
+/**
+ * The create is on chain: the coin goes live and appears on the board. Idempotent, and resumable: a
+ * launch left at "landed" (cut off before its last steps) is finished by the next call, which the
+ * reconciler makes (2026-10-28: a race on the stats row stopped one there and its modal spun on).
+ */
 export async function markLanded(d: WorkerDeps, launchId: string, signature: string): Promise<void> {
   const launch = await d.prisma.launch.findUnique({ where: { id: launchId }, include: { coin: true } });
   if (!launch?.coin) return;
   const now = new Date();
-  // Idempotent: the launch processor, the indexer and the reconciler may all get here (audit).
+  // The launch processor, the indexer and the reconciler may all get here (audit): one moves it.
   const moved = await d.prisma.$transaction(async (tx) => {
     const l = await tx.launch.updateMany({ where: { id: launchId, step: { in: ["checking", "signing", "bundling"] } }, data: { step: "landed", signature, unsignedTx: null } });
     if (l.count !== 1) return false;
     await tx.coin.updateMany({ where: { id: launch.coin!.id, status: "pending" }, data: { status: "live", createdSig: signature, launchedAt: now } });
     return true;
   });
-  if (!moved) return;
-  // Opening price from the empty curve (virtual reserves); the indexer takes over from the first trade.
+  // Another caller is finishing it, or it's done; one already "landed" before this call still needs its last steps.
+  if (!moved && launch.step !== "landed") return;
+  // Opening price from the curve; the indexer takes over from the first trade (the dev buy's, when there's one).
   let priceSol = 0;
   const info = launch.coin.poolState ? await d.conn.getAccountInfo(new PublicKey(launch.coin.poolState), "confirmed").catch(() => null) : null;
   if (info) priceSol = poolPriceSol(decodePool(info.data));
-  await d.prisma.coinStats.upsert({ where: { coinId: launch.coin.id }, create: { coinId: launch.coin.id, priceSol }, update: {} });
-  await d.prisma.launch.update({ where: { id: launchId }, data: { step: "indexed" } });
+  await putCoinStats(d.prisma, launch.coin.id, { priceSol }, {});
+  const done = await d.prisma.launch.updateMany({ where: { id: launchId, step: "landed" }, data: { step: "indexed" } });
+  if (done.count !== 1) return;
   await publishLive(d.redis, { type: "launch", at: now.toISOString(), mint: launch.coin.mint!, ticker: launch.coin.ticker, imageUrl: launch.coin.imageUrl, name: launch.coin.name });
-  d.log("launch: live", { launchId, coinId: launch.coin.id, signature });
+  d.log("launch: live", { launchId, coinId: launch.coin.id, signature: launch.signature ?? signature });
 }
 
 /** Marks the launch failed and frees the coin's unique identity (ticker, picture, X account). */
@@ -410,4 +417,7 @@ export async function reconcileLaunches(d: WorkerDeps, requeue: (launchId: strin
   }
   const lost = await d.prisma.launch.findMany({ where: { step: "checking", createdAt: { lt: new Date(Date.now() - 5 * 60_000) } }, select: { id: true }, take: 50 });
   for (const l of lost) await requeue(l.id);
+  // On chain but cut off before "indexed": the coin is live, the creator's modal waits. Finish it.
+  const half = await d.prisma.launch.findMany({ where: { step: "landed", updatedAt: { lt: new Date(Date.now() - 60_000) } }, select: { id: true, signature: true }, take: 50 });
+  for (const l of half) await markLanded(d, l.id, l.signature ?? "");
 }

@@ -39,7 +39,9 @@ export async function getViewer(d: LiveDeps, req: FastifyRequest): Promise<Viewe
 }
 
 export async function startSession(d: LiveDeps, reply: FastifyReply, wallet: string): Promise<void> {
-  const user = await d.prisma.user.upsert({ where: { wallet }, create: { wallet }, update: {} });
+  // Not an upsert with an empty update: two first sign-ins at once would race on the unique wallet.
+  await d.prisma.user.createMany({ data: [{ wallet }], skipDuplicates: true });
+  const user = await d.prisma.user.findUniqueOrThrow({ where: { wallet } });
   const token = randomBytes(32).toString("base64url");
   await d.prisma.session.create({ data: { id: tokenHash(token), userId: user.id, expiresAt: new Date(Date.now() + SESSION_TTL_MS) } });
   reply.setCookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: d.env.NODE_ENV === "production", path: "/", maxAge: SESSION_TTL_MS / 1000 });

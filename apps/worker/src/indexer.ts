@@ -15,7 +15,7 @@ import { cpmmPoolPda, decodeCpmmPool, EventLayoutError, getTransactionAnyVersion
 import type { WorkerDeps } from "./deps";
 import { markLanded } from "./launch";
 import { bucket, cpmmTradeRow, curveTradeRow, type Tf, type TradeRow } from "./market";
-import { refreshMarketStats } from "./stats";
+import { refreshMarketStats, putCoinStats } from "./stats";
 
 const TF_DB: Record<Tf, string> = { "1m": "1m", "5m": "5m", "1h": "1h", "1d": "1d" };
 /** getTransaction returning null this many times in a row for one signature raises an alert. */
@@ -349,7 +349,8 @@ export class Indexer {
               h = GREATEST("Candle".h, EXCLUDED.h), l = LEAST("Candle".l, EXCLUDED.l), c = EXCLUDED.c,
               "volSol" = "Candle"."volSol" + EXCLUDED."volSol"`;
         }
-        await tx.coinStats.upsert({ where: { coinId: coin.id }, create: { coinId: coin.id, lastTradeAt: ts }, update: { lastTradeAt: ts } });
+        // Race-free: a unique failure here would read as "trade already saved" below and drop the trade.
+        await putCoinStats(tx, coin.id, { lastTradeAt: ts });
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return false;

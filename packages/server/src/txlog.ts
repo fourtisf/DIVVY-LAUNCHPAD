@@ -16,9 +16,9 @@ export interface SignedTxEntry {
 export const prismaTxLogger =
   (prisma: PrismaClient) =>
   async (e: SignedTxEntry): Promise<void> => {
-    await prisma.signedTx.upsert({
-      where: { signature: e.signature },
-      create: { purpose: e.purpose, signer: e.signer, signature: e.signature, coinId: e.coinId ?? null, bundleId: e.bundleId ?? null, dryRun: e.dryRun ?? false },
-      update: {},
+    // INSERT … ON CONFLICT DO NOTHING: an upsert with an empty update races on the unique signature.
+    await prisma.signedTx.createMany({
+      data: [{ purpose: e.purpose, signer: e.signer, signature: e.signature, coinId: e.coinId ?? null, bundleId: e.bundleId ?? null, dryRun: e.dryRun ?? false }],
+      skipDuplicates: true,
     });
   };
