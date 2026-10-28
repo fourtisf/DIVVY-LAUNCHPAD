@@ -12,6 +12,7 @@ import {
   type TradeBuildResponse,
 } from "@divvy/shared";
 import {
+  ata,
   buyInstructions,
   claimCreatorFeeInstructions,
   creatorFeeVault,
@@ -109,10 +110,15 @@ export async function liveTradeRoutes(app: FastifyInstance, { d }: { d: LiveDeps
         const tx = new VersionedTransaction(new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message());
         return { tx: b64(tx), route: "curve", expectedOut: amount(out, 6), minOut: amount(keep(out), 6), priceImpactBps: spot > 0 ? Math.max(0, Math.round((exec / spot - 1) * 10_000)) : 0 };
       }
-      const q = quoteSell(pool, global, rates, new BN(amountIn.toString()));
+      // Never more than the wallet holds now: a "100%" from a balance the page read a moment ago could
+      // ask for more, and that sell would fail (2026-10-28). An RPC that doesn't answer leaves it as asked.
+      const held = await d.conn.getTokenAccountBalance(ata(owner, mint, mintProgramA), "confirmed").then((b) => BigInt(b.value.amount), () => null);
+      if (held === 0n) return sendError(reply, 422, "NOTHING_TO_SELL", `This wallet holds no $${c.ticker}`);
+      const tokensIn = held !== null && held < amountIn ? held : amountIn;
+      const q = quoteSell(pool, global, rates, new BN(tokensIn.toString()));
       const out = BigInt(q.amountOut.toString());
-      const ixs = [priority, ...sellInstructions({ ...base, tokensIn: new BN(amountIn.toString()), minLamportsOut: new BN(keep(out).toString()) })];
-      const exec = Number(out) / 1e9 / (Number(amountIn) / 1e6);
+      const ixs = [priority, ...sellInstructions({ ...base, tokensIn: new BN(tokensIn.toString()), minLamportsOut: new BN(keep(out).toString()) })];
+      const exec = Number(out) / 1e9 / (Number(tokensIn) / 1e6);
       const tx = new VersionedTransaction(new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message());
       return { tx: b64(tx), route: "curve", expectedOut: amount(out, 9), minOut: amount(keep(out), 9), priceImpactBps: spot > 0 ? Math.max(0, Math.round((1 - exec / spot) * 10_000)) : 0 };
     }
