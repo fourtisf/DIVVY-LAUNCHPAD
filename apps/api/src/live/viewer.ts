@@ -64,8 +64,9 @@ export async function requireViewer(d: LiveDeps, req: FastifyRequest, reply: Fas
 
 export async function requireAdmin(d: LiveDeps, req: FastifyRequest, reply: FastifyReply): Promise<Viewer | null> {
   const v = await getViewer(d, req);
+  // A 404, like any unknown path: the admin pages and API don't say they exist (owner request 2026-10-28).
   if (!v || !v.isAdmin) {
-    await sendError(reply, 403, "FORBIDDEN", "Admins only");
+    await sendError(reply, 404, "NOT_FOUND", "Not found");
     return null;
   }
   return v;

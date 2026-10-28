@@ -96,7 +96,6 @@ export function MeView() {
         {me?.x ? ` · @${me.x.handle}` : ""}. {claimModel ? "Every hour your coins credit you their stock. Claim it any time; you pay only the network fee and your token account." : "Every hour your coins send you their stock."}
       </p>
       <div className="me-actions">
-        {me?.isAdmin && <Link className="btn btn-ghost" href="/admin">Admin</Link>}
         <button className="btn btn-ghost" type="button" onClick={() => void signOut()}>Sign out</button>
         <button className="btn btn-ghost" type="button" onClick={() => void signOut().then(() => wallet.disconnect())}>Disconnect</button>
       </div>

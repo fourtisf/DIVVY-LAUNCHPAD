@@ -17,8 +17,8 @@ async function visitorHeaders(): Promise<Record<string, string>> {
   return { ...(ip ? { "x-forwarded-for": ip } : {}), ...(country ? { "x-geo-country": country } : {}) };
 }
 
-export async function serverApi<T>(path: string): Promise<T> {
-  return api<T>(path, { headers: await visitorHeaders() });
+export async function serverApi<T>(path: string, extra?: Record<string, string>): Promise<T> {
+  return api<T>(path, { headers: { ...(await visitorHeaders()), ...extra } });
 }
 
 /** For responses that are the same for everyone (/api/config, /api/stats). */

@@ -56,7 +56,7 @@ export async function extrasRoutes(app: FastifyInstance, { store, session, admin
   };
 
   app.get("/api/admin/overview", async (req, reply): Promise<AdminOverview | void> => {
-    if (!admin(req)) return sendError(reply, 403, "FORBIDDEN", "Admins only");
+    if (!admin(req)) return sendError(reply, 404, "NOT_FOUND", "Not found");
     return {
       launchesOpen: settings.launchesOpen,
       launchesPausedReason: settings.reason,
@@ -71,7 +71,7 @@ export async function extrasRoutes(app: FastifyInstance, { store, session, admin
   });
 
   app.post("/api/admin/settings", async (req, reply) => {
-    if (!admin(req)) return sendError(reply, 403, "FORBIDDEN", "Admins only");
+    if (!admin(req)) return sendError(reply, 404, "NOT_FOUND", "Not found");
     const body = AdminSettingsRequestSchema.safeParse(req.body);
     if (!body.success) return sendError(reply, 400, "BAD_REQUEST", "Invalid settings");
     settings.launchesOpen = body.data.launchesOpen;
@@ -80,7 +80,7 @@ export async function extrasRoutes(app: FastifyInstance, { store, session, admin
   });
 
   app.get("/api/admin/reports", async (req, reply) => {
-    if (!admin(req)) return sendError(reply, 403, "FORBIDDEN", "Admins only");
+    if (!admin(req)) return sendError(reply, 404, "NOT_FOUND", "Not found");
     return {
       items: reports
         .map((r, i) => ({ r, i }))
@@ -94,7 +94,7 @@ export async function extrasRoutes(app: FastifyInstance, { store, session, admin
 
   // Demo only: remembered for the admin page, not applied to the demo board.
   app.post<{ Params: { mint: string } }>("/api/admin/coins/:mint/hide", async (req, reply) => {
-    if (!admin(req)) return sendError(reply, 403, "FORBIDDEN", "Admins only");
+    if (!admin(req)) return sendError(reply, 404, "NOT_FOUND", "Not found");
     const body = AdminHideRequestSchema.safeParse(req.body);
     if (!body.success) return sendError(reply, 400, "BAD_REQUEST", "Invalid request");
     if (!store.coinByMint(req.params.mint)) return sendError(reply, 404, "COIN_NOT_FOUND", "Unknown coin");
@@ -104,7 +104,7 @@ export async function extrasRoutes(app: FastifyInstance, { store, session, admin
   });
 
   app.post<{ Params: { id: string } }>("/api/admin/reports/:id", async (req, reply) => {
-    if (!admin(req)) return sendError(reply, 403, "FORBIDDEN", "Admins only");
+    if (!admin(req)) return sendError(reply, 404, "NOT_FOUND", "Not found");
     const body = AdminReportUpdateSchema.safeParse(req.body);
     if (!body.success) return sendError(reply, 400, "BAD_REQUEST", "Invalid status");
     const r = reports[Number(req.params.id)];
