@@ -228,3 +228,135 @@ Cara $USPAD membayarmu:
 
 Saham tokenisasi tidak tersedia untuk warga AS. Bukan saran keuangan.
 ```
+
+## Token live, third set (2026-10-28), filled in
+
+With the CA and NVDAx filled in. Each post is under 280 characters as X counts them. The "New on uspad.fun"
+post names the dev buy and the creator fee claim on the coin page: post it once the 2026-10-28 update is live.
+
+Post:
+
+```text
+$USPAD is live. 🟢
+
+Hold it, get paid in Nvidia stock.
+
+$10+ of $USPAD in your wallet = NVDAx every hour, bought from its own trading fees and sent on chain.
+
+CA: 8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+
+uspad.fun
+```
+
+Reply 1, right under it (pin it):
+
+```text
+⚠️ Only one $USPAD is official:
+
+8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+
+Tickers can repeat on uspad. Paste the CA into the search on uspad.fun to find the real one. The CA comes only from @uspadfun.
+```
+
+Reply 2:
+
+```text
+How $USPAD pays you:
+
+• Every buy and sell pays 1.25%
+• 0.50% of it buys NVDAx every hour
+• Sent to every wallet holding $10+ of $USPAD
+• A public receipt on chain for every round
+
+Tokenized stocks aren't available to US persons. Not financial advice.
+```
+
+Reply 3, what's new:
+
+```text
+New on uspad.fun:
+
+• The dev buys first, in the same transaction as the launch. No sniper gets in before
+• Creators claim their fees straight from their coin's page
+• Search any coin by ticker, name or CA
+
+Launch yours → uspad.fun
+```
+
+Short CA post:
+
+```text
+$USPAD
+CA: 8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+
+Paid in NVDAx every hour · uspad.fun
+```
+
+Versi Indonesia:
+
+```text
+$USPAD sudah live. 🟢
+
+Pegang, dapat saham Nvidia.
+
+Pegang $10+ $USPAD = dapat NVDAx tiap jam, dibeli dari fee trading-nya sendiri dan dikirim on-chain.
+
+CA: 8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+
+uspad.fun
+```
+
+```text
+⚠️ Hanya satu $USPAD yang resmi:
+
+8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev
+
+Ticker bisa sama di uspad. Paste CA di kolom search uspad.fun untuk menemukan yang asli. CA resmi hanya dari @uspadfun.
+```
+
+```text
+Cara $USPAD membayarmu:
+
+• Tiap beli dan jual kena fee 1,25%
+• 0,50% darinya membeli NVDAx setiap jam
+• Dikirim ke setiap wallet yang pegang $10+ $USPAD
+• Bukti on-chain publik tiap putaran
+
+Saham tokenisasi tidak tersedia untuk warga AS. Bukan saran keuangan.
+```
+
+```text
+Baru di uspad.fun:
+
+• Dev beli paling pertama, di transaksi yang sama dengan launch. Sniper tidak bisa masuk duluan
+• Creator claim fee langsung dari halaman coin-nya
+• Cari coin pakai ticker, nama, atau CA
+
+Launch punyamu → uspad.fun
+```
+
+### Bios, third set
+
+X bio for @uspadfun (114 of 160 characters):
+
+```text
+Memecoins that pay holders in US stocks, every hour. Hold $USPAD, get NVDAx. Dev buys first, no snipers. uspad.fun
+```
+
+$USPAD's description for token pages such as DEX Screener (222 characters):
+
+```text
+The token of uspad.fun. Hold $10+ of $USPAD and get Nvidia stock (NVDAx) every hour, bought from its own trading fees and sent on chain. Every trade pays 1.25%; 0.50% of it goes to holders. Official CA only from @uspadfun.
+```
+
+Versi Indonesia (206 characters):
+
+```text
+Token resmi uspad.fun. Pegang $10+ $USPAD dan dapat saham Nvidia (NVDAx) tiap jam, dibeli dari fee trading-nya dan dikirim on-chain. Tiap trade kena 1,25%; 0,50% untuk holder. CA resmi hanya dari @uspadfun.
+```
+
+One line, for Telegram or a pinned message:
+
+```text
+$USPAD: hold it, get paid in Nvidia stock every hour. 🟢
+```
