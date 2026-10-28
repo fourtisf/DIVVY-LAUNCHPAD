@@ -37,7 +37,7 @@
 #   go-live.sh payouts minimum <USD>
 #                                 a coin's hourly holders' share under this waits for the next hour ($1).
 #   go-live.sh token-ca <address> shows the uspad token's contract address in the hero; token-ca off
-#                                 takes it off again (rebuilds the site: it is a NEXT_PUBLIC_ value).
+#                                 puts back "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
 #   go-live.sh status             apps, health, wallet addresses and balances.
 #
@@ -907,7 +907,7 @@ token_ca() {
   if [ "$1" = off ]; then
     set_env $ENV_DIR/build.env NEXT_PUBLIC_TOKEN_CA ""
     update
-    note "CA dihapus dari situs."
+    note "CA dihapus dari situs: tertulis 'CA: coming soon'."
   else
     set_env $ENV_DIR/build.env NEXT_PUBLIC_TOKEN_CA "$1"
     update

@@ -10,7 +10,7 @@ $USPAD's official CA (from the owner, 2026-10-28): `8cxC88G3HAVxH7BNwU7oZq6CpjDK
 
 Tickers can repeat on uspad and the board shows more than one $USPAD, so every post says where the
 official address comes from. The site's hero can show the CA with a copy button:
-`/root/go-live.sh token-ca <CA>`; `/root/go-live.sh token-ca off` takes it off (the owner took it off on 2026-10-28).
+`/root/go-live.sh token-ca <CA>`; `/root/go-live.sh token-ca off` puts back "CA: coming soon" (the owner's choice on 2026-10-28).
 
 Every post is under 280 characters as X counts them with a 44-character CA (the longest a Solana
 address gets). Video: `uspad-token-1920x1080.mp4`; banner for token pages: `uspad-token-header-3000x1000.png`.

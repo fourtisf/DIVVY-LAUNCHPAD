@@ -79,7 +79,7 @@ Follow setup-vps.md with these changes:
 | `BLOCKED_COUNTRIES` | `US` at least (xStocks aren't offered to U.S. persons); legal review decides the rest |
 | `ADMIN_WALLETS` | the owner's own wallet address |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALERT_CHAT_ID` | strongly recommended: every money alert goes there |
-| `NEXT_PUBLIC_TOKEN_CA` | empty (no CA in the hero) unless `go-live.sh token-ca <address>` sets it; `token-ca off` clears it |
+| `NEXT_PUBLIC_TOKEN_CA` | empty ("CA: coming soon" in the hero) unless `go-live.sh token-ca <address>` sets it; `token-ca off` clears it |
 
 ## Phase 2. 💰 The PlatformConfig
 
