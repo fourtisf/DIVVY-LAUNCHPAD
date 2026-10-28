@@ -2,6 +2,8 @@
 
 For the post that $USPAD is live. Replace the two placeholders before posting:
 
+$USPAD's official CA (from the owner, 2026-10-28): `8cxC88G3HAVxH7BNwU7oZq6CpjDKdXMRpjW8KBJUucev`.
+
 - `[CA]`: $USPAD's official mint address. Post it only after the coin is live: uspad keeps a mint
   secret until its create lands, and the "is live" panel shows it (copy it from there).
 - `[STOCK]`: the stock its holders earn, picked on the create form (NVDAx, SPYx, …).
