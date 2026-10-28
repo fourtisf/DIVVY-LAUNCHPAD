@@ -6,7 +6,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/node_modules/**", "**/.next/**", "**/dist/**", "prototype/**", "**/next-env.d.ts"] },
+  { ignores: ["**/node_modules/**", "**/.next/**", "**/dist/**", "prototype/**", "**/next-env.d.ts", "**/playwright-report/**", "**/test-results/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -19,6 +19,14 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
     settings: { next: { rootDir: "apps/web" } },
     rules: { ...nextPlugin.configs.recommended.rules, ...reactHooks.configs.recommended.rules },
+  },
+  {
+    // The page's code runs on Next.js's Buffer polyfill, which lacks Node's BigInt reads: a check written
+    // with Buffer passed every Node test and stopped every mainnet launch on 2026-10-28. Use Uint8Array
+    // and DataView there (lib/txcheck.ts).
+    files: ["apps/web/src/**/*.{ts,tsx}"],
+    ignores: ["apps/web/src/**/*.test.ts"],
+    rules: { "no-restricted-globals": ["error", { name: "Buffer", message: "Buffer in the browser is Next.js's polyfill, without Node's BigInt reads: use Uint8Array and DataView." }] },
   },
   {
     // Phase 0 scripts are CommonJS so their `require.main === module` entry checks work.

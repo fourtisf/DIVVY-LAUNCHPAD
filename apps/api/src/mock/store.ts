@@ -32,7 +32,15 @@ export interface MockLaunch {
   ticker: string;
   coin: MockCoin;
   indexed: boolean;
+  /**
+   * A launch by a signed-in wallet waits for it to sign the coin's create, as live mode does (the e2e
+   * test drives this with a test wallet). The steps after signing count from `signedAt`.
+   */
+  sign?: { creator: string; unsigned: string; signedAt: number | null; refused: boolean };
 }
+
+/** When a launch's steps start counting: at once, or once its creator signed; null while it waits. */
+export const launchClock = (l: MockLaunch): number | null => (l.sign ? l.sign.signedAt : l.startedAt);
 
 export const DEMO_WALLET = "7Hq3Lx9Fa2Mv8RtYbW1Pd5QzJnK4cE6uSgDhA3x9Fa";
 /** Step timing for the launch modal (the prototype advances one step per second). */
@@ -80,7 +88,8 @@ export class MockStore {
   /** Advances mock launches; a launch is added to the board when it reaches "indexed". */
   tick(now = Date.now()): void {
     for (const l of this.launches.values()) {
-      if (!l.indexed && now - l.startedAt >= 3 * LAUNCH_STEP_MS) {
+      const clock = launchClock(l);
+      if (!l.indexed && clock !== null && now - clock >= 3 * LAUNCH_STEP_MS) {
         l.indexed = true;
         l.coin.createdAt = now;
         this.coins.unshift(l.coin);

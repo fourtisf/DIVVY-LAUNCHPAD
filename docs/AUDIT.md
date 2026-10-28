@@ -198,7 +198,7 @@ NEW-1 to NEW-4 were found while re-checking the reviews. NEW-5 was found while f
 
 ## Third review (2026-10-27)
 
-Five AI review agents read the code again after the creator-signed create, the creator-paid launch fee and the 1.25% fee: the launch pipeline and launch fee, the dividend engine, the indexer and API, the web app, and `deploy/mainnet/go-live.sh`. Every finding below was re-checked against the code before it was fixed. The fixes are in commit `ac31ed8` (T-1 to T-12) and the commit that adds this section (T-13 to T-42). Tests: worker 64, API 29, shared 43, solana 37, server 5, web unit 16, all passing; typecheck and lint clean.
+Five AI review agents read the code again after the creator-signed create, the creator-paid launch fee and the 1.25% fee: the launch pipeline and launch fee, the dividend engine, the indexer and API, the web app, and `deploy/mainnet/go-live.sh`. Every finding below was re-checked against the code before it was fixed. The fixes are in commit `ac31ed8` (T-1 to T-12) and the commit that adds this section (T-13 to T-42). T-43 was found on mainnet the day after. Tests: worker 64, API 29, shared 43, solana 37, server 5, web unit 16, all passing; typecheck and lint clean.
 
 | ID | Severity | Finding | Status | Where and how |
 |---|---|---|---|---|
@@ -244,6 +244,7 @@ Five AI review agents read the code again after the creator-signed create, the c
 | T-40 | Low | A /payouts stock filter showed unfiltered receipts while loading. | fixed | It says it's loading, or that it failed. |
 | T-41 | Low | A ticker URL over 64 characters showed an error page; the coin page's payouts never refreshed; trade rows keyed by signature alone. | fixed | Not-found instead; 30 s refresh; keyed by signature and position. |
 | T-42 | Low | A zero price showed "InfinityB"; the report dialog ignored Escape. | fixed | No estimate without a price; Escape closes the dialog and focus moves in and back. |
+| T-43 | Critical | Found on mainnet, 2026-10-28: every creator-signed create failed the page's safety check before the wallet was asked ("g.readBigUInt64LE is not a function"), so no launch could be approved. `checkCreate` read amounts with Buffer's BigInt reads, which Next.js's browser polyfill lacks; every test ran on Node's Buffer. | fixed | `apps/web/src/lib/txcheck.ts` reads with DataView. Kept from coming back: a unit test runs the checks on Next.js's own polyfill; `apps/web/e2e/launch-sign.spec.ts` drives the creator-signed launch in a real browser with a Wallet Standard test wallet against a mock API that hands over a real create and verifies the signature (it fails with the same error on the old code); lint refuses `Buffer` in browser code. |
 
 Residual risks:
 - `go-live.sh update` installs the release's own copy of the script over `/root/go-live.sh` (`self_update`). Root therefore trusts whatever the divvy user built. That is the same trust root already gives the release it runs, but it's worth knowing.
