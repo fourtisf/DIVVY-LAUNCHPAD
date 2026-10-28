@@ -220,7 +220,7 @@ pending_migrations() { # release
   ls -1 "$1/packages/db/prisma/migrations" | grep -E '^[0-9]' | grep -vxF -f <(printf '%s\n' "$applied") || true
 }
 
-smoke() { # release: boots it next to the running site on spare ports (RUNBOOK "Deploy", step 2)
+smoke() { # release: boots it next to the running site on spare ports (RUNBOOK "Deploy", step 3)
   say "Uji coba build di port cadangan"
   # Logs in a private folder (not world-readable /tmp files), shown with API keys masked (audit).
   local t
@@ -577,14 +577,17 @@ update() {
   # Inlined into the web build (NEXT_PUBLIC_*), so set before building.
   set_env $ENV_DIR/build.env NEXT_PUBLIC_SOLANA_RPC_URL "$BROWSER_RPC"
   build_release
-  smoke "$REL"
-  # Migrations first, then the switch (RUNBOOK "Deploy" step 3): a failed migration leaves the old
-  # release running and is tried again by the next `update` (audit).
+  # Migrations before the trial run, then the switch (RUNBOOK "Deploy" steps 2 to 4). The new release's
+  # queries need its columns: tried on the old schema, its board failed with a 500 and stopped the
+  # update (2026-10-28, the dev buy's columns on Coin). Migrations are additive, so the old release keeps
+  # running on the migrated database whatever happens next, and a failed migration leaves it running and
+  # is tried again by the next `update` (audit).
   if [ -n "$(pending_migrations "$REL")" ]; then
     say "Ada migrasi baru: backup dulu"
     run_backup || die "backup database gagal (alasan di atas). Tidak ada yang diubah: situs lama tetap jalan."
     migrate "$REL"
   fi
+  smoke "$REL"
   point_current "$REL"
   # Right away, so a fixed script reaches /root even if a later step stops.
   self_update

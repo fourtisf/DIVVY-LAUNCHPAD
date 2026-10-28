@@ -338,7 +338,7 @@ exit
 
 ## 10. First deploy and PM2 at boot
 
-Follow [`docs/RUNBOOK.md`](../docs/RUNBOOK.md), "Deploy", steps 1 to 5 (release, install, build, smoke test, migrate, switch). Before step 2, `api.env` and `worker.env` need at least `SOLANA_RPC_URL`, `DIVVY_PLATFORM_CONFIG`, `STORAGE_DIR` and `PUBLIC_MEDIA_BASE`: the smoke test starts the API and the worker, and neither starts without them. Both also check `SOLANA_CLUSTER` against the RPC. Without the keypairs (§8) the worker starts, but launches and payouts fail.
+Follow [`docs/RUNBOOK.md`](../docs/RUNBOOK.md), "Deploy", steps 1 to 5 (release, install, build, migrate, smoke test, switch). Before step 3, `api.env` and `worker.env` need at least `SOLANA_RPC_URL`, `DIVVY_PLATFORM_CONFIG`, `STORAGE_DIR` and `PUBLIC_MEDIA_BASE`: the smoke test starts the API and the worker, and neither starts without them. Both also check `SOLANA_CLUSTER` against the RPC. Without the keypairs (§8) the worker starts, but launches and payouts fail.
 
 Then start PM2 instead of reloading it, once per app user, and register each daemon with systemd. The app names match the user names, so `--only "$u"` starts each user's own app. Never start an app under another user's daemon.
 
@@ -444,7 +444,7 @@ For a server set up with one `divvy` user running everything from `/etc/divvy/di
    sudo install -d -o divvy-backup -g divvy-backup -m 700 /home/divvy-backup/.config /home/divvy-backup/.config/rclone
    sudo install -o divvy-backup -g divvy-backup -m 600 /home/divvy/.config/rclone/rclone.conf /home/divvy-backup/.config/rclone/rclone.conf
    ```
-5. **Build and check a release** with RUNBOOK "Deploy" steps 1 to 3. Step 1 links `build.env`, and step 2 smoke-tests under the new users and env files.
+5. **Build and check a release** with RUNBOOK "Deploy" steps 1 to 3. Step 1 links `build.env`, step 2 applies any new migrations, and step 3 smoke-tests under the new users and env files.
 6. **Stop the old daemon and switch.**
    ```bash
    sudo systemctl disable --now pm2-divvy && sudo rm /etc/systemd/system/pm2-divvy.service && sudo systemctl daemon-reload

@@ -101,7 +101,18 @@ REL=/srv/divvy/releases/<the folder printed above>
 sudo mkdir -p "$REL/apps/web/.next/cache" && sudo chown -R divvy-web:divvy-web "$REL/apps/web/.next/cache"
 ```
 
-### 2. Smoke-test it on spare ports
+### 2. Migrate (only if the release adds migrations)
+
+```bash
+diff <(ls -1 /srv/divvy/current/packages/db/prisma/migrations) <(ls -1 "$REL/packages/db/prisma/migrations")
+# Any ">" line means new migrations. Back up first, then apply them with the API's database URL:
+sudo -u divvy-backup -H /usr/local/bin/divvy-pg-backup
+cd "$REL/packages/db" && sudo -u divvy-api -H node --env-file=/etc/divvy/api.env ./node_modules/prisma/build/index.js migrate deploy; cd
+```
+
+Migrate before the smoke test: the new release's queries need its new columns, and against the old schema its board fails with a 500 (2026-10-28, the dev buy's columns). Migrations must be **backward compatible** (expand, then contract). The old release keeps running against the new schema until the reload, also when the smoke test then fails, and a rollback never undoes a migration. Ship a column drop or rename in a later release, once no running code uses the old shape.
+
+### 3. Smoke-test it on spare ports
 
 This step is not optional. If a new instance fails to boot, `pm2 reload` still prints ✓: it waits `listen_timeout` (15 s), stops the healthy old instance anyway, and the new one crash-loops. That was tested with PM2 7.1.1. Boot the new build next to the old one first, each app as its own user with its own env file:
 
@@ -124,17 +135,6 @@ cd
 The worker line must show `"roles":["none"]` and the `cluster`, `mainnetEnabled`, `payoutsDryRun` and `delivery` you expect. `/api/health` answers HTTP 200 even when it reports `"ok":false`, which is why the check reads the body.
 
 Anything else: read `/tmp/smoke-api.log`, `/tmp/smoke-web.log` and `/tmp/smoke-worker.log` ("Worker or API won't start" lists the start checks), fix the problem, and don't go further. All three exit on their own (`timeout`) and serve no public traffic. The smoke API holds no keys and runs no jobs, and the worker with `WORKER_ROLES=none` starts nothing, so neither changes anything.
-
-### 3. Migrate (only if the release adds migrations)
-
-```bash
-diff <(ls -1 /srv/divvy/current/packages/db/prisma/migrations) <(ls -1 "$REL/packages/db/prisma/migrations")
-# Any ">" line means new migrations. Back up first, then apply them with the API's database URL:
-sudo -u divvy-backup -H /usr/local/bin/divvy-pg-backup
-cd "$REL/packages/db" && sudo -u divvy-api -H node --env-file=/etc/divvy/api.env ./node_modules/prisma/build/index.js migrate deploy; cd
-```
-
-Migrations must be **backward compatible** (expand, then contract). The old release keeps running against the new schema until the reload, and a rollback never undoes a migration. Ship a column drop or rename in a later release, once no running code uses the old shape.
 
 ### 4. Switch and reload
 
@@ -836,7 +836,7 @@ df -h /var/lib/redis
 
 ### Worker or API won't start
 
-**Signs:** restart counts climbing in `pm2all ls`, then `errored`; or the smoke test in Deploy step 2 fails.
+**Signs:** restart counts climbing in `pm2all ls`, then `errored`; or the smoke test in Deploy step 3 fails.
 
 ```bash
 pm2as divvy-worker logs divvy-worker --err --lines 40 --nostream
