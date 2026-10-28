@@ -23,6 +23,16 @@ export class UnsafeTransaction extends Error {
   }
 }
 
+/**
+ * Little-endian reads straight from the instruction bytes. Not Buffer's: in the browser Buffer is Next.js's
+ * polyfill, which has no readBigUInt64LE, so every creator-signed create failed this check before the
+ * wallet ever saw it (2026-10-28, the first mainnet tries). A read past the end is null.
+ */
+const view = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength);
+const u32 = (b: Uint8Array, o: number): number | null => (b.length >= o + 4 ? view(b).getUint32(o, true) : null);
+const u64 = (b: Uint8Array, o: number): bigint | null => (b.length >= o + 8 ? view(b).getBigUint64(o, true) : null);
+const startsWith = (b: Uint8Array, prefix: Uint8Array) => b.length >= prefix.length && prefix.every((x, i) => b[i] === x);
+
 const wsolAta = (owner: PublicKey) =>
   PublicKey.findProgramAddressSync([owner.toBuffer(), new PublicKey(TOKEN).toBuffer(), new PublicKey(WSOL).toBuffer()], new PublicKey(ATA))[0];
 
@@ -52,10 +62,10 @@ export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, ne
   for (const ix of msg.compiledInstructions) {
     const prog = keys.get(ix.programIdIndex)?.toBase58() ?? "";
     if (!allowed.has(prog)) throw new UnsafeTransaction(`unexpected program ${prog}`);
-    const data = Buffer.from(ix.data);
+    const data = ix.data;
     if (prog === SystemProgram.programId.toBase58()) {
       // Only wrapping SOL into your own WSOL account (tag 2 = Transfer).
-      if (data.readUInt32LE(0) !== 2 || !at(ix, 1)?.equals(myWsol)) throw new UnsafeTransaction("a SOL transfer to someone else");
+      if (u32(data, 0) !== 2 || !at(ix, 1)?.equals(myWsol)) throw new UnsafeTransaction("a SOL transfer to someone else");
     } else if (prog === TOKEN || prog === TOKEN_2022) {
       const tag = data[0];
       if (tag === 17) continue; // SyncNative
@@ -75,7 +85,7 @@ export function checkTransaction(tx: VersionedTransaction, wallet: PublicKey, ne
 }
 
 /** initialize_with_token_2022's discriminator, the create's own (Anchor sighash; packages/solana createInstruction). */
-const INITIALIZE_WITH_TOKEN_2022 = Buffer.from("25be7ede2c9aab11", "hex");
+const INITIALIZE_WITH_TOKEN_2022 = Uint8Array.from([0x25, 0xbe, 0x7e, 0xde, 0x2c, 0x9a, 0xab, 0x11]);
 /** The Jito tip is a small transfer; anything bigger to an address the page can't check is refused. */
 const MAX_TIP_LAMPORTS = 1_000_000n;
 /** The most the create's priority fee (compute unit price × limit) may cost the creator (audit). */
@@ -106,25 +116,25 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
   let cuLimit = 1_400_000n;
   for (const ix of msg.compiledInstructions) {
     const prog = keys[ix.programIdIndex]?.toBase58() ?? "";
-    const data = Buffer.from(ix.data);
+    const data = ix.data;
     if (prog === ComputeBudgetProgram.programId.toBase58()) {
       // SetComputeUnitLimit (2, u32) and SetComputeUnitPrice (3, u64 micro-lamports).
-      if (data[0] === 2 && data.length >= 5) cuLimit = BigInt(data.readUInt32LE(1));
-      else if (data[0] === 3 && data.length >= 9) cuPrice = data.readBigUInt64LE(1);
+      if (data[0] === 2 && data.length >= 5) cuLimit = BigInt(u32(data, 1)!);
+      else if (data[0] === 3 && data.length >= 9) cuPrice = u64(data, 1)!;
       continue;
     }
     if (prog === LAUNCHLAB[network]) {
       // Accounts: 0 payer, 1 creator, 6 the new mint (packages/solana createInstruction).
-      if (!data.subarray(0, 8).equals(INITIALIZE_WITH_TOKEN_2022)) throw new UnsafeTransaction("a LaunchLab instruction that isn't a coin create");
+      if (!startsWith(data, INITIALIZE_WITH_TOKEN_2022)) throw new UnsafeTransaction("a LaunchLab instruction that isn't a coin create");
       if (!at(ix, 0)?.equals(wallet) || !at(ix, 1)?.equals(wallet)) throw new UnsafeTransaction("a coin create for someone else");
       if (!at(ix, 6)?.equals(mint)) throw new UnsafeTransaction("a coin create for another mint");
       creates++;
       continue;
     }
     if (prog === SystemProgram.programId.toBase58()) {
-      if (data.length !== 12 || data.readUInt32LE(0) !== 2 || !at(ix, 0)?.equals(wallet)) throw new UnsafeTransaction("a SOL transfer that isn't the launch fee or the tip");
+      if (data.length !== 12 || u32(data, 0) !== 2 || !at(ix, 0)?.equals(wallet)) throw new UnsafeTransaction("a SOL transfer that isn't the launch fee or the tip");
       const to = at(ix, 1)?.toBase58();
-      const lamports = data.readBigUInt64LE(4);
+      const lamports = u64(data, 4)!;
       if (fee.to && to === fee.to && fees === 0) {
         if (lamports > fee.lamports) throw new UnsafeTransaction("a launch fee above uspad's");
         fees++;

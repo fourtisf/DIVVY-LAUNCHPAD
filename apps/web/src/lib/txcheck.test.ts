@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { createRequire } from "node:module";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AddressLookupTableAccount,
   ComputeBudgetProgram,
@@ -145,5 +146,44 @@ describe("checkCreate", () => {
     expect(() => checkCreate(build([cu!, ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000_000_000 }), c!, f!, t!]), me, "mainnet-beta", fee)).toThrow(/priority fee/);
     // No limit instruction: priced at the 1.4M-unit maximum.
     expect(() => checkCreate(build([ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000_000 }), c!, f!, t!]), me, "mainnet-beta", fee)).toThrow(/priority fee/);
+  });
+});
+
+describe("in the browser", () => {
+  // The browser's Buffer is Next.js's polyfill, without readBigUInt64LE: the checks must not need it
+  // (2026-10-28: every creator-signed create failed here before the wallet saw it).
+  const NextBuffer = (createRequire(import.meta.url)("next/dist/compiled/buffer") as { Buffer: typeof Buffer }).Buffer;
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("checks a create and a trade with Next.js's Buffer polyfill", () => {
+    expect(typeof NextBuffer.prototype.readBigUInt64LE).toBe("undefined");
+    const me = Keypair.generate().publicKey;
+    const create = new TransactionInstruction({
+      programId: LAUNCHLAB,
+      keys: [me, me, ...Array.from({ length: 5 }, () => Keypair.generate().publicKey)].map((pubkey, i) => ({ pubkey, isSigner: i === 0 || i === 6, isWritable: i === 0 || i >= 5 })),
+      data: Buffer.concat([Buffer.from("25be7ede2c9aab11", "hex"), Buffer.alloc(40)]),
+    });
+    const feeTo = Keypair.generate().publicKey;
+    const built = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: me,
+        recentBlockhash: blockhash,
+        instructions: [
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1_000 }),
+          create,
+          SystemProgram.transfer({ fromPubkey: me, toPubkey: feeTo, lamports: 20_000_000 }),
+          SystemProgram.transfer({ fromPubkey: me, toPubkey: Keypair.generate().publicKey, lamports: 100_000 }),
+        ],
+      }).compileToV0Message(),
+    );
+    const trade = tx(wallet, [wrap(1000)]);
+    // The page gets the create as base64 and deserializes it, as LaunchModal does.
+    const b64 = Buffer.from(built.serialize()).toString("base64");
+    vi.stubGlobal("Buffer", NextBuffer);
+    const got = VersionedTransaction.deserialize(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    expect(() => checkCreate(got, me, "mainnet-beta", { to: feeTo.toBase58(), lamports: 20_000_000n })).not.toThrow();
+    expect(() => checkCreate(got, me, "mainnet-beta", { to: feeTo.toBase58(), lamports: 10_000_000n })).toThrow(/above uspad's/);
+    expect(() => checkTransaction(trade, wallet, "mainnet-beta", "trade")).not.toThrow();
   });
 });
