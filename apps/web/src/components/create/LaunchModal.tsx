@@ -73,38 +73,44 @@ export function LaunchModal({
   walletNow.current = wallet;
   // The create the wallet was last asked to sign: a new attempt brings a new one.
   const asked = useRef<string | null>(null);
-  // While the wallet is asked: since when (for the "open your wallet" hint) and what it last said.
+  // The newest create waiting for the wallet; since when the launch waits for a signature; when the
+  // wallet was last asked and what it last answered. They drive the hints and the Approve button.
+  const [toSign, setToSign] = useState<string | null>(null);
+  const [signingSince, setSigningSince] = useState<number | null>(null);
   const [askedAt, setAskedAt] = useState<number | null>(null);
   const [walletSaid, setWalletSaid] = useState<string | null>(null);
-  const [, setTick] = useState(0);
+  const [signedB64, setSignedB64] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (askedAt === null) return;
-    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    if (k !== 1) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [askedAt]);
+  }, [k]);
 
   /**
    * The creator signs their coin's create (owner decision 2026-10-27): checked here before the wallet
    * opens, then sent back signed for the worker to add the mint's signature. Turning it down, or a
    * create that fails the check, ends the launch with nothing charged.
+   *
+   * The wallet is asked once on its own when a create arrives. Its prompt can get lost (behind the
+   * window, or held back by a wallet that only opens on a click), so the modal also has an Approve
+   * button that asks again; the answer to an ask that a newer one replaced doesn't count, except a
+   * signature, which the worker checks against the create it's waiting for.
    */
-  // One wallet prompt at a time: a create that arrives while one is open waits for it (audit).
-  const busy = useRef(false);
-  const queued = useRef<string | null>(null);
+  const prompting = useRef(false);
+  const seq = useRef(0);
   const sign = (body: object) => api(`/api/launch/${launchId}/sign`, { method: "POST", body: JSON.stringify(body) });
   const signCreate = async (b64: string) => {
-    if (busy.current) {
-      queued.current = b64;
-      return;
-    }
-    busy.current = true;
+    const my = ++seq.current;
+    prompting.current = true;
     const wallet = walletNow.current;
+    setWalletSaid(null);
     try {
       if (!wallet.publicKey || !wallet.signTransaction) throw new UnsafeTransaction("this wallet can't sign the launch");
       const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
       checkCreate(tx, wallet.publicKey, config.network, { to: config.launchFee.to, lamports: BigInt(config.launchFee.amount.raw) });
-      setWalletSaid(null);
       setAskedAt(Date.now());
+      console.info("launch: asking the wallet to sign the create", wallet.wallet?.adapter.name);
       const signed = await wallet.signTransaction(tx);
       let bin = "";
       for (const b of signed.serialize()) bin += String.fromCharCode(b);
@@ -112,6 +118,7 @@ export function LaunchModal({
       for (let i = 0; ; i++) {
         try {
           await sign({ signedTx: btoa(bin) });
+          setSignedB64(b64);
           break;
         } catch (e) {
           if (i === 2) throw e;
@@ -120,9 +127,10 @@ export function LaunchModal({
       }
     } catch (e) {
       console.error("launch: the wallet didn't sign", e);
+      if (my !== seq.current) return;
       // Only a refusal ends the launch: the creator turned it down, or the create failed the page's
-      // check. Any other wallet error (a prompt still open, a dropped connection) waits for the next ask,
-      // and says what the wallet answered so it can be fixed.
+      // check. Any other wallet error (a dropped connection, a wallet that needs a click) waits for the
+      // Approve button or the next create, and says what the wallet answered.
       if (e instanceof UnsafeTransaction || rejected(e)) {
         if (e instanceof UnsafeTransaction) toast(e.message);
         await sign({ refused: true }).catch(() => {});
@@ -131,11 +139,10 @@ export function LaunchModal({
         setWalletSaid(x?.error?.message || x?.message || "no answer");
       }
     } finally {
-      setAskedAt(null);
-      busy.current = false;
-      const next = queued.current;
-      queued.current = null;
-      if (next && next !== b64) void signCreate(next);
+      if (my === seq.current) {
+        prompting.current = false;
+        setAskedAt(null);
+      }
     }
   };
 
@@ -149,9 +156,12 @@ export function LaunchModal({
         const i = STEP_INDEX[s.step];
         if (i < 0) return onDone(s);
         setK(i);
+        if (s.step === "signing") setSigningSince((x) => x ?? Date.now());
         if (s.step === "signing" && s.tx && s.tx !== asked.current) {
           asked.current = s.tx;
-          void signCreate(s.tx);
+          setToSign(s.tx);
+          // One prompt at a time on its own (audit): while one is open, the button asks with this one.
+          if (!prompting.current) void signCreate(s.tx);
         }
         if (i >= STEPS.length) {
           // By mint: coins can share a ticker.
@@ -261,11 +271,21 @@ export function LaunchModal({
                 </li>
               ))}
             </ul>
-            {k === 1 && walletSaid ? (
-              <p className="note" role="status">Your wallet didn&apos;t sign it ({walletSaid}). It will ask again in a moment.</p>
-            ) : k === 1 && askedAt !== null && Date.now() - askedAt > 8000 ? (
-              <p className="note" role="status">Don&apos;t see your wallet? Open it from your browser&apos;s toolbar: the request is waiting there.</p>
-            ) : null}
+            {k === 1 && !toSign && signingSince !== null && now - signingSince > 10_000 && (
+              <p className="note" role="status">Waiting for uspad to hand your wallet the create. Keep this tab open.</p>
+            )}
+            {k === 1 && toSign && toSign !== signedB64 && (walletSaid !== null || askedAt === null || now - askedAt > 8000) && (
+              <>
+                <p className="note" role="status">
+                  {walletSaid !== null
+                    ? `Your wallet didn't sign it (${walletSaid}). Ask it again:`
+                    : "Don't see your wallet? Open it from your browser's toolbar, or ask it again:"}
+                </p>
+                <button type="button" className="btn btn-g" style={{ width: "100%", marginTop: 10 }} onClick={() => void signCreate(toSign)}>
+                  Approve in wallet
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

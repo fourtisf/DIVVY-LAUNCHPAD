@@ -255,13 +255,31 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
     }
   });
 
+  // Log lines for the signing step, once each (the page polls every 400 ms).
+  const handedOver = new Set<string>();
+  const withheld = new Set<string>();
   app.get<{ Params: { id: string } }>("/api/launch/:id", async (req, reply): Promise<LaunchStatus | void> => {
     if (!/^[a-z0-9]{20,40}$/.test(req.params.id)) return sendError(reply, 404, "LAUNCH_NOT_FOUND", "No such launch");
     const l = await d.prisma.launch.findUnique({ where: { id: req.params.id }, include: { coin: true } });
     if (!l || !l.coin) return sendError(reply, 404, "LAUNCH_NOT_FOUND", "No such launch");
     const out: LaunchStatus = { id: l.id, step: l.step, ticker: l.coin.ticker };
     // The create to sign names the mint: its creator alone gets it before the coin lands.
-    if (l.step === "signing" && l.unsignedTx && (await getViewer(d, req))?.userId === l.userId) out.tx = l.unsignedTx;
+    if (l.step === "signing" && l.unsignedTx) {
+      const v = await getViewer(d, req);
+      if (v?.userId === l.userId) {
+        out.tx = l.unsignedTx;
+        if (!handedOver.has(l.unsignedTx)) {
+          handedOver.add(l.unsignedTx);
+          if (handedOver.size > 1000) handedOver.clear();
+          req.log.info({ launchId: l.id }, "launch: create handed to its creator's wallet");
+        }
+      } else if (!withheld.has(l.id)) {
+        // Once per launch: a creator whose page never gets the create can't approve it (debugging).
+        withheld.add(l.id);
+        if (withheld.size > 1000) withheld.clear();
+        req.log.warn({ launchId: l.id, signedIn: !!v }, "launch: create withheld, the viewer isn't its creator");
+      }
+    }
     // The mint is revealed only once the create has landed (HANDOFF §3.5).
     if ((l.step === "landed" || l.step === "indexed") && l.coin.mint) {
       out.mint = l.coin.mint;
