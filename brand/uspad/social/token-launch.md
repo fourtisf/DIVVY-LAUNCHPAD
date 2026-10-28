@@ -91,3 +91,55 @@ Cara $USPAD membayar:
 
 Saham tokenisasi tidak tersedia untuk warga AS. Bukan saran keuangan.
 ```
+
+## Post with the trailer video
+
+Attach `uspad-token-1920x1080.mp4`.
+
+```text
+Meet $USPAD. 🟢
+
+The token of uspad.fun: launch a memecoin on Solana, and every trade pays its holders in US stocks like NVDAx and SPYx, every hour, on chain.
+
+No snipers. No dev buy.
+
+CA: [CA]
+
+uspad.fun
+```
+
+Reply under it:
+
+```text
+The official $USPAD:
+
+[CA]
+
+Tickers can repeat on uspad. Only trust the CA from @uspadfun and uspad.fun.
+```
+
+Versi Indonesia:
+
+```text
+Ini $USPAD. 🟢
+
+Token dari uspad.fun: launch memecoin di Solana, tiap trade membayar holder-nya dengan saham AS seperti NVDAx dan SPYx, tiap jam, on-chain.
+
+Tanpa sniper. Tanpa dev buy.
+
+CA: [CA]
+
+uspad.fun
+```
+
+## X bio for @uspadfun (118 of 160 characters)
+
+```text
+Memecoins that pay their holders in US stocks, every hour. Launch on Solana in seconds: no snipers, no dev buy. $USPAD
+```
+
+## $USPAD's description (token pages such as DEX Screener, 218 of 280 characters with NVDAx)
+
+```text
+The token of uspad.fun, the Solana launchpad where every memecoin pays its holders in tokenized US stocks, every hour. Every trade pays 1.25%: 0.50% of it buys [STOCK] for holders hourly. Official CA only from @uspadfun.
+```
