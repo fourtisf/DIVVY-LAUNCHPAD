@@ -30,6 +30,7 @@ import { useToast } from "../Toasts";
 import { CandleChart } from "./CandleChart";
 import { ReportButton } from "./ReportButton";
 import { TradeBox } from "./TradeBox";
+import { CreatorFees } from "./CreatorFees";
 import { shareLabel } from "@/lib/devbuy";
 
 type List<T> = { items: T[]; nextCursor?: string | null };
@@ -226,6 +227,7 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
 
         <aside className="stack">
           <TradeBox coin={coin} />
+          <CreatorFees coin={coin} />
           <div className="foil-card">
             <div className="foil-top">
               <Chip sym={coin.dividendAsset} />

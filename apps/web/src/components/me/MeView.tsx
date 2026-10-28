@@ -101,6 +101,38 @@ export function MeView() {
       </div>
       {me?.blocked && <p className="note me-warn">uspad isn&apos;t available in your country, so claims are turned off here.</p>}
 
+      {/* First for creators, so their fees are easy to find. */}
+      {creator && creator.coins.length > 0 && (
+        <div className="panel" style={{ marginBottom: 18 }} id="creatorFees">
+          <div className="panel-h">
+            <h3>Your creator fees</h3>
+            <button className="btn btn-g" type="button" disabled={!!busy || creator.claimable.raw === "0"} onClick={() => void claimCreator()}>
+              {busy === "creator" ? "Claiming…" : creator.claimable.raw === "0" ? "Nothing to claim yet" : `Claim ${sol(creator.claimable.ui)}`}
+            </button>
+          </div>
+          <p className="note">Your {(config.fees.creatorBps / 100).toFixed(2)}% of every trade on the curve collects on chain in your own creator vault. Claiming sends it to this wallet.</p>
+          <div className="table-scroll">
+            <table className="t">
+              <thead><tr><th>Coin</th><th className="r">Status</th><th className="r">Creator fees earned</th></tr></thead>
+              <tbody>
+                {creator.coins.map((c) => (
+                  <tr key={c.mint}>
+                    <td>
+                      <Link href={coinHref(c)} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={c.imageUrl} alt="" width={26} height={26} style={{ borderRadius: 8 }} />${c.ticker}
+                      </Link>
+                    </td>
+                    <td className="r">{c.status === "graduated" ? "Graduated" : "On the curve"}</td>
+                    <td className="r">{sol(c.creatorFees.ui)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-h">
           <h3>{claimModel ? "Ready to claim" : "Waiting to be sent"}</h3>
@@ -134,7 +166,7 @@ export function MeView() {
         )}
       </div>
 
-      <div className="panel" style={{ marginBottom: 18 }}>
+      <div className="panel" style={{ marginBottom: 80 }}>
         <div className="panel-h"><h3>Payout history</h3></div>
         {!payouts?.items.length ? (
           <p className="note">No payouts yet.</p>
@@ -164,36 +196,6 @@ export function MeView() {
         )}
       </div>
 
-      {creator && creator.coins.length > 0 && (
-        <div className="panel" style={{ marginBottom: 80 }}>
-          <div className="panel-h">
-            <h3>Your coins</h3>
-            <button className="btn btn-g" type="button" disabled={!!busy || creator.claimable.raw === "0"} onClick={() => void claimCreator()}>
-              {busy === "creator" ? "Claiming…" : `Claim ${sol(creator.claimable.ui)}`}
-            </button>
-          </div>
-          <p className="note">Your {(config.fees.creatorBps / 100).toFixed(2)}% of every trade on the curve collects on chain in your own creator vault. Claiming sends it to this wallet.</p>
-          <div className="table-scroll">
-            <table className="t">
-              <thead><tr><th>Coin</th><th className="r">Status</th><th className="r">Creator fees earned</th></tr></thead>
-              <tbody>
-                {creator.coins.map((c) => (
-                  <tr key={c.mint}>
-                    <td>
-                      <Link href={coinHref(c)} style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap", fontWeight: 500 }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={c.imageUrl} alt="" width={26} height={26} style={{ borderRadius: 8 }} />${c.ticker}
-                      </Link>
-                    </td>
-                    <td className="r">{c.status === "graduated" ? "Graduated" : "On the curve"}</td>
-                    <td className="r">{sol(c.creatorFees.ui)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </>
   );
 }

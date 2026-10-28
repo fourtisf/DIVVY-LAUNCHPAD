@@ -11,7 +11,7 @@ import bs58 from "bs58";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction, type Connection, type VersionedTransactionResponse } from "@solana/web3.js";
 import { Redis } from "ioredis";
 import { PrismaClient } from "@divvy/db";
 import { ApiErrorSchema, CheckResponseSchema, CoinDetailSchema, CoinListSchema, ConfigSchema, LaunchStatusSchema, MeSchema, StatsSchema, UploadResponseSchema } from "@divvy/shared";
@@ -221,6 +221,29 @@ describe.skipIf(!run)("live mode", () => {
     await prisma.session.updateMany({ where: { user: { wallet: admin.address } }, data: { createdAt: new Date(Date.now() - 13 * 3_600_000) } });
     expect((await get("/api/admin/overview", a)).statusCode).toBe(404);
     expect(((await get("/api/me", a)).json() as { wallet: string; isAdmin: boolean })).toMatchObject({ wallet: admin.address, isAdmin: false });
+  });
+
+  it("builds the creator's fee claim with a priority fee, and refuses an empty vault", async () => {
+    const c = await login(keypair());
+    const f = fakeConn as unknown as Record<string, unknown>;
+    const before = { bal: f.getTokenAccountBalance, fees: f.getRecentPrioritizationFees };
+    try {
+      expect((await post("/api/me/creator/claim/build", {}, c)).statusCode).toBe(409);
+      f.getTokenAccountBalance = async () => ({ value: { amount: "500000000", decimals: 9 } });
+      f.getRecentPrioritizationFees = async () => [];
+      expect(((await get("/api/me/creator", c)).json() as { claimable: { raw: string } }).claimable.raw).toBe("500000000");
+      const r = await post("/api/me/creator/claim/build", {}, c);
+      expect(r.statusCode).toBe(200);
+      const tx = VersionedTransaction.deserialize(Buffer.from((r.json() as { tx: string }).tx, "base64"));
+      const first = tx.message.compiledInstructions[0]!;
+      expect(tx.message.staticAccountKeys[first.programIdIndex]!.equals(ComputeBudgetProgram.programId)).toBe(true);
+      expect(first.data[0]).toBe(3); // SetComputeUnitPrice, at the floor with no recent fees
+      expect(Buffer.from(first.data).readBigUInt64LE(1)).toBe(50_000n);
+      expect(tx.message.compiledInstructions).toHaveLength(4);
+    } finally {
+      f.getTokenAccountBalance = before.bal;
+      f.getRecentPrioritizationFees = before.fees;
+    }
   });
 
   it("uploads, launches through the queue, and hides the mint until it lands", async () => {

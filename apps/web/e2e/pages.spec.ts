@@ -63,6 +63,14 @@ test("unknown pages show the not-found state", async ({ page }) => {
   await expect(page.getByText("This page doesn't exist.")).toBeVisible();
 });
 
+test("the admin page is a plain 404 to anyone but a signed-in admin (owner request 2026-10-28)", async ({ page }) => {
+  const res = await page.goto("/admin");
+  expect(res?.status()).toBe(404);
+  await expect(page.getByText("This page doesn't exist.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Admin" })).toHaveCount(0);
+  expect((await page.request.get("/api/admin/overview")).status()).toBe(404);
+});
+
 test("a coin that shares a ticker keeps its own page (owner decision 2026-10-27)", async ({ page, request }) => {
   // A second $TAPE, launched through the mock API like the create form does.
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGMwnplGU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAHLzyD0U3RLHAAAAAElFTkSuQmCC", "base64");

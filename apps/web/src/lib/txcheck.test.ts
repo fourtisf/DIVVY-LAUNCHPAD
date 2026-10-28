@@ -37,6 +37,24 @@ function table(addresses: PublicKey[]) {
 const wrap = (lamports: number) => SystemProgram.transfer({ fromPubkey: wallet, toPubkey: ata(wallet, WSOL), lamports });
 
 describe("checkTransaction", () => {
+  // The API's creator claim (packages/solana claimCreatorFeeInstructions): a priority fee, your WSOL
+  // account, claim_creator_fee into it, then the account closed back to you as SOL.
+  const creatorClaim = (closeTo = wallet) => {
+    const wsol = ata(wallet, WSOL);
+    const k = (pubkey: PublicKey, isSigner = false, isWritable = false) => ({ pubkey, isSigner, isWritable });
+    return tx(wallet, [
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),
+      new TransactionInstruction({ programId: ATA, keys: [k(wallet, true, true), k(wsol, false, true), k(wallet), k(WSOL), k(SystemProgram.programId), k(TOKEN)], data: Buffer.from([1]) }),
+      new TransactionInstruction({ programId: LAUNCHLAB, keys: [k(wallet, true, true), k(Keypair.generate().publicKey), k(Keypair.generate().publicKey, false, true), k(wsol, false, true), k(WSOL), k(TOKEN)], data: Buffer.alloc(8, 7) }),
+      new TransactionInstruction({ programId: TOKEN, keys: [k(wsol, false, true), k(closeTo, false, true), k(wallet, true)], data: Buffer.from([9]) }),
+    ]);
+  };
+
+  it("passes the creator fee claim with its priority fee", () => {
+    expect(() => checkTransaction(creatorClaim(), wallet, "mainnet-beta", "creator-claim")).not.toThrow();
+    expect(() => checkTransaction(creatorClaim(Keypair.generate().publicKey), wallet, "mainnet-beta", "creator-claim")).toThrow(UnsafeTransaction);
+  });
+
   it("passes a Jupiter route compiled with address lookup tables (graduated coins)", () => {
     const routeAccounts = Array.from({ length: 6 }, () => Keypair.generate().publicKey);
     const route = new TransactionInstruction({

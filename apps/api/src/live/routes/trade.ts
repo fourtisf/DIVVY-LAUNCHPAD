@@ -220,10 +220,13 @@ export async function liveTradeRoutes(app: FastifyInstance, { d }: { d: LiveDeps
     const v = await requireViewer(d, req, reply);
     if (!v) return;
     const owner = new PublicKey(v.wallet);
-    const bal = await d.conn.getTokenAccountBalance(creatorFeeVault(d.programs.launchLab, owner)).catch(() => null);
+    const vault = creatorFeeVault(d.programs.launchLab, owner);
+    const bal = await d.conn.getTokenAccountBalance(vault).catch(() => null);
     if (!bal || BigInt(bal.value.amount) === 0n) return sendError(reply, 409, "NOTHING_TO_CLAIM", "There's nothing to claim yet");
-    const { blockhash } = await d.conn.getLatestBlockhash("confirmed");
-    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: claimCreatorFeeInstructions(d.programs.launchLab, owner) }).compileToV0Message();
+    const [{ blockhash }, price] = await Promise.all([d.conn.getLatestBlockhash("confirmed"), priorityPrice(d, vault)]);
+    // A priority fee like a trade's (price only, under 0.001 SOL), so the claim lands when the network is busy.
+    const instructions = [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: price }), ...claimCreatorFeeInstructions(d.programs.launchLab, owner)];
+    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions }).compileToV0Message();
     return { tx: b64(new VersionedTransaction(msg)) };
   });
 

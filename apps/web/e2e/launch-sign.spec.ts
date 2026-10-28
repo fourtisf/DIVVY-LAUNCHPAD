@@ -131,6 +131,33 @@ test.describe("creator-signed launch", () => {
     await expect(page.locator("#devBuyTag")).toContainText(/Dev bought 3\.\d%/, { timeout: 30_000 });
   });
 
+  test("the coin's creator finds their fees and a claim button on its page and on /me", async ({ page }) => {
+    // A launch, then two pages the dev server may compile first.
+    test.setTimeout(120_000);
+    await walletSignedIn(page);
+    const ticker = await fillCreate(page);
+    await page.locator("#launchBtn").click();
+    await expect(page.getByRole("heading", { name: `$${ticker} is live` })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: "Open coin page" }).click();
+    const panel = page.locator("#creatorFees");
+    await expect(panel).toContainText("Your creator fees", { timeout: 30_000 });
+    await expect(panel).toContainText(`Earned on $${ticker}`);
+    // The demo API's vault is empty: nothing to claim, so no transaction to sign.
+    await expect(page.locator("#claimCreator")).toHaveText("Nothing to claim yet");
+    await expect(page.locator("#claimCreator")).toBeDisabled();
+    // /me puts the creator's fees first.
+    await panel.getByRole("link", { name: "All your coins" }).click();
+    await expect(page.locator("#creatorFees")).toContainText(`$${ticker}`, { timeout: 30_000 });
+    await expect(page.locator(".panel").first()).toHaveAttribute("id", "creatorFees");
+  });
+
+  test("nobody else sees a coin's creator fees", async ({ page }) => {
+    await walletSignedIn(page);
+    await page.goto("/coin/CHIPDOG");
+    await expect(page.getByRole("group", { name: "Buy or sell" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("#creatorFees")).toHaveCount(0);
+  });
+
   test("a dev buy outside 0.01 to 80 SOL can't be launched", async ({ page }) => {
     await walletSignedIn(page);
     await fillCreate(page);
