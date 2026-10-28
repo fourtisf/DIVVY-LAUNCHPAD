@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * The uspad token's contract address, in the hero next to the payout badge. Set NEXT_PUBLIC_TOKEN_CA
- * (read at build time) once the token exists; until then it says "coming soon".
+ * The uspad token's contract address, in the hero next to the payout badge, from NEXT_PUBLIC_TOKEN_CA
+ * (read at build time). Without one the hero shows no CA at all (owner request 2026-10-28).
  */
 import { short } from "@divvy/shared";
 import { Icon } from "./Icon";
@@ -13,15 +13,7 @@ const CA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(raw) ? raw : "";
 
 export function TokenCa() {
   const toast = useToast();
-  if (!CA) {
-    return (
-      <span className="eyecatch ca-pill">
-        <span>
-          <b>CA:</b> coming soon
-        </span>
-      </span>
-    );
-  }
+  if (!CA) return null;
   const copy = () => navigator.clipboard?.writeText(CA).then(() => toast("Contract address copied"), () => {});
   return (
     <button type="button" className="eyecatch ca-pill" onClick={copy} title={CA} aria-label={`Copy contract address ${CA}`}>

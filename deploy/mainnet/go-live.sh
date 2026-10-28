@@ -36,8 +36,8 @@
 #   go-live.sh payouts dry-run    back to computing without sending.
 #   go-live.sh payouts minimum <USD>
 #                                 a coin's hourly holders' share under this waits for the next hour ($1).
-#   go-live.sh token-ca <address> shows the uspad token's contract address in the hero instead of
-#                                 "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
+#   go-live.sh token-ca <address> shows the uspad token's contract address in the hero; token-ca off
+#                                 takes it off again (rebuilds the site: it is a NEXT_PUBLIC_ value).
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
 #   go-live.sh status             apps, health, wallet addresses and balances.
 #
@@ -902,11 +902,17 @@ payouts() {
 
 # --------------------------------------------------------------------------------------------------
 token_ca() {
-  [[ ${1:-} =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || die "pakai: go-live.sh token-ca <alamat mint uspad token>"
+  [[ ${1:-} =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$|^off$ ]] || die "pakai: go-live.sh token-ca <alamat mint uspad token> | off"
   [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
-  set_env $ENV_DIR/build.env NEXT_PUBLIC_TOKEN_CA "$1"
-  update
-  note "CA di situs: $1"
+  if [ "$1" = off ]; then
+    set_env $ENV_DIR/build.env NEXT_PUBLIC_TOKEN_CA ""
+    update
+    note "CA dihapus dari situs."
+  else
+    set_env $ENV_DIR/build.env NEXT_PUBLIC_TOKEN_CA "$1"
+    update
+    note "CA di situs: $1"
+  fi
 }
 
 # --------------------------------------------------------------------------------------------------
