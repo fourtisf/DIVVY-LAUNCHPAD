@@ -32,12 +32,26 @@ curve, and the 1.25% split → "Launch yours." uspad.fun.
 ```text
 uspad.fun is live. 🟢
 
-Anyone can launch a coin:
-1. Name it, pick the stock
-2. Approve once in your wallet
-3. Live in a private bundle
+Memecoins that pay their holders in tokenized US stocks.
 
-Its holders get paid in US stocks, every hour. Creators earn 0.15% of every trade.
+Launch a coin, pick its stock (NVDAx, SPYx, TSLAx…), and every hour its holders get that stock in their wallet.
+
+No snipers. No dev buy.
+
+Launch yours → uspad.fun
+```
+
+Or, step by step:
+
+```text
+uspad.fun is live. 🟢
+
+Launch a memecoin in 3 steps:
+1. Name it, pick a US stock (NVDAx, SPYx…)
+2. Approve once in your wallet
+3. It goes live: no snipers, no dev buy
+
+Every hour, its holders get paid in that stock.
 
 Launch yours → uspad.fun
 ```
