@@ -270,7 +270,7 @@ export function CreateForm() {
             <div className="form-row fld">
               <div>
                 <label className="lbl" htmlFor="fName">{t.name}</label>
-                <input className={"tinput" + (cn.s === "fail" ? " bad" : "")} id="fName" maxLength={config.limits.nameMaxLen} placeholder="Chip Dog" value={d.name} onChange={set("name")} />
+                <input className={"tinput" + (cn.s === "fail" ? " bad" : "")} id="fName" maxLength={config.limits.nameMaxLen} placeholder={t.namePlaceholder} value={d.name} onChange={set("name")} />
               </div>
               <div>
                 <label className="lbl" htmlFor="fTick">{t.ticker}</label>

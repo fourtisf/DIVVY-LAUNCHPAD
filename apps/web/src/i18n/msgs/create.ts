@@ -15,6 +15,7 @@ export const create = defineMsgs(
     // 1. The coin
     coinTitle: "The coin",
     coinNote: "Name, ticker and picture can't be changed later.",
+    namePlaceholder: "Chip Dog",
     name: "Name",
     ticker: "Ticker",
     description: "Description",
@@ -114,6 +115,8 @@ export const create = defineMsgs(
     optional: "选填",
     coinTitle: "代币",
     coinNote: "名称、代币符号和图片创建后不能修改。",
+    // Names may be written in Chinese (antivamp foldName keeps Han characters).
+    namePlaceholder: "芯片狗",
     name: "名称",
     ticker: "代币符号",
     description: "简介",

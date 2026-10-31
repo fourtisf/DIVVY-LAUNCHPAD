@@ -11,6 +11,9 @@
  * - A wider Cyrillic/Greek confusables table, applied to names as well as tickers.
  * - A single leading "$" is treated as ticker notation and dropped ("$WIF" reads as WIF, not SWIF).
  * - Names fold leetspeak digits after trailing digits are removed ("Ch1p D0g" reads as "chipdog").
+ * And one widening (owner, 2026-10-31, hwai is Chinese first): names keep their Han characters, so a name
+ * written in Chinese is accepted instead of folding to nothing ("The name is too short"). One Han
+ * character is enough. Tickers stay Latin letters and digits.
  */
 
 export type CheckStatus = "idle" | "ok" | "fail";
@@ -118,12 +121,19 @@ export function foldTicker(input: string): string {
   return mapChars(prepTicker(input), HOMOGLYPHS, LEET).replace(/[^A-Z0-9]/g, "");
 }
 
-/** The name's identity for similarity (nameNorm). */
+/** Han characters (Chinese names; owner, 2026-10-31: hwai is Chinese first). */
+const HAN = /\p{Script=Han}/u;
+
+/**
+ * The name's identity for similarity (nameNorm). Latin letters and digits fold as before; Han
+ * characters are kept as they are, so a name written in Chinese ("芯片狗") has an identity too
+ * instead of folding to nothing.
+ */
 export function foldName(input: string): string {
   let s = mapChars(stripMarks(input), HOMOGLYPHS).toLowerCase();
   s = s.replace(/(^|[^a-z0-9])2\.0(?![a-z0-9])/g, "$1 ");
   const tokens = s
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^a-z0-9\p{Script=Han}]+/gu, " ")
     .trim()
     .split(" ")
     .filter((t) => t && !NAME_STOPWORDS.has(t) && !/^v\d+$/.test(t));
@@ -221,7 +231,8 @@ export function checkTicker(input: string, ctx: TickerContext): CheckResult {
 export function checkName(input: string, ctx: NameContext): CheckResult {
   if (!input.trim()) return result("idle", "NAME_EMPTY", "Type a name");
   const norm = foldName(input);
-  if (norm.length < 2) return result("fail", "NAME_TOO_SHORT", "The name is too short");
+  // One Han character is a word ("龙"); in Latin letters a name needs two.
+  if (norm.length < (HAN.test(norm) ? 1 : 2)) return result("fail", "NAME_TOO_SHORT", "The name is too short");
   for (const c of ctx.candidates()) {
     if (similarity(c.nameNorm, norm) >= NAME_SIMILARITY_LIMIT)
       return result("fail", "NAME_SIMILAR", `Too close to “${c.name}”`, c);

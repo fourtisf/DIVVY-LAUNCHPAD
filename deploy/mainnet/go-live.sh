@@ -38,6 +38,11 @@
 #                                 a coin's hourly holders' share under this waits for the next hour ($1).
 #   go-live.sh token-ca <address> shows the platform token's contract address in the hero; token-ca off
 #                                 puts back "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
+#   go-live.sh platform-info name | all
+#                                 dry run: the name (and with "all" the web link and picture, once hwai.ai
+#                                 serves the site) Raydium shows for the PlatformConfig, uspad → hwai.
+#   I_HAVE_OWNER_APPROVAL=yes go-live.sh platform-info name --send
+#                                 💰 sends it (a network fee only; one update per epoch, see the script).
 #   go-live.sh socials <x> <tg>   the official X and Telegram handles (without @, or "off"), shown in the hero
 #                                 and footer; rebuilds the site. Unset, the site shows no X or Telegram links.
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
@@ -48,6 +53,10 @@
 set -euo pipefail
 
 DOMAIN=uspad.fun
+# The product's name and domain since the owner's rename (2026-10-31). The site still serves $DOMAIN
+# until the domain move; the PlatformConfig's name, web and picture use these (go-live.sh platform-info).
+BRAND=hwai
+BRAND_DOMAIN=hwai.ai
 REPO=https://github.com/fourtisf/uspad.git
 BRANCH=claude/new-session-qmy02t
 SECRETS=/root/uspad-secrets.env
@@ -446,7 +455,7 @@ platform_config() {
   fi
   say "PlatformConfig ${send[*]:-(dry run)}  admin $admin, fee claimer $fee"
   (cd "$CUR/packages/solana" && env RPC_URL="$RPC" PLATFORM_ADMIN_KEYPAIR="$ADMIN_KEY" FEE_WALLET="$fee" NFT_WALLET="$fee" \
-    NAME=uspad WEB="https://$DOMAIN" IMG="https://$DOMAIN/brand/uspad-mark-512.png" I_HAVE_OWNER_APPROVAL="${I_HAVE_OWNER_APPROVAL:-}" \
+    NAME="$BRAND" WEB="https://$BRAND_DOMAIN" IMG="https://$BRAND_DOMAIN/brand/hwai-mark-512.png" I_HAVE_OWNER_APPROVAL="${I_HAVE_OWNER_APPROVAL:-}" \
     ./node_modules/.bin/tsx scripts/phase0/create-platform-config.ts "${send[@]}" 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g'
   note "PDA di api.env: $(env_get $ENV_DIR/api.env DIVVY_PLATFORM_CONFIG)"
 }
@@ -923,6 +932,31 @@ token_ca() {
 }
 
 # --------------------------------------------------------------------------------------------------
+# The name, web link and picture Raydium shows for the PlatformConfig (owner, 2026-10-31: uspad → hwai).
+#   platform-info name    only the name, which needs nothing else
+#   platform-info all     name, web https://$BRAND_DOMAIN and picture, once $BRAND_DOMAIN serves the site
+# A dry run unless --send (with I_HAVE_OWNER_APPROVAL=yes). The script checks in the simulation that
+# nothing but these fields changes (fees, wallets, scales) and that the link and picture load.
+platform_info() {
+  load_secrets
+  [ -L "$CUR" ] && [ -f "$ADMIN_KEY" ] || die "jalankan 'go-live.sh prepare' dulu"
+  [ -f "$CUR/packages/solana/scripts/phase0/set-platform-info.ts" ] || die "kode di server masih lama: jalankan 'go-live.sh update' dulu"
+  local what=${1:-} send=() web="" img=""
+  case "$what" in
+    name) ;;
+    all) web="https://$BRAND_DOMAIN"; img="https://$BRAND_DOMAIN/brand/hwai-mark-512.png" ;;
+    *) die "pakai: go-live.sh platform-info name | all  [--send]" ;;
+  esac
+  if [ "${2:-}" = "--send" ]; then
+    [ "${I_HAVE_OWNER_APPROVAL:-}" = yes ] || die "--send butuh I_HAVE_OWNER_APPROVAL=yes (persetujuan owner di chat)"
+    send=(--send)
+  fi
+  say "PlatformConfig: nama $BRAND${web:+, web $web, gambar $img} ${send[*]:-(dry run)}"
+  (cd "$CUR/packages/solana" && env RPC_URL="$RPC" PLATFORM_ADMIN_KEYPAIR="$ADMIN_KEY" NAME="$BRAND" WEB="$web" IMG="$img" \
+    I_HAVE_OWNER_APPROVAL="${I_HAVE_OWNER_APPROVAL:-}" ./node_modules/.bin/tsx scripts/phase0/set-platform-info.ts "${send[@]}" 2>&1) | sed 's/api-key=[^&" ]*/api-key=…/g'
+}
+
+# --------------------------------------------------------------------------------------------------
 # The official X and Telegram handles (web/src/lib/social.ts). "off" hides that account's links.
 socials() {
   local ok='^([A-Za-z0-9_]{1,32}|off)$'
@@ -983,6 +1017,7 @@ case "${1:-}" in
   payouts) payouts "${2:-}" "${3:-}" ;;
   token-ca) token_ca "${2:-}" ;;
   socials) socials "${2:-}" "${3:-}" ;;
+  platform-info) platform_info "${2:-}" "${3:-}" ;;
   status) status ;;
   *) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 1 ;;
 esac

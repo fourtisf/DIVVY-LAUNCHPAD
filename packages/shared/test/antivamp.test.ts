@@ -140,6 +140,15 @@ describe("foldName", () => {
     expect(foldName("Theory Dog")).toBe("theorydog");
     expect(foldName("Realm Frog")).toBe("realmfrog");
   });
+
+  it("keeps Chinese names (hwai is Chinese first)", () => {
+    expect(foldName("芯片狗")).toBe("芯片狗");
+    expect(foldName(" 芯片 · 狗 ")).toBe("芯片狗");
+    expect(foldName("芯片狗 2")).toBe("芯片狗");
+    expect(foldName("Chip 狗")).toBe("chip狗");
+    expect(foldName("ＣＨＩＰ狗")).toBe("chip狗"); // fullwidth Latin still folds
+    expect(foldName("The 韭菜之王 Official")).toBe("韭菜之王");
+  });
 });
 
 describe("checkName", () => {
@@ -158,6 +167,10 @@ describe("checkName", () => {
   it("handles empty and too-short names", () => {
     expect(checkName("", nameCtx).status).toBe("idle");
     expect(checkName("The OG", nameCtx)).toMatchObject({ code: "NAME_TOO_SHORT", message: "The name is too short" });
+    expect(checkName("芯片狗", nameCtx)).toMatchObject({ status: "ok", code: "NAME_OK" });
+    expect(checkName("龙", nameCtx)).toMatchObject({ status: "ok", code: "NAME_OK" });
+    expect(checkName("X", nameCtx).code).toBe("NAME_TOO_SHORT");
+    expect(checkName("！！", nameCtx).code).toBe("NAME_TOO_SHORT");
   });
 });
 
