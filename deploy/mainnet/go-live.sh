@@ -941,7 +941,33 @@ token_ca() {
 }
 
 # --------------------------------------------------------------------------------------------------
-reload_nginx() { if has_systemd; then systemctl reload nginx; else nginx -s reload; fi; }
+# Starts Nginx when it isn't running (a fresh install may leave it stopped). When it can't start, says
+# why: usually another program already holds port 80 or 443.
+start_nginx() {
+  if has_systemd; then
+    systemctl is-active --quiet nginx && return 0
+    systemctl enable nginx > /dev/null 2>&1 || true
+    systemctl start nginx 2> /dev/null && return 0
+  else
+    pgrep -x nginx > /dev/null && return 0
+    nginx 2> /dev/null && return 0
+  fi
+  local who
+  who=$(ss -ltnpH '( sport = :80 or sport = :443 )' 2> /dev/null | grep -v '"nginx"' | grep -o 'users:(("[^"]*"' | cut -d'"' -f2 | sort -u | tr '\n' ' ')
+  if [ -n "$who" ]; then
+    ss -ltnp '( sport = :80 or sport = :443 )' >&2
+    die "Nginx tidak bisa jalan: port 80/443 sudah dipakai program lain ($who). Satu server hanya bisa punya satu program di port itu: hentikan program itu atau pindahkan ke port lain, lalu ulangi."
+  fi
+  { nginx -t; has_systemd && journalctl -u nginx -n 20 --no-pager; } >&2 || true
+  die "Nginx tidak bisa jalan (alasan di atas)"
+}
+reload_nginx() {
+  if has_systemd; then
+    if systemctl is-active --quiet nginx; then systemctl reload nginx; else start_nginx; fi
+  else
+    nginx -s reload 2> /dev/null || start_nginx
+  fi
+}
 # Whether an address is this server's (a VPS has its public address on an interface; else ask out).
 ip_is_mine() { hostname -I | tr ' ' '\n' | grep -qx "$1" || [ "$1" = "$(curl -fsS -4 --max-time 5 https://api.ipify.org 2>/dev/null)" ]; }
 
@@ -993,6 +1019,8 @@ bootstrap() {
   fi
   npm install -g --force pnpm@10.28.0 pm2@7 > /tmp/divvy-npm.log 2>&1 || die "pemasangan pnpm dan PM2 gagal (lihat /tmp/divvy-npm.log)"
   note "node $(node --version), pnpm $(pnpm --version)"
+  start_nginx
+  note "Nginx jalan"
 
   say "DNS $DOMAIN"
   check_dns "$DOMAIN"
