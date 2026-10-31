@@ -207,7 +207,9 @@ What the site uses: the header lockup, the favicon and app icons, the share imag
 
 [`brand/uspad/`](../brand/uspad/) is retired: the old identity and its posts and videos, kept for the record. Nothing in the site uses it.
 
-Still named uspad, each waiting for the owner:
+**A new launchpad, not a rename of uspad's platform (owner, 2026-10-31).** hwai runs on its own new server with new wallets, an empty database and its own PlatformConfig (name `hwai`, web `https://hwai.ai`), set up with `go-live.sh bootstrap`. Everything below about uspad's server describes what stays there; the `domain` and `platform-info` commands that would move or rename it aren't the plan.
+
+Still named uspad, on uspad's own server:
 
 - **The $USPAD token** and its posts in `brand/uspad/social/`. The hero's CA pill shows whatever `NEXT_PUBLIC_TOKEN_CA` holds (`go-live.sh token-ca off` hides it).
 - **The PlatformConfig on mainnet** keeps name `uspad`, web `https://uspad.fun` and image `https://uspad.fun/brand/uspad-mark-512.png` (VERIFIED item 27) until the owner runs `go-live.sh platform-info` (VERIFIED item 30; the owner asked for it on 2026-10-31). `platform-info name` changes the name now; `platform-info all` also points web and picture at hwai.ai, once hwai.ai serves the site. Meanwhile `apps/web/public/brand/uspad-mark-512.png` holds the hwai mark, so that image URL already shows hwai.

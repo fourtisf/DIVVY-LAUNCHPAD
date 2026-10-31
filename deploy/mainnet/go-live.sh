@@ -38,6 +38,9 @@
 #                                 a coin's hourly holders' share under this waits for the next hour ($1).
 #   go-live.sh token-ca <address> shows the platform token's contract address in the hero; token-ca off
 #                                 puts back "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
+#   go-live.sh bootstrap          a brand-new server for hwai.ai (new launchpad from zero): packages,
+#                                 firewall, Node, pnpm, PM2, DNS check, certificate, API keys typed here,
+#                                 then prepare. Then platform-config and switch as below.
 #   go-live.sh domain             moves the live site to hwai.ai on this server: certificate, Nginx,
 #                                 WEB_ORIGIN; uspad.fun redirects there (and keeps serving old coins'
 #                                 pictures and metadata). Needs hwai.ai and www.hwai.ai pointing here.
@@ -942,37 +945,87 @@ reload_nginx() { if has_systemd; then systemctl reload nginx; else nginx -s relo
 # Whether an address is this server's (a VPS has its public address on an interface; else ask out).
 ip_is_mine() { hostname -I | tr ' ' '\n' | grep -qx "$1" || [ "$1" = "$(curl -fsS -4 --max-time 5 https://api.ipify.org 2>/dev/null)" ]; }
 
+# Both names must resolve to this server (A for the domain, CNAME or A for www).
+check_dns() {
+  local h ip
+  for h in "$1" "www.$1"; do
+    ip=$(getent ahostsv4 "$h" | awk 'NR==1{print $1}')
+    [ -n "$ip" ] && ip_is_mine "$ip" || die "$h mengarah ke ${ip:-(belum ada)}, bukan server ini ($(hostname -I | awk '{print $1}')). Atur DNS (A untuk @, CNAME www), tunggu beberapa menit, lalu ulangi."
+  done
+}
+
+# A certificate for a domain and its www (webroot, so certbot never edits the config). Port 80 answers
+# ACME for those names through a temporary site only while certbot runs.
+issue_cert() {
+  local d=$1 acme=/etc/nginx/sites-enabled/divvy-acme.conf
+  [ -f "/etc/letsencrypt/live/$d/fullchain.pem" ] && { note "sertifikat $d sudah ada"; return 0; }
+  say "Sertifikat $d dan www.$d"
+  install -d -m 755 /var/www/certbot
+  printf 'server {\n    listen 80;\n    server_name %s www.%s;\n    location ^~ /.well-known/acme-challenge/ { root /var/www/certbot; default_type text/plain; }\n    location / { return 404; }\n}\n' "$d" "$d" > "$acme"
+  nginx -t > /dev/null 2>&1 || { rm -f "$acme"; die "Nginx menolak blok ACME sementara"; }
+  reload_nginx
+  if ! certbot certonly --webroot -w /var/www/certbot -d "$d" -d "www.$d" --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring; then
+    rm -f "$acme"; reload_nginx
+    die "certbot gagal untuk $d (alasan di atas)"
+  fi
+  rm -f "$acme"; reload_nginx
+}
+
+# --------------------------------------------------------------------------------------------------
+# A brand-new server for hwai (owner, 2026-10-31: hwai.ai is a new launchpad from zero, on its own
+# server, with new wallets, an empty database and its own PlatformConfig; nothing carries over from
+# uspad). It installs what `prepare` expects (deploy/preview/README.md §2: packages, firewall, Node 22,
+# pnpm, PM2), checks that the domain points here, gets its certificate and asks for the API keys on
+# this terminal, then runs `prepare`. After it: platform-config and switch, as for any first install.
+bootstrap() {
+  [ -f "$LIVE_MARK" ] && die "server ini sudah live; bootstrap hanya untuk server baru"
+  [ -f "$DOMAIN_FILE" ] || echo "$BRAND_DOMAIN" > "$DOMAIN_FILE"
+  DOMAIN=$(cat "$DOMAIN_FILE")
+  say "Server baru untuk $DOMAIN: paket, firewall, Node 22, pnpm, PM2"
+  apt-get update -q > /tmp/divvy-apt.log 2>&1 || note "apt-get update melaporkan masalah (lihat /tmp/divvy-apt.log)"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q git curl nginx certbot ufw dnsutils jq openssl > /dev/null
+  # SSH first, so enabling the firewall never closes this session.
+  ufw allow OpenSSH > /dev/null && ufw allow 'Nginx Full' > /dev/null && ufw --force enable > /dev/null
+  if ! node --version 2>/dev/null | grep -q '^v22\.'; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
+    bash /tmp/nodesource_setup.sh > /tmp/divvy-nodesource.log 2>&1 || die "pemasangan Node 22 gagal (lihat /tmp/divvy-nodesource.log)"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q nodejs > /dev/null
+  fi
+  npm install -g --force pnpm@10.28.0 pm2@7 > /tmp/divvy-npm.log 2>&1 || die "pemasangan pnpm dan PM2 gagal (lihat /tmp/divvy-npm.log)"
+  note "node $(node --version), pnpm $(pnpm --version)"
+
+  say "DNS $DOMAIN"
+  check_dns "$DOMAIN"
+  note "$DOMAIN dan www.$DOMAIN mengarah ke server ini"
+  issue_cert "$DOMAIN"
+
+  if [ ! -f "$SECRETS" ]; then
+    say "API key Helius dan Jupiter (diketik di sini, tidak pernah di chat; tidak tampil di layar)"
+    local helius jup
+    read -rsp "   HELIUS_API_KEY: " helius; echo
+    read -rsp "   JUP_API_KEY: " jup; echo
+    [ -n "$helius" ] && [ -n "$jup" ] || die "dua key itu wajib diisi"
+    ( umask 077; printf 'HELIUS_API_KEY=%s\nJUP_API_KEY=%s\n' "$helius" "$jup" > "$SECRETS" )
+    note "disimpan di $SECRETS (chmod 600)"
+  fi
+  prepare
+}
+
 # Moves the live site to $BRAND_DOMAIN on this server (owner, 2026-10-31: uspad.fun → hwai.ai): a
 # certificate for it and www, the Nginx site, WEB_ORIGIN and the media base, and the old name kept as a
 # redirect. The old name still serves /api/media/ itself: coins launched before the move have their
 # metadata (on chain) and pictures (in the database) there, so the new site's CSP allows its pictures.
 # Anything that fails puts the old Nginx config and env files back.
 domain_move() {
-  local new=$BRAND_DOMAIN old=$DOMAIN conf=/etc/nginx/sites-available/uspad-live.conf acme=/etc/nginx/sites-enabled/hwai-acme.conf
+  local new=$BRAND_DOMAIN old=$DOMAIN conf=/etc/nginx/sites-available/uspad-live.conf
   [ "$old" = "$new" ] && { note "situs sudah di https://$new"; return 0; }
   [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
   [ -f "$conf" ] || die "$conf tidak ada: situs live belum dipasang di server ini"
   load_secrets
   say "Pindah domain: $old → $new"
-  local h ip
-  for h in "$new" "www.$new"; do
-    ip=$(getent ahostsv4 "$h" | awk 'NR==1{print $1}')
-    [ -n "$ip" ] && ip_is_mine "$ip" || die "$h mengarah ke ${ip:-(belum ada)}, bukan server ini ($(hostname -I | awk '{print $1}')). Atur DNS (A untuk @, CNAME www), tunggu beberapa menit, lalu ulangi."
-  done
+  check_dns "$new"
 
-  if [ ! -f "/etc/letsencrypt/live/$new/fullchain.pem" ]; then
-    say "Sertifikat $new dan www.$new"
-    install -d -m 755 /var/www/certbot
-    # Port 80 answers ACME for the new name only while certbot runs.
-    printf 'server {\n    listen 80;\n    server_name %s www.%s;\n    location ^~ /.well-known/acme-challenge/ { root /var/www/certbot; default_type text/plain; }\n    location / { return 404; }\n}\n' "$new" "$new" > "$acme"
-    nginx -t > /dev/null 2>&1 || { rm -f "$acme"; die "Nginx menolak blok ACME sementara"; }
-    reload_nginx
-    if ! certbot certonly --webroot -w /var/www/certbot -d "$new" -d "www.$new" --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring; then
-      rm -f "$acme"; reload_nginx
-      die "certbot gagal (alasan di atas); situs tetap di $old"
-    fi
-    rm -f "$acme"
-  fi
+  issue_cert "$new"
 
   say "Nginx: https://$new, dan $old dialihkan ke sana"
   local f bak=/root/divvy-before-domain
@@ -1149,6 +1202,7 @@ case "${1:-}" in
   socials) socials "${2:-}" "${3:-}" ;;
   platform-info) platform_info "${2:-}" "${3:-}" ;;
   domain) domain_move ;;
+  bootstrap) bootstrap ;;
   status) status ;;
   *) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 1 ;;
 esac

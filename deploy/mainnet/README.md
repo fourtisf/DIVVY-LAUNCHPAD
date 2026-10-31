@@ -22,7 +22,19 @@ I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh fee-rate --send
 /root/go-live.sh status
 ```
 
-**The hwai rename (owner, 2026-10-31).** The code lives on `claude/tender-curie-4uer50` (go-live.sh's `BRANCH`). Point `hwai.ai` (A record) and `www.hwai.ai` (CNAME) at this server, then:
+**hwai.ai, a new launchpad on a new server (owner, 2026-10-31).** hwai starts from zero: its own server, new wallets, an empty database and its own PlatformConfig. Nothing carries over from uspad, which keeps its own server. The code lives on `claude/tender-curie-4uer50` (go-live.sh's `BRANCH`). On the new server, with `hwai.ai` (A record) and `www.hwai.ai` (CNAME) pointing at it, as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fourtisf/uspad/claude/tender-curie-4uer50/deploy/mainnet/go-live.sh -o /root/go-live.sh && chmod 700 /root/go-live.sh
+/root/go-live.sh bootstrap               # packages, firewall, Node 22, pnpm, PM2, DNS check, certificate, API keys (typed there), then prepare
+/root/go-live.sh platform-config         # dry run; then, with the owner's OK and 0.02 SOL on the admin wallet prepare printed:
+I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-config --send
+/root/go-live.sh switch                  # live, launches paused, payouts in dry-run
+```
+
+After that the steps are the ones above (`cp-creator` from the next epoch, `open-launches`, `launches open`), each spending step with the owner's OK. `bootstrap` writes `hwai.ai` to `/root/divvy-domain` first, so every command serves hwai.ai; the PlatformConfig is created as name `hwai`, web `https://hwai.ai`. Internal names (`/root/uspad-keys`, `/root/uspad-secrets.env`, the `divvy-*` users) stay as the script has always called them.
+
+**Moving the uspad server to hwai.ai instead** (not the owner's plan; kept for the record). On the uspad server:
 
 ```bash
 sudo -u divvy git -C /srv/divvy/repo.git fetch -q origin
