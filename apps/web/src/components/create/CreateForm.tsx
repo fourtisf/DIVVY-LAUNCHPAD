@@ -20,7 +20,10 @@ import {
 import { api, ApiRequestError, qs } from "@/lib/api";
 import { useConfig } from "@/lib/config";
 import { useDebounced } from "@/lib/hooks";
-import { errorText, useSession } from "@/lib/session";
+import { useErrorText, useSession } from "@/lib/session";
+import { useMsgs } from "@/i18n/client";
+import { common } from "@/i18n/msgs/common";
+import { create } from "@/i18n/msgs/create";
 import { Chip } from "../Chip";
 import { CoinCard } from "../CoinCard";
 import { Icon } from "../Icon";
@@ -48,6 +51,8 @@ interface Draft {
 let saved: Draft = { name: "", ticker: "", desc: "", pays: "NVDAx", x: "", tg: "", web: "", dev: "", imgPreview: null, upload: null };
 
 type Check = { s: "idle" | "ok" | "fail"; m: string };
+/** The picture's check: the server's message as it came, or the page's own in the visitor's language. */
+type ImgCheck = { s: Check["s"]; m: string | ((c: (typeof create)["en"]) => string) };
 const toCheck = (r: { status: Check["s"]; message: string } | undefined, idle: string): Check => (r ? { s: r.status, m: r.message } : { s: "idle", m: idle });
 
 /**
@@ -84,13 +89,16 @@ export function CreateForm() {
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
   const { me, ensureSignedIn } = useSession();
+  const t = useMsgs(create);
+  const tc = useMsgs(common);
+  const errText = useErrorText();
   const [d, setD] = useState<Draft>(saved);
-  const [imgCheck, setImgCheck] = useState<Check>(() => (saved.upload ? { s: saved.upload.check.status, m: saved.upload.check.message } : { s: "idle", m: "Upload a picture" }));
+  const [imgCheck, setImgCheck] = useState<ImgCheck>(() => (saved.upload ? { s: saved.upload.check.status, m: saved.upload.check.message } : { s: "idle", m: (c) => c.uploadPicture }));
   const [over, setOver] = useState(false);
   const [launch, setLaunch] = useState<{ id: string; ticker: string; img: string; pays: string; devBuy: bigint } | null>(null);
   // Why the last launch didn't happen, kept under the button: a toast alone is gone in 2.6 s.
   const [launchError, setLaunchError] = useState<string | null>(null);
-  // The creator's wallet pays for the coin's create (owner decision 2026-10-27): uspad's fee inside it,
+  // The creator's wallet pays for the coin's create (owner decision 2026-10-27): the launch fee inside it,
   // and about what the create itself costs.
   const feeSol = config.launchFee.to ? config.launchFee.amount.ui : 0;
   const createSol = config.launchFee.createCost.ui;
@@ -109,12 +117,12 @@ export function CreateForm() {
   const dq = useDebounced({ ticker: d.ticker, name: d.name, x: d.x }, 150);
   const checkKey = dq.ticker.trim() || dq.name.trim() || dq.x.trim() ? "/api/check" + qs({ ticker: dq.ticker, name: dq.name, x: dq.x }) : null;
   const { data: checks } = useSWR<CheckResponse>(checkKey, { keepPreviousData: true });
-  const ct = d.ticker.trim() ? toCheck(checks?.ticker, "Checking…") : { s: "idle" as const, m: "Type a ticker" };
-  const cn = d.name.trim() ? toCheck(checks?.name, "Checking…") : { s: "idle" as const, m: "Type a name" };
+  const ct = d.ticker.trim() ? toCheck(checks?.ticker, t.checking) : { s: "idle" as const, m: t.typeTicker };
+  const cn = d.name.trim() ? toCheck(checks?.name, t.checking) : { s: "idle" as const, m: t.typeName };
   // The project's X link (owner decision 2026-10-27): typed like the Telegram link, one coin per account.
-  const cx = d.x.trim() ? toCheck(checks?.x, "Checking…") : { s: "ok" as const, m: "Optional" };
+  const cx = d.x.trim() ? toCheck(checks?.x, t.checking) : { s: "ok" as const, m: t.optionalCheck };
   const stale = dq.ticker !== d.ticker || dq.name !== d.name || dq.x !== d.x;
-  const ci = imgCheck;
+  const ci: Check = { s: imgCheck.s, m: typeof imgCheck.m === "string" ? imgCheck.m : imgCheck.m(t) };
   // The dev buy: none when empty; about what it gets on the empty curve, after the trade fee.
   const devBuy = parseDevBuy(d.dev);
   const devSol = devBuy ? Number(devBuy) / 1e9 : 0;
@@ -122,18 +130,18 @@ export function CreateForm() {
 
   const handleFile = async (f: File | undefined) => {
     if (!f) return;
-    if (!config.limits.imageTypes.includes(f.type)) return setImgCheck({ s: "fail", m: "Use a PNG, JPG, WEBP or GIF" });
-    if (f.size > config.limits.imageMaxBytes) return setImgCheck({ s: "fail", m: `That file is over ${Math.round(config.limits.imageMaxBytes / 1024 / 1024)} MB` });
+    if (!config.limits.imageTypes.includes(f.type)) return setImgCheck({ s: "fail", m: (c) => c.imageType });
+    if (f.size > config.limits.imageMaxBytes) return setImgCheck({ s: "fail", m: (c) => c.imageTooBig(Math.round(config.limits.imageMaxBytes / 1024 / 1024)) });
     if (!config.demo) {
       try {
-        if (!(await ensureSignedIn())) return setImgCheck({ s: "idle", m: "Connect a wallet to upload" });
+        if (!(await ensureSignedIn())) return setImgCheck({ s: "idle", m: (c) => c.connectToUpload });
       } catch (e) {
-        return setImgCheck({ s: "idle", m: errorText(e, "Sign in to upload") ?? "Sign in to upload" });
+        return setImgCheck({ s: "idle", m: errText(e, t.signInToUpload) ?? t.signInToUpload });
       }
     }
     const preview = URL.createObjectURL(f);
     setD((p) => ({ ...p, imgPreview: preview, upload: null }));
-    setImgCheck({ s: "idle", m: "Checking the picture" });
+    setImgCheck({ s: "idle", m: (c) => c.checkingPicture });
     const fd = new FormData();
     fd.append("file", f);
     try {
@@ -141,7 +149,7 @@ export function CreateForm() {
       setD((p) => ({ ...p, upload: r }));
       setImgCheck({ s: r.check.status, m: r.check.message });
     } catch (e) {
-      setImgCheck({ s: "fail", m: e instanceof ApiRequestError ? e.message : "The upload failed. Try again." });
+      setImgCheck({ s: "fail", m: e instanceof ApiRequestError ? e.message : (c) => c.uploadFailed });
     }
   };
 
@@ -153,34 +161,34 @@ export function CreateForm() {
     try {
       const lamports = await connection.getBalance(publicKey, "confirmed");
       const max = maxDevBuy(BigInt(lamports), config.launchFee.to ? BigInt(config.launchFee.amount.raw) : 0n, BigInt(config.launchFee.createCost.raw));
-      if (max === null) toast("Your wallet doesn't hold enough SOL for a dev buy on top of the launch");
+      if (max === null) toast(t.devTooPoor);
       else setD((p) => ({ ...p, dev: solText(max) }));
     } catch {
-      toast("Couldn't read your balance. Type the amount instead.");
+      toast(t.balanceFailed);
     } finally {
       setMaxBusy(false);
     }
   };
 
   const ready = !stale && ct.s === "ok" && cn.s === "ok" && cx.s !== "fail" && ci.s === "ok" && devBuy !== null;
-  const costs = [feeSol ? `the ${feeSol} SOL fee` : null, createSol ? `about ${createSol} SOL to create the coin` : null, devSol ? `your ${devSol} SOL dev buy with about ${Number(DEV_BUY_ACCOUNTS_LAMPORTS) / 1e9} SOL for its token accounts` : null].filter(Boolean) as string[];
+  const costs = [feeSol ? t.costFee(feeSol) : null, createSol ? t.costCreate(createSol) : null, devSol ? t.costDev(devSol, Number(DEV_BUY_ACCOUNTS_LAMPORTS) / 1e9) : null].filter(Boolean) as string[];
   const hint =
     ct.s !== "ok"
-      ? "Fix the ticker to continue."
+      ? t.fixTicker
       : cn.s !== "ok"
-        ? "Fix the name to continue."
+        ? t.fixName
         : ci.s !== "ok"
-          ? "Add a picture to continue."
+          ? t.fixPicture
           : cx.s === "fail"
-            ? "Fix the X account to continue."
+            ? t.fixX
             : devBuy === null
-              ? "Fix the dev buy to continue."
+              ? t.fixDev
               : costs.length
-                ? `Ready. Your wallet approves ${costs.length > 1 ? `${costs.slice(0, -1).join(", ")} and ${costs[costs.length - 1]}` : costs[0]}.`
-                : "Ready. Launching takes a few seconds.";
+                ? t.readyApproves(costs)
+                : t.readyFree;
 
-  const t = displayTicker(d.ticker) || "TICKER";
-  const previewImg = d.upload?.url ?? d.imgPreview ?? avatarDataUri(t);
+  const tick = displayTicker(d.ticker) || "TICKER";
+  const previewImg = d.upload?.url ?? d.imgPreview ?? avatarDataUri(tick);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -201,9 +209,9 @@ export function CreateForm() {
         }),
       });
       if (feeSig) heldFee.clear(wallet);
-      setLaunch({ id: res.launchId, ticker: t, img: d.upload.url, pays: d.pays, devBuy: devBuy ?? 0n });
+      setLaunch({ id: res.launchId, ticker: tick, img: d.upload.url, pays: d.pays, devBuy: devBuy ?? 0n });
     } catch (err) {
-      const m = errorText(err, "The launch failed. Try again.");
+      const m = errText(err, t.launchFailed);
       if (m) {
         toast(m);
         setLaunchError(m);
@@ -216,7 +224,7 @@ export function CreateForm() {
     setLaunch(null);
     saved = blank();
     setD(saved);
-    setImgCheck({ s: "idle", m: "Upload a picture" });
+    setImgCheck({ s: "idle", m: (c) => c.uploadPicture });
   };
 
   const done = (s: LaunchStatus) => {
@@ -224,9 +232,9 @@ export function CreateForm() {
     if (s.step === "indexed") {
       saved = blank();
       router.push(coinHref(s));
-      toast(`$${s.ticker} is live`);
+      toast(t.isLive(s.ticker));
     } else {
-      const m = s.error?.message ?? "The launch failed. Nothing was created.";
+      const m = s.error?.message ?? t.launchFailedNothing;
       toast(m);
       setLaunchError(m);
     }
@@ -244,14 +252,10 @@ export function CreateForm() {
 
   return (
     <>
-      <Link className="back" href="/"><Icon name="back" />Back to the board</Link>
+      <Link className="back" href="/"><Icon name="back" />{tc.backToBoard}</Link>
       <div className="create-head">
-        <h1>Create a coin</h1>
-        <p>
-          {feeSol || createSol
-            ? `Your wallet signs the create and pays ${feeSol ? `${feeSol} SOL to launch plus ` : ""}about ${createSol} SOL for the coin itself. It goes out in a private bundle, so nobody buys before you, and your holders get the dividend.`
-            : "It's free. uspad's launcher creates your coin in a private bundle and pays the rent, so nobody buys before it lands, and your holders get the dividend."}
-        </p>
+        <h1>{t.title}</h1>
+        <p>{feeSol || createSol ? t.headPaid(feeSol, createSol) : t.headFree}</p>
       </div>
       <div className="create-grid">
         <form id="frm" noValidate onSubmit={submit}>
@@ -259,26 +263,26 @@ export function CreateForm() {
             <div className="fsec-h">
               <span className="n">1</span>
               <div>
-                <h2>The coin</h2>
-                <p>Name, ticker and picture can&apos;t be changed later.</p>
+                <h2>{t.coinTitle}</h2>
+                <p>{t.coinNote}</p>
               </div>
             </div>
             <div className="form-row fld">
               <div>
-                <label className="lbl" htmlFor="fName">Name</label>
+                <label className="lbl" htmlFor="fName">{t.name}</label>
                 <input className={"tinput" + (cn.s === "fail" ? " bad" : "")} id="fName" maxLength={config.limits.nameMaxLen} placeholder="Chip Dog" value={d.name} onChange={set("name")} />
               </div>
               <div>
-                <label className="lbl" htmlFor="fTick">Ticker</label>
+                <label className="lbl" htmlFor="fTick">{t.ticker}</label>
                 <input className={"tinput" + (ct.s === "fail" ? " bad" : "")} id="fTick" maxLength={12} placeholder="CHIPDOG" value={d.ticker} onChange={set("ticker")} style={{ textTransform: "uppercase" }} />
               </div>
             </div>
             <div className="fld">
-              <label className="lbl" htmlFor="fDesc">Description <em>optional</em></label>
-              <textarea className="tinput" id="fDesc" maxLength={config.limits.descriptionMaxLen} placeholder="One line people will remember" value={d.desc} onChange={set("desc")} />
+              <label className="lbl" htmlFor="fDesc">{t.description} <em>{t.optional}</em></label>
+              <textarea className="tinput" id="fDesc" maxLength={config.limits.descriptionMaxLen} placeholder={t.descPlaceholder} value={d.desc} onChange={set("desc")} />
             </div>
             <div className="fld">
-              <span className="lbl">Picture</span>
+              <span className="lbl">{t.picture}</span>
               <label
                 className={"drop" + (over ? " over" : "")}
                 id="drop"
@@ -294,13 +298,13 @@ export function CreateForm() {
               >
                 {d.imgPreview || d.upload ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={d.imgPreview ?? d.upload!.url} alt="Your coin picture" />
+                  <img src={d.imgPreview ?? d.upload!.url} alt={t.pictureAlt} />
                 ) : (
                   <span className="ph"><Icon name="img" size={22} /></span>
                 )}
                 <p>
-                  Drop an image or click to choose
-                  <small>PNG, JPG, WEBP or GIF up to {Math.round(config.limits.imageMaxBytes / 1024 / 1024)} MB.</small>
+                  {t.drop}
+                  <small>{t.dropLimit(Math.round(config.limits.imageMaxBytes / 1024 / 1024))}</small>
                 </p>
               </label>
               <input ref={fileInput} type="file" id="fImg" accept={config.limits.imageTypes.join(",")} className="sr" onChange={(e) => void handleFile(e.target.files?.[0])} />
@@ -311,11 +315,11 @@ export function CreateForm() {
             <div className="fsec-h">
               <span className="n">2</span>
               <div>
-                <h2>The dividend</h2>
-                <p>What your holders earn every hour. Locked once the coin is live.</p>
+                <h2>{t.dividendTitle}</h2>
+                <p>{t.dividendNote}</p>
               </div>
             </div>
-            <div className="stocks" role="radiogroup" aria-label="Dividend stock">
+            <div className="stocks" role="radiogroup" aria-label={t.dividendStock}>
               {config.dividendAssets
                 .filter((a) => a.enabled)
                 .map((s) => (
@@ -325,35 +329,35 @@ export function CreateForm() {
                       <b>{s.symbol}</b>
                       <span>
                         <span>{s.name}</span>
-                        <span className={s.change24hPct > 0 ? "up" : s.change24hPct < 0 ? "down" : ""}>{s.change24hPct ? pct(s.change24hPct) : "stable"}</span>
+                        <span className={s.change24hPct > 0 ? "up" : s.change24hPct < 0 ? "down" : ""}>{s.change24hPct ? pct(s.change24hPct) : t.stable}</span>
                       </span>
                     </div>
                   </button>
                 ))}
             </div>
-            <p className="note">Buyers always pay in SOL. The stock is only what holders earn.</p>
+            <p className="note">{t.paysNote}</p>
           </section>
 
           <section className="fsec">
             <div className="fsec-h">
               <span className="n">3</span>
               <div>
-                <h2>Links</h2>
-                <p>All optional.</p>
+                <h2>{t.linksTitle}</h2>
+                <p>{t.linksNote}</p>
               </div>
             </div>
             <div className="form-row fld">
               <div>
-                <label className="lbl" htmlFor="fX">X account <em>optional</em></label>
+                <label className="lbl" htmlFor="fX">{t.xAccount} <em>{t.optional}</em></label>
                 <input className={"tinput" + (cx.s === "fail" ? " bad" : "")} id="fX" placeholder="x.com/yourproject" value={d.x} onChange={set("x")} />
               </div>
               <div>
-                <label className="lbl" htmlFor="fTg">Telegram <em>optional</em></label>
+                <label className="lbl" htmlFor="fTg">Telegram <em>{t.optional}</em></label>
                 <input className="tinput" id="fTg" placeholder="t.me/yourgroup" value={d.tg} onChange={set("tg")} />
               </div>
             </div>
             <div className="fld">
-              <label className="lbl" htmlFor="fWeb">Website <em>optional</em></label>
+              <label className="lbl" htmlFor="fWeb">{t.website} <em>{t.optional}</em></label>
               <input className="tinput" id="fWeb" placeholder="https://" value={d.web} onChange={set("web")} />
             </div>
           </section>
@@ -362,12 +366,12 @@ export function CreateForm() {
             <div className="fsec-h">
               <span className="n">4</span>
               <div>
-                <h2>Dev buy</h2>
-                <p>Optional. Your buy goes inside the create, so it&apos;s the coin&apos;s first trade, before anyone else can buy.</p>
+                <h2>{t.devBuy}</h2>
+                <p>{t.devNote}</p>
               </div>
             </div>
             <div className="fld">
-              <label className="lbl" htmlFor="fDev">Amount in SOL <em>optional</em></label>
+              <label className="lbl" htmlFor="fDev">{t.devAmount} <em>{t.optional}</em></label>
               <input className={"tinput" + (devBuy === null ? " bad" : "")} id="fDev" inputMode="decimal" autoComplete="off" placeholder="0" value={d.dev} onChange={set("dev")} />
               <div className="quick" id="devQuick">
                 {DEV_BUY_PICKS.map((q) => (
@@ -375,58 +379,58 @@ export function CreateForm() {
                     {q} SOL
                   </button>
                 ))}
-                <button type="button" id="devMax" disabled={maxBusy} title="Your balance, less what the launch itself costs" onClick={() => void pickMax()}>
-                  {maxBusy ? "…" : "Max"}
+                <button type="button" id="devMax" disabled={maxBusy} title={t.maxTitle} onClick={() => void pickMax()}>
+                  {maxBusy ? "…" : t.max}
                 </button>
               </div>
             </div>
             <p className="note" id="devNote">
               {devBuy === null
-                ? "Use an amount from 0.01 to 80 SOL."
+                ? t.devRange
                 : devBuy
-                  ? `About ${shareLabel(devShare)} of the supply. Your coin's page shows everyone how much you bought.`
-                  : "Leave it empty for no dev buy. Your coin's page shows everyone how much you bought."}
+                  ? t.devShare(shareLabel(devShare))
+                  : t.devEmpty}
             </p>
           </section>
         </form>
 
         <aside className="sticky stack">
           <div className="panel">
-            <h3>Your coin on the board</h3>
+            <h3>{t.previewTitle}</h3>
             <div id="preview">
               <CoinCard
                 asDiv
-                c={{ name: d.name || "Your coin", ticker: t, imageUrl: previewImg, pays: d.pays, mcap: 2900, ch: 0, ageMin: 0, creatorLabel: "you", progress: 0, graduated: false, paidUsd: 0, holders: 1, spark: [] }}
+                c={{ name: d.name || t.previewName, ticker: tick, imageUrl: previewImg, pays: d.pays, mcap: 2900, ch: 0, ageMin: 0, creatorLabel: t.previewCreator, progress: 0, graduated: false, paidUsd: 0, holders: 1, spark: [] }}
               />
             </div>
           </div>
           <div className="panel">
-            <h3>Checks</h3>
+            <h3>{t.checksTitle}</h3>
             <ul className="checks" id="checks">
-              {checkRow("Ticker", ct)}
-              {checkRow("Name", cn)}
-              {checkRow("Picture", ci)}
-              {checkRow("X account", cx)}
+              {checkRow(t.ticker, ct)}
+              {checkRow(t.name, cn)}
+              {checkRow(t.picture, ci)}
+              {checkRow(t.xAccount, cx)}
             </ul>
           </div>
           <div className="panel">
-            <div className="sumline"><span>Cost to launch</span><b>{feeSol || createSol ? `${feeSol ? `${feeSol} + ` : ""}~${createSol} SOL` : "Free"}</b></div>
-            <div className="sumline"><span>Your share of every trade</span><b>{bpsLabel(config.fees.creatorBps)}</b></div>
-            <div className="sumline"><span>Holders&apos; share</span><b id="holdShare">{bpsLabel(config.fees.holdersBps)} in {d.pays}</b></div>
-            <div className="sumline"><span>Dev buy</span><b id="devSum">{devSol ? `${devSol} SOL, about ${shareLabel(devShare)}` : "None"}</b></div>
+            <div className="sumline"><span>{t.costToLaunch}</span><b>{feeSol || createSol ? `${feeSol ? `${feeSol} + ` : ""}~${createSol} SOL` : t.free}</b></div>
+            <div className="sumline"><span>{t.yourShare}</span><b>{bpsLabel(config.fees.creatorBps)}</b></div>
+            <div className="sumline"><span>{t.holdersShare}</span><b id="holdShare">{t.holdersShareValue(bpsLabel(config.fees.holdersBps), d.pays)}</b></div>
+            <div className="sumline"><span>{t.devBuy}</span><b id="devSum">{devSol ? t.devSum(devSol, shareLabel(devShare)) : t.none}</b></div>
             <button className="btn btn-g btn-lg" id="launchBtn" type="submit" form="frm" style={{ width: "100%", marginTop: 14 }} disabled={!ready || (!config.launchesOpen && !me?.isAdmin) || !!me?.blocked}>
-              Launch coin
+              {t.launchCoin}
             </button>
             <p className="note" id="launchHint" style={{ textAlign: "center", color: launchError ? "var(--red)" : undefined }}>
               {me?.blocked
-                ? "uspad isn't available in your country."
+                ? t.blocked
                 : launchError
                   ? launchError
                   : config.launchesOpen
                     ? hint
                     : me?.isAdmin
-                      ? `Paused for everyone else; you can launch as an admin. ${hint}`
-                      : (config.launchesPausedReason ?? "Launches are paused.")}
+                      ? t.adminPaused(hint)
+                      : (config.launchesPausedReason ?? t.paused)}
             </p>
           </div>
         </aside>

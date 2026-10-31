@@ -12,18 +12,16 @@ import {
 } from "@divvy/shared";
 import { api } from "@/lib/api";
 import { useAssets, useConfig } from "@/lib/config";
+import { useErrorText } from "@/lib/session";
 import { checkCreate, UnsafeTransaction } from "@/lib/txcheck";
+import { useMsgs } from "@/i18n/client";
+import { create } from "@/i18n/msgs/create";
 import { CoinSpin3D } from "../Coin3D";
 import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 
-const STEPS = [
-  "Checking ticker, name and X account",
-  "Approve the launch in your wallet",
-  "Sending the create in a private bundle",
-  "Live on chain",
-  "On the board",
-];
+/** The modal's steps (create.steps): checks, wallet, bundle, on chain, on the board. */
+const STEP_COUNT = create.en.steps.length;
 /** Whether a wallet error means the person turned the request down (wallet-adapter wraps the wallet's own error). */
 const rejected = (e: unknown) => {
   const x = e as { message?: string; code?: number; error?: { code?: number; message?: string } } | null;
@@ -65,6 +63,11 @@ export function LaunchModal({
   const back = useAssets()[pays];
   const config = useConfig();
   const toast = useToast();
+  const t = useMsgs(create);
+  const errText = useErrorText();
+  // Like the wallet below: the polling loop's prompt toasts in the language shown now.
+  const errTextNow = useRef(errText);
+  errTextNow.current = errText;
   const [k, setK] = useState(0);
   const [live, setLive] = useState<{
     status: LaunchStatus;
@@ -135,11 +138,12 @@ export function LaunchModal({
       // check. Any other wallet error (a dropped connection, a wallet that needs a click) waits for the
       // Approve button or the next create, and says what the wallet answered.
       if (e instanceof UnsafeTransaction || rejected(e)) {
-        if (e instanceof UnsafeTransaction) toast(e.message);
+        if (e instanceof UnsafeTransaction) toast(errTextNow.current(e, e.message) ?? e.message);
         await sign({ refused: true }).catch(() => {});
       } else {
         const x = e as { message?: string; error?: { message?: string } } | null;
-        setWalletSaid(x?.error?.message || x?.message || "no answer");
+        // Empty when the wallet said nothing: shown as "no answer" in the visitor's language.
+        setWalletSaid(x?.error?.message || x?.message || "");
       }
     } finally {
       if (my === seq.current) {
@@ -166,7 +170,7 @@ export function LaunchModal({
           // One prompt at a time on its own (audit): while one is open, the button asks with this one.
           if (!prompting.current) void signCreate(s.tx);
         }
-        if (i >= STEPS.length) {
+        if (i >= STEP_COUNT) {
           // By mint: coins can share a ticker.
           const coin = s.mint ? await api<CoinDetail>(`/api/coins/${s.mint}`).catch(() => null) : null;
           if (!stop)
@@ -198,19 +202,19 @@ export function LaunchModal({
         <CoinSpin3D src={img} back={back} label={"$" + ticker} />
         {live ? (
           <div className="in">
-            <h2 id="modalTitle">${ticker} is live</h2>
-            <p>Its holders get {pays} every hour from its trading fees.</p>
+            <h2 id="modalTitle">{t.isLive(ticker)}</h2>
+            <p>{t.holdersGet(pays)}</p>
             <div className="kv">
-              <span>Market cap</span>
+              <span>{t.marketCap}</span>
               <b>{live.mcapUsd === null ? "…" : usd(live.mcapUsd)}</b>
             </div>
             <div className="kv">
-              <span>Pays holders in</span>
+              <span>{t.paysIn}</span>
               <b>{pays}</b>
             </div>
             {live.status.mint && (
               <div className="kv">
-                <span>Mint</span>
+                <span>{t.mint}</span>
                 <b>
                   <button
                     type="button"
@@ -219,7 +223,7 @@ export function LaunchModal({
                       void navigator.clipboard
                         .writeText(live.status.mint!)
                         .then(
-                          () => toast("Mint address copied"),
+                          () => toast(t.mintCopied),
                           () => toast(live.status.mint!),
                         )
                     }
@@ -235,7 +239,7 @@ export function LaunchModal({
                 className="btn btn-g btn-lg"
                 onClick={() => onDone(live.status)}
               >
-                Open coin page
+                {t.openCoin}
               </button>
               {live.status.mint && (
                 <a
@@ -244,7 +248,7 @@ export function LaunchModal({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  View on Solscan
+                  {t.viewSolscan}
                 </a>
               )}
               <button
@@ -252,16 +256,16 @@ export function LaunchModal({
                 className="btn btn-ghost"
                 onClick={onAnother}
               >
-                Launch another
+                {t.launchAnother}
               </button>
             </div>
           </div>
         ) : (
           <div className="in">
-            <h2 id="modalTitle">Minting ${ticker}</h2>
-            <p>{k === 1 ? "Your wallet pays for the coin's create and signs it, so the coin is yours on chain. Keep this tab open." : "Keep this tab open. It takes a few seconds."}</p>
+            <h2 id="modalTitle">{t.minting(ticker)}</h2>
+            <p>{k === 1 ? t.signingNote : t.keepOpen}</p>
             <ul className="prog" id="prog">
-              {STEPS.map((s, i) => (
+              {t.steps.map((s, i) => (
                 <li key={s} className={i < k ? "done" : i === k ? "now" : ""}>
                   <span className={"ck " + (i < k ? "ok" : "")}>
                     {i < k ? (
@@ -275,17 +279,17 @@ export function LaunchModal({
               ))}
             </ul>
             {k === 1 && !toSign && signingSince !== null && now - signingSince > 10_000 && (
-              <p className="note" role="status">Waiting for uspad to hand your wallet the create. Keep this tab open.</p>
+              <p className="note" role="status">{t.waitingCreate}</p>
             )}
             {k === 1 && toSign && toSign !== signedB64 && (walletSaid !== null || askedAt === null || now - askedAt > 8000) && (
               <>
                 <p className="note" role="status">
                   {walletSaid !== null
-                    ? `Your wallet didn't sign it (${walletSaid}). Ask it again:`
-                    : "Don't see your wallet? Open it from your browser's toolbar, or ask it again:"}
+                    ? t.didntSign(walletSaid || t.noAnswer)
+                    : t.cantSee}
                 </p>
                 <button type="button" className="btn btn-g" style={{ width: "100%", marginTop: 10 }} onClick={() => void signCreate(toSign)}>
-                  Approve in wallet
+                  {t.approve}
                 </button>
               </>
             )}

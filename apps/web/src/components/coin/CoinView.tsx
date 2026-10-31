@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import {
-  ago,
   bpsLabel,
   minutesSince,
   num,
@@ -22,6 +21,10 @@ import {
 import { qs } from "@/lib/api";
 import { useAssets, useConfig } from "@/lib/config";
 import { deliveryCopy } from "@/lib/copy";
+import { BRAND } from "@/lib/brand";
+import { useAgo, useLang, useMsgs } from "@/i18n/client";
+import { common } from "@/i18n/msgs/common";
+import { coinMsgs } from "@/i18n/msgs/coin";
 import { Chip } from "../Chip";
 import { CoinFlip3D } from "../Coin3D";
 import { Countdown } from "../Countdown";
@@ -55,6 +58,10 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
   const config = useConfig();
   const assets = useAssets();
   const toast = useToast();
+  const t = useMsgs(coinMsgs);
+  const tc = useMsgs(common);
+  const [lang] = useLang();
+  const ago = useAgo();
   const s = assets[coin.dividendAsset];
   const px = s?.priceUsd ?? 1;
   const ageMin = minutesSince(coin.createdAt);
@@ -82,33 +89,33 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
   const f = config.fees;
   const minHolder = usd(config.payouts.minHolderUsd);
   const lateMin = Math.round(config.payouts.lateAfterSec / 60);
-  const statusLabel = meter.status === "late" ? "Late" : meter.status === "carried" ? "Carried to next round" : "On time";
+  const statusLabel = meter.status === "late" ? t.statusLate : meter.status === "carried" ? t.statusCarried : t.statusOnTime;
 
   const copyCa = () => {
     navigator.clipboard?.writeText(coin.mint).catch(() => {});
-    toast("Contract address copied");
+    toast(t.caCopied);
   };
 
   return (
     <>
-      <Link className="back" href="/"><Icon name="back" />Back to the board</Link>
+      <Link className="back" href="/"><Icon name="back" />{tc.backToBoard}</Link>
       <div className="coin-head">
-        <CoinFlip3D src={coin.imageUrl} back={s} label={"$" + coin.ticker} title={`Front: $${coin.ticker}. Back: ${coin.dividendAsset}`} />
+        <CoinFlip3D src={coin.imageUrl} back={s} label={"$" + coin.ticker} title={t.coinTitle(coin.ticker, coin.dividendAsset)} />
         <div style={{ minWidth: 0 }}>
           <h1>
             {coin.name}
             <span className="t">${coin.ticker}</span>
           </h1>
           <div className="sub">
-            <span suppressHydrationWarning>Created by {coin.creator.label} {ago(coin.createdAt)}</span>
-            <button className="ca" type="button" id="copyCa" title="Copy contract address" onClick={copyCa}>
+            <span suppressHydrationWarning>{t.createdBy(coin.creator.label, ago(coin.createdAt))}</span>
+            <button className="ca" type="button" id="copyCa" title={t.copyCa} onClick={copyCa}>
               <Icon name="copy" />
               {short(coin.mint)}
             </button>
-            <span className="tag"><Icon name="shield" />Private bundle launch</span>
-            <span className="tag" id="devBuyTag" title={coin.devBuyPct ? `The creator bought ${shareLabel(coin.devBuyPct)} of the supply inside the create` : "The creator didn't buy any in the create"}>
+            <span className="tag"><Icon name="shield" />{t.privateBundle}</span>
+            <span className="tag" id="devBuyTag" title={coin.devBuyPct ? t.devBoughtTitle(shareLabel(coin.devBuyPct)) : t.noDevBuyTitle}>
               <Icon name="gift" />
-              {coin.devBuyPct ? `Dev bought ${shareLabel(coin.devBuyPct)}` : "No dev buy"}
+              {coin.devBuyPct ? t.devBought(shareLabel(coin.devBuyPct)) : t.noDevBuy}
             </span>
             <ReportButton mint={coin.mint} ticker={coin.ticker} />
           </div>
@@ -116,43 +123,43 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
       </div>
 
       <div className="kpis">
-        <div><span>Market cap</span><b className="up">{usd(coin.marketCapUsd)}</b></div>
-        <div><span>24h change</span><b className={coin.change24hPct >= 0 ? "up" : "down"}>{pct(coin.change24hPct)}</b></div>
-        <div><span>24h volume</span><b>{usd(coin.volume24hUsd)}</b></div>
-        <div><span>Holders</span><b>{coin.holders.toLocaleString("en-US")}</b></div>
-        <div><span>Paid to holders</span><b className="up">{usd(coin.paidUsd)}</b></div>
+        <div><span>{t.kpiMcap}</span><b className="up">{usd(coin.marketCapUsd)}</b></div>
+        <div><span>{t.kpiChange}</span><b className={coin.change24hPct >= 0 ? "up" : "down"}>{pct(coin.change24hPct)}</b></div>
+        <div><span>{t.kpiVolume}</span><b>{usd(coin.volume24hUsd)}</b></div>
+        <div><span>{t.kpiHolders}</span><b>{coin.holders.toLocaleString("en-US")}</b></div>
+        <div><span>{t.kpiPaid}</span><b className="up">{usd(coin.paidUsd)}</b></div>
       </div>
 
       <div className="coin-grid">
         <div className="stack">
           <div className="panel">
             <div className="chart-head">
-              <div className="tf" role="group" aria-label="Candle size">
-                {INTERVALS.map((t) => (
-                  <button type="button" key={t.tf} aria-pressed={tf === t.tf} onClick={() => setTf(t.tf)}>{t.label}</button>
+              <div className="tf" role="group" aria-label={t.candleSize}>
+                {INTERVALS.map((i) => (
+                  <button type="button" key={i.tf} aria-pressed={tf === i.tf} onClick={() => setTf(i.tf)}>{i.label}</button>
                 ))}
               </div>
-              <div className="tf" role="group" aria-label="Chart of">
-                <button type="button" aria-pressed={unit === "price"} onClick={() => setUnit("price")}>Price</button>
-                <button type="button" aria-pressed={unit === "mcap"} onClick={() => setUnit("mcap")}>Market cap</button>
+              <div className="tf" role="group" aria-label={t.chartOf}>
+                <button type="button" aria-pressed={unit === "price"} onClick={() => setUnit("price")}>{t.price}</button>
+                <button type="button" aria-pressed={unit === "mcap"} onClick={() => setUnit("mcap")}>{t.marketCap}</button>
               </div>
             </div>
             <CandleChart
               candles={candles}
               solUsd={config.quote.priceUsd}
               payoutHours={payoutHours}
-              label={`${unit === "price" ? "Price" : "Market cap"} chart for $${coin.ticker}`}
+              label={t.chartLabel(unit, coin.ticker)}
             />
             <div className="legend">
-              <span>Market cap all-time high {usd(coin.athUsd)}</span>
-              <span><i style={{ background: "var(--teal)" }} />Hourly payout to holders</span>
+              <span>{t.ath(usd(coin.athUsd))}</span>
+              <span><i style={{ background: "var(--teal)" }} />{t.hourlyPayout}</span>
             </div>
           </div>
           <div className="panel">
             <div className="tabs" role="tablist">
               {(["payouts", "holders", "trades"] as const).map((k) => (
                 <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-                  {k[0]!.toUpperCase() + k.slice(1)}
+                  {t.tabs[k]}
                 </button>
               ))}
             </div>
@@ -160,7 +167,7 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
               {tab === "payouts" &&
                 (payouts?.items.length ? (
                   <table className="t">
-                    <thead><tr><th>When</th><th className="r">Paid</th><th className="r">Value</th><th className="r">Wallets</th><th className="r">Tx</th></tr></thead>
+                    <thead><tr><th>{t.thWhen}</th><th className="r">{t.thPaid}</th><th className="r">{t.thValue}</th><th className="r">{t.thWallets}</th><th className="r">{t.thTx}</th></tr></thead>
                     <tbody>
                       {payouts.items.map((p) => (
                         <tr key={p.id}>
@@ -175,26 +182,26 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
                   </table>
                 ) : (
                   <p className="muted" style={{ padding: "20px 4px 6px", margin: 0 }}>
-                    No payout yet. The first round runs at the top of the hour, <b><Countdown nextAt={meter.nextRoundAt} /></b> from now, for every wallet holding at least {minHolder}.
+                    {t.noPayout(<b><Countdown nextAt={meter.nextRoundAt} /></b>, minHolder)}
                   </p>
                 ))}
               {tab === "holders" && holders && (
                 <table className="t">
-                  <thead><tr><th>Wallet</th><th className="r">Share</th><th className="r">Received</th></tr></thead>
+                  <thead><tr><th>{t.thWallet}</th><th className="r">{t.thShare}</th><th className="r">{t.thReceived}</th></tr></thead>
                   <tbody>
                     {holders.items.map((h) => (
                       <tr key={h.wallet}>
                         <td>
                           {h.excluded ? (
                             <>
-                              {h.label ?? short(h.wallet)} <span className="faint" style={{ fontSize: 12 }}>not paid</span>
+                              {h.label ?? short(h.wallet)} <span className="faint" style={{ fontSize: 12 }}>{t.notPaid}</span>
                             </>
                           ) : (
                             short(h.wallet)
                           )}
                         </td>
                         <td className="r">{h.pct.toFixed(2)}%</td>
-                        <td className={"r " + (h.excluded ? "faint" : "up")}>{h.excluded || !h.received ? "n/a" : num(h.received.ui) + " " + coin.dividendAsset}</td>
+                        <td className={"r " + (h.excluded ? "faint" : "up")}>{h.excluded || !h.received ? t.na : num(h.received.ui) + " " + coin.dividendAsset}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -204,22 +211,22 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
                 trades &&
                 (trades.items.length ? (
                   <table className="t">
-                    <thead><tr><th>When</th><th>Side</th><th className="r">${coin.ticker}</th><th className="r">SOL</th><th className="r">Wallet</th></tr></thead>
+                    <thead><tr><th>{t.thWhen}</th><th>{t.thSide}</th><th className="r">${coin.ticker}</th><th className="r">SOL</th><th className="r">{t.thWallet}</th></tr></thead>
                     <tbody>
                       {/* One transaction can hold several trades of a coin: keyed by signature and which one it is. */}
-                      {trades.items.map((t, i, all) => (
-                        <tr key={`${t.sig}:${all.slice(0, i).filter((x) => x.sig === t.sig).length}`}>
-                          <td>{ago(t.ts)}</td>
-                          <td className={"side-" + t.side}>{t.side}</td>
-                          <td className="r">{num(t.token.ui)}</td>
-                          <td className="r">{t.sol.ui.toFixed(3)}</td>
-                          <td className="r">{short(t.wallet)}</td>
+                      {trades.items.map((tr, i, all) => (
+                        <tr key={`${tr.sig}:${all.slice(0, i).filter((x) => x.sig === tr.sig).length}`}>
+                          <td>{ago(tr.ts)}</td>
+                          <td className={"side-" + tr.side}>{t.side[tr.side]}</td>
+                          <td className="r">{num(tr.token.ui)}</td>
+                          <td className="r">{tr.sol.ui.toFixed(3)}</td>
+                          <td className="r">{short(tr.wallet)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 ) : (
-                  <p className="muted" style={{ padding: "20px 4px 6px", margin: 0 }}>No trades yet. The first buyer gets the lowest price on the curve.</p>
+                  <p className="muted" style={{ padding: "20px 4px 6px", margin: 0 }}>{t.noTrades}</p>
                 ))}
             </div>
           </div>
@@ -232,27 +239,27 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
             <div className="foil-top">
               <Chip sym={coin.dividendAsset} />
               <div>
-                <small>Holders are paid in</small>
+                <small>{t.paidIn}</small>
                 <strong>{coin.dividendAsset}</strong>
               </div>
               <div className="cd">
-                <small>Next payout</small>
+                <small>{t.nextPayout}</small>
                 <b><Countdown nextAt={meter.nextRoundAt} /></b>
               </div>
             </div>
             <div className="foil-body">
               <div className="paid-row">
                 <div>
-                  <div className="faint" style={{ fontSize: 12.5, marginBottom: 6 }}>Paid out so far</div>
+                  <div className="faint" style={{ fontSize: 12.5, marginBottom: 6 }}>{t.paidSoFar}</div>
                   <b>{num(coin.paid.ui)} {coin.dividendAsset}</b>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <div className="faint" style={{ fontSize: 12.5 }}>Worth</div>
+                  <div className="faint" style={{ fontSize: 12.5 }}>{t.worth}</div>
                   <div style={{ fontSize: 18, fontWeight: 700 }} className="up">{usd(coin.paidUsd)}</div>
                 </div>
               </div>
               <div className="calc">
-                <label htmlFor="hold">If you hold <b id="holdPct">{hold.toFixed(1)}%</b> of supply</label>
+                <label htmlFor="hold">{t.ifYouHold(<b id="holdPct">{hold.toFixed(1)}%</b>)}</label>
                 <input
                   type="range"
                   id="hold"
@@ -264,14 +271,14 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
                   style={{ ["--p" as string]: ((hold - 0.1) / 4.9) * 100 + "%" }}
                 />
                 <div className="out" id="calcOut">
-                  At today&apos;s volume you&apos;d receive about <b>{num(daily / px)} {coin.dividendAsset}</b> a day, worth <b>{usd(daily)}</b>.
+                  {t.calcOut(<b>{num(daily / px)} {coin.dividendAsset}</b>, <b>{usd(daily)}</b>)}
                 </div>
               </div>
-              <p className="note">Wallets holding at least {minHolder} at the hourly snapshot are {deliveryCopy(config).cardNoteVerb}. The curve, the pool and the launcher wallet are left out.</p>
+              <p className="note">{t.cardNote(minHolder, deliveryCopy(config, lang))}</p>
             </div>
           </div>
           <div className="panel">
-            <h3>Where the fee goes</h3>
+            <h3>{t.whereFee}</h3>
             <div className="split" aria-hidden="true">
               <i style={{ flex: f.holdersBps, background: "var(--g)" }} />
               <i style={{ flex: f.creatorBps, background: "var(--teal)" }} />
@@ -279,30 +286,30 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
               <i style={{ flex: f.protocolBps, background: "rgba(255,255,255,.14)" }} />
             </div>
             <div className="split-legend">
-              <span><i style={{ background: "var(--g)" }} />Buys {coin.dividendAsset} for holders<b>{bpsLabel(f.holdersBps)}</b></span>
-              <span><i style={{ background: "var(--teal)" }} />Creator<b>{bpsLabel(f.creatorBps)}</b></span>
-              <span><i style={{ background: "var(--lime)" }} />uspad<b>{bpsLabel(f.divvyBps)}</b></span>
-              <span><i style={{ background: "rgba(255,255,255,.14)" }} />Raydium protocol<b>{bpsLabel(f.protocolBps)}</b></span>
+              <span><i style={{ background: "var(--g)" }} />{t.buysFor(coin.dividendAsset)}<b>{bpsLabel(f.holdersBps)}</b></span>
+              <span><i style={{ background: "var(--teal)" }} />{t.creator}<b>{bpsLabel(f.creatorBps)}</b></span>
+              <span><i style={{ background: "var(--lime)" }} />{BRAND}<b>{bpsLabel(f.divvyBps)}</b></span>
+              <span><i style={{ background: "rgba(255,255,255,.14)" }} />{t.raydiumProtocol}<b>{bpsLabel(f.protocolBps)}</b></span>
             </div>
           </div>
           <div className="panel">
             <div className="panel-h">
-              <h3>Payout meter</h3>
+              <h3>{t.meter}</h3>
               <span className={"status " + meter.status}><i />{statusLabel}</span>
             </div>
             <div className="meter-bar" aria-hidden="true">
               <i style={{ flex: meter.paid24hUsd / tot, background: "var(--g)" }} />
               <i style={{ flex: meter.pendingUsd / tot, background: "var(--teal)" }} />
             </div>
-            <div className="kv"><span>Paid to holders, last 24h</span><b>{usd(meter.paid24hUsd)}</b></div>
-            <div className="kv"><span>Waiting for the next round</span><b suppressHydrationWarning>{usd(meter.pendingUsd)}</b></div>
-            <div className="kv"><span>Last payout</span><b suppressHydrationWarning>{meter.lastPayoutAt ? ago(meter.lastPayoutAt) : "First round pending"}</b></div>
-            <p className="note">Fees sit in this coin&apos;s own on-chain vault until the hourly round. A round more than {lateMin} minutes late turns this red for everyone.</p>
+            <div className="kv"><span>{t.paid24h}</span><b>{usd(meter.paid24hUsd)}</b></div>
+            <div className="kv"><span>{t.waiting}</span><b suppressHydrationWarning>{usd(meter.pendingUsd)}</b></div>
+            <div className="kv"><span>{t.lastPayout}</span><b suppressHydrationWarning>{meter.lastPayoutAt ? ago(meter.lastPayoutAt) : t.firstPending}</b></div>
+            <p className="note">{t.feesNote(lateMin)}</p>
           </div>
           <div className="panel">
-            <h3>Check the address</h3>
+            <h3>{t.checkAddress}</h3>
             <p className="note">
-              Coins on uspad can share a ticker, a name, a picture and an X account. This ${coin.ticker} is <b>{short(coin.mint)}</b>: compare it with the address the project posts before you buy.
+              {t.checkNote(coin.ticker, <b>{short(coin.mint)}</b>)}
             </p>
           </div>
         </aside>

@@ -3,17 +3,22 @@
 import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
-import { ago, num, short, usd, usdFull, type PayoutList } from "@divvy/shared";
+import { num, short, usd, usdFull, type PayoutList } from "@divvy/shared";
 import { qs } from "@/lib/api";
 import { useAssets, useConfig } from "@/lib/config";
 import { deliveryCopy } from "@/lib/copy";
+import { useAgo, useLang, useMsgs } from "@/i18n/client";
+import { payouts } from "@/i18n/msgs/payouts";
 import { Chip } from "../Chip";
 import { Countdown } from "../Countdown";
 import { coinHref } from "@/lib/links";
 
 export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: PayoutList; assetsInUse: string[]; nextRoundAt: string }) {
   const assets = useAssets();
-  const copy = deliveryCopy(useConfig());
+  const t = useMsgs(payouts);
+  const ago = useAgo();
+  const [lang] = useLang();
+  const copy = deliveryCopy(useConfig(), lang);
   const [filter, setFilter] = useState("all");
   const key = "/api/payouts" + qs({ asset: filter === "all" ? null : filter, limit: 60 });
   // A stock filter shows its own receipts or says it's loading: never the unfiltered list under its chip (audit).
@@ -21,20 +26,20 @@ export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: Pa
   const s = (data ?? initial).summary;
   return (
     <>
-      <h1 className="page-h">Payouts</h1>
-      <p className="page-lede">Every hour each coin&apos;s vault buys its stock and {copy.payoutsLedeVerb} holders. These are the receipts, newest first. Each one is a transaction you can open.</p>
+      <h1 className="page-h">{t.title}</h1>
+      <p className="page-lede">{t.lede(copy.payoutsLedeVerb)}</p>
       <div className="tiles">
-        <div><b className="up">{usdFull(s.paidUsd)}</b><span>Paid to holders</span></div>
-        <div><b>{s.rounds.toLocaleString("en-US")}</b><span>Payout rounds</span></div>
-        <div><b>{s.walletPayments.toLocaleString("en-US")}</b><span>Wallet payments</span></div>
-        <div><b suppressHydrationWarning>{usdFull(s.pendingUsd)}</b><span>Waiting for the next round</span></div>
+        <div><b className="up">{usdFull(s.paidUsd)}</b><span>{t.tilePaid}</span></div>
+        <div><b>{s.rounds.toLocaleString("en-US")}</b><span>{t.tileRounds}</span></div>
+        <div><b>{s.walletPayments.toLocaleString("en-US")}</b><span>{t.tileWallets}</span></div>
+        <div><b suppressHydrationWarning>{usdFull(s.pendingUsd)}</b><span>{t.tilePending}</span></div>
       </div>
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-h">
-          <h3>Payout meter, all coins</h3>
+          <h3>{t.meter}</h3>
           <span className={"status " + (s.status === "late" ? "late" : "ok")}>
             <i />
-            {s.status === "late" ? `${s.lateCoins} ${s.lateCoins === 1 ? "coin is" : "coins are"} late` : "Every coin on time"}
+            {s.status === "late" ? t.late(s.lateCoins) : t.onTime}
           </span>
         </div>
         <div className="meter-bar">
@@ -42,16 +47,16 @@ export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: Pa
           <i style={{ flex: s.pendingUsd, background: "var(--teal)" }} />
         </div>
         <div className="legend">
-          <span><i style={{ background: "var(--g)" }} />Paid</span>
-          <span><i style={{ background: "var(--teal)" }} />Waiting, next round in&nbsp;<b><Countdown nextAt={nextRoundAt} /></b></span>
-          <span><i style={{ background: "var(--red)" }} />Late, shown per coin</span>
+          <span><i style={{ background: "var(--g)" }} />{t.legendPaid}</span>
+          <span><i style={{ background: "var(--teal)" }} />{t.legendWaiting(<Countdown nextAt={nextRoundAt} />)}</span>
+          <span><i style={{ background: "var(--red)" }} />{t.legendLate}</span>
         </div>
       </div>
       <div className="panel" style={{ marginBottom: 80 }}>
         <div className="panel-h" style={{ flexWrap: "wrap" }}>
-          <h3>Receipts</h3>
-          <div className="pays-filter" role="group" aria-label="Filter receipts by stock">
-            <button type="button" className="fchip all" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
+          <h3>{t.receipts}</h3>
+          <div className="pays-filter" role="group" aria-label={t.filterLabel}>
+            <button type="button" className="fchip all" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>{t.all}</button>
             {assetsInUse.filter((a) => assets[a]).map((a) => (
               <button type="button" className="fchip" key={a} aria-pressed={filter === a} onClick={() => setFilter(a)}>
                 <Chip sym={a} />
@@ -62,11 +67,11 @@ export function PayoutsView({ initial, assetsInUse, nextRoundAt }: { initial: Pa
         </div>
         <div className="table-scroll">
           <table className="t">
-            <thead><tr><th>Coin</th><th>When</th><th className="r">Paid</th><th className="r">Value</th><th className="r">Wallets</th><th className="r">Tx</th></tr></thead>
+            <thead><tr><th>{t.colCoin}</th><th>{t.colWhen}</th><th className="r">{t.colPaid}</th><th className="r">{t.colValue}</th><th className="r">{t.colWallets}</th><th className="r">{t.colTx}</th></tr></thead>
             <tbody id="rcpt">
               {!data && (
                 <tr>
-                  <td colSpan={6} className="faint">{error ? "Couldn't load these receipts. Try again in a moment." : "Loading…"}</td>
+                  <td colSpan={6} className="faint">{error ? t.loadError : t.loading}</td>
                 </tr>
               )}
               {data?.items.map((p) => (

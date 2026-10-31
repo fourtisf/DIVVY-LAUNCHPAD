@@ -8,9 +8,11 @@ import { PublicKey } from "@solana/web3.js";
 import { bpsLabel, num, sol, type CoinDetail, type TradeBuildResponse } from "@divvy/shared";
 import { api } from "@/lib/api";
 import { useConfig } from "@/lib/config";
-import { errorText } from "@/lib/session";
+import { useErrorText } from "@/lib/session";
 import { poolFees } from "@/lib/poolfees";
 import { explorerTx, FailedOnChain, SentUnconfirmed, signAndSend, TxExpired } from "@/lib/tx";
+import { useMsgs } from "@/i18n/client";
+import { tradeMsgs } from "@/i18n/msgs/coin";
 import { Chip } from "../Chip";
 import { useToast } from "../Toasts";
 
@@ -20,6 +22,8 @@ let lastSide: "buy" | "sell" = "buy";
 export function TradeBox({ coin }: { coin: CoinDetail }) {
   const config = useConfig();
   const toast = useToast();
+  const t = useMsgs(tradeMsgs);
+  const errorText = useErrorText();
   const walletCtx = useWallet();
   const { publicKey } = walletCtx;
   const { connection } = useConnection();
@@ -65,16 +69,16 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   // The confirmation may still turn up: look for it now and then, and clear the hold once it's settled.
   useEffect(() => {
     if (!unconfirmed) return;
-    const t = setInterval(async () => {
+    const timer = setInterval(async () => {
       const st = (await connection.getSignatureStatuses([unconfirmed], { searchTransactionHistory: true }).catch(() => null))?.value[0];
       if (st?.err || st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") {
         setUnconfirmed(null);
         setBalTick((n) => n + 1);
-        toast(st.err ? "Your last trade failed on chain. Only the network fee was spent." : "Your last trade went through.");
+        toast(st.err ? t.lastFailed : t.lastWentThrough);
       }
     }, 5_000);
-    return () => clearInterval(t);
-  }, [unconfirmed, connection, toast]);
+    return () => clearInterval(timer);
+  }, [unconfirmed, connection, toast, t]);
 
   const v = parseAmount(amt);
   const f = config.fees;
@@ -86,8 +90,8 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
   // Local estimates only (the API quotes the real amount); none without a price.
   const estimate = !(price > 0) ? null : side === "buy" ? ((v * keep) / price) * (1 - Math.min(0.25, v / 40)) : v * price * keep;
   const recv = estimate === null ? "–" : side === "buy" ? num(estimate) + " $" + coin.ticker : sol(estimate);
-  const balLabel = wallet ? (side === "buy" ? (bal.sol != null ? `Balance ${bal.sol.toFixed(3)} SOL` : "") : bal.tokens != null ? `Balance ${num(bal.tokens)} $${coin.ticker}` : "") : "";
-  const feeLabel = `${+(feeBps / 100).toFixed(2)}%, ${holdersBps * 2 === feeBps ? "half of it" : `${bpsLabel(holdersBps)} of it`} to holders`;
+  const balLabel = wallet ? (side === "buy" ? (bal.sol != null ? t.balanceSol(bal.sol.toFixed(3)) : "") : bal.tokens != null ? t.balanceTokens(num(bal.tokens), coin.ticker) : "") : "";
+  const feeLabel = t.feeLabel(String(+(feeBps / 100).toFixed(2)), holdersBps * 2 === feeBps ? null : bpsLabel(holdersBps));
 
   const pick = (s: "buy" | "sell") => {
     setSide(s);
@@ -102,23 +106,23 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
     setFailed(null);
     try {
       const amountIn = toBaseUnits(amt, side === "buy" ? 9 : 6);
-      if (!amountIn) return toast("Enter an amount like 0.5");
+      if (!amountIn) return toast(t.enterAmount);
       const r = await api<TradeBuildResponse>("/api/trade/build", { method: "POST", body: JSON.stringify({ mint: coin.mint, side, amountIn, slippageBps, wallet }) });
       // Demo mode builds nothing to sign.
-      if (r.tx === null) return toast(side === "buy" ? `Bought ${recv} (demo)` : `Sold for ${recv} (demo)`);
+      if (r.tx === null) return toast(side === "buy" ? t.demoBought(recv) : t.demoSold(recv));
       // The server's numbers, checked before the wallet opens (audit): the minimum must match the slippage
       // you chose, and a quote far below the estimate shown here is put to you first.
-      if (r.minOut.ui < r.expectedOut.ui * (1 - slippageBps / 10_000) * 0.999) return toast("The quote didn't match your slippage setting. Nothing was sent.");
+      if (r.minOut.ui < r.expectedOut.ui * (1 - slippageBps / 10_000) * 0.999) return toast(t.quoteMismatch);
       const unit = side === "buy" ? `$${coin.ticker}` : "SOL";
-      if (estimate !== null && r.expectedOut.ui < estimate * 0.85 && !window.confirm(`You'd get about ${num(r.expectedOut.ui)} ${unit} (at least ${num(r.minOut.ui)}), less than shown. Continue?`)) return;
-      if (r.priceImpactBps > 1500 && !window.confirm(`This trade moves the price by about ${(r.priceImpactBps / 100).toFixed(1)}%. Continue?`)) return;
+      if (estimate !== null && r.expectedOut.ui < estimate * 0.85 && !window.confirm(t.lessThanShown(num(r.expectedOut.ui), unit, num(r.minOut.ui)))) return;
+      if (r.priceImpactBps > 1500 && !window.confirm(t.priceImpact((r.priceImpactBps / 100).toFixed(1)))) return;
       await signAndSend(walletCtx, connection, r.tx, { network: config.network, kind: "trade", coinMint: coin.mint }, () => setStage("confirming"));
-      toast(side === "buy" ? `Bought ${num(r.expectedOut.ui)} $${coin.ticker}` : `Sold for ${sol(r.expectedOut.ui)}`);
+      toast(side === "buy" ? t.bought(num(r.expectedOut.ui), coin.ticker) : t.sold(sol(r.expectedOut.ui)));
       // The wallet's balances now, the coin's numbers once the indexer has seen the trade (it polls every 4 s).
-      setBalTick((t) => t + 1);
+      setBalTick((n) => n + 1);
       for (const ms of [2_500, 7_000]) {
         setTimeout(() => {
-          setBalTick((t) => t + 1);
+          setBalTick((n) => n + 1);
           void mutate((k) => typeof k === "string" && k.startsWith(`/api/coins/${coin.mint}`));
         }, ms);
       }
@@ -127,7 +131,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
       if (e instanceof FailedOnChain || e instanceof TxExpired) setFailed({ sig: e.signature, expired: e instanceof TxExpired });
       // Errors after sending come back with their own wording; this one is only for before.
       console.error("trade", e);
-      const m = errorText(e, "The trade didn't go through. Nothing was sent.");
+      const m = errorText(e, t.tradeFailed);
       if (m) toast(m);
     } finally {
       setBusy(false);
@@ -136,17 +140,17 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
 
   return (
     <div className="panel">
-      <div className="toggle" role="group" aria-label="Buy or sell">
-        <button type="button" className="b" aria-pressed={side === "buy"} onClick={() => pick("buy")}>Buy</button>
-        <button type="button" className="s" aria-pressed={side === "sell"} onClick={() => pick("sell")}>Sell</button>
+      <div className="toggle" role="group" aria-label={t.buyOrSell}>
+        <button type="button" className="b" aria-pressed={side === "buy"} onClick={() => pick("buy")}>{t.buy}</button>
+        <button type="button" className="s" aria-pressed={side === "sell"} onClick={() => pick("sell")}>{t.sell}</button>
       </div>
       <label className="field">
         <span>
-          <span id="payLbl">{side === "buy" ? "You pay" : "You sell"}</span>
+          <span id="payLbl">{side === "buy" ? t.youPay : t.youSell}</span>
           <span className="faint" id="bal">{balLabel}</span>
         </span>
         <div className="input">
-          <input id="amt" inputMode="decimal" value={amt} onChange={(e) => setAmt(e.target.value)} aria-label="Amount" />
+          <input id="amt" inputMode="decimal" value={amt} onChange={(e) => setAmt(e.target.value)} aria-label={t.amount} />
           <span className="unit" id="unit">
             {side === "buy" ? (
               <>
@@ -172,14 +176,14 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
               ))}
         </div>
       </label>
-      <div className="kv"><span>You receive</span><b id="recv">{recv}</b></div>
-      <div className="kv"><span>Route</span><b id="route">{side === "buy" ? (graduated ? "SOL into the Raydium pool" : "SOL into the bonding curve") : graduated ? "Raydium pool to SOL" : "Bonding curve to SOL"}</b></div>
-      <div className="kv"><span>Trading fee</span><b>{feeLabel}</b></div>
+      <div className="kv"><span>{t.youReceive}</span><b id="recv">{recv}</b></div>
+      <div className="kv"><span>{t.route}</span><b id="route">{side === "buy" ? (graduated ? t.routeBuyPool : t.routeBuyCurve) : graduated ? t.routeSellPool : t.routeSellCurve}</b></div>
+      <div className="kv"><span>{t.tradingFee}</span><b>{feeLabel}</b></div>
       {live && (
         <div className="kv">
-          <span>Max slippage</span>
+          <span>{t.maxSlippage}</span>
           <b>
-            <select className="slip" aria-label="Max slippage" value={slippageBps} onChange={(e) => setSlippageBps(Number(e.target.value))}>
+            <select className="slip" aria-label={t.maxSlippage} value={slippageBps} onChange={(e) => setSlippageBps(Number(e.target.value))}>
               {[50, 100, 200, 500].map((b) => (
                 <option key={b} value={b}>{b / 100}%</option>
               ))}
@@ -196,35 +200,36 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
         onClick={trade}
       >
         {!wallet
-          ? "Connect wallet to trade"
+          ? t.connectToTrade
           : busy
             ? stage === "confirming"
-              ? "Confirming on Solana…"
-              : "Approve in your wallet…"
+              ? t.confirming
+              : t.approve
             : side === "buy"
-              ? `Buy $${coin.ticker}`
-              : `Sell $${coin.ticker}`}
+              ? t.buyTicker(coin.ticker)
+              : t.sellTicker(coin.ticker)}
       </button>
       {failed && (
         <p className="note" role="status" id="tradeFailed">
-          {failed.expired ? "Your last trade didn't land in time. Nothing was spent." : "Your last trade failed on chain; only the network fee was spent."}{" "}
-          <a className="link" href={explorerTx(failed.sig, config.network)} target="_blank" rel="noreferrer">See it on Solscan</a>
-          {failed.expired ? ", then try again." : ". A price that moved more than your max slippage is the usual reason: try again, or raise it."}
+          {t.failedNote(failed.expired, (text) => (
+            <a className="link" href={explorerTx(failed.sig, config.network)} target="_blank" rel="noreferrer">{text}</a>
+          ))}
         </p>
       )}
       {unconfirmed && (
         <p className="note" role="status">
-          Your last trade was sent but isn&apos;t confirmed yet.{" "}
-          <a className="link" href={explorerTx(unconfirmed, config.network)} target="_blank" rel="noreferrer">Check it on Solscan</a> before you trade again.{" "}
-          <button type="button" className="link" onClick={() => setUnconfirmed(null)}>I checked it</button>
+          {t.unconfirmedNote((text) => (
+            <a className="link" href={explorerTx(unconfirmed, config.network)} target="_blank" rel="noreferrer">{text}</a>
+          ))}{" "}
+          <button type="button" className="link" onClick={() => setUnconfirmed(null)}>{t.iChecked}</button>
         </p>
       )}
       {graduated ? (
-        <p className="note">Graduated. Trades go to the Raydium pool.</p>
+        <p className="note">{t.graduated}</p>
       ) : (
         <div style={{ marginTop: 16 }}>
           <div className="bar-row">
-            <span>Bonding curve, graduates at {usdShort(config.graduation.targetUsd)}</span>
+            <span>{t.curve(usdShort(config.graduation.targetUsd))}</span>
             <span>{Math.round(coin.progress * 100)}%</span>
           </div>
           <div className="bar">

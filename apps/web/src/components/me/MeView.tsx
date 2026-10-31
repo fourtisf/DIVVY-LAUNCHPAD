@@ -5,21 +5,26 @@ import { useState } from "react";
 import useSWR from "swr";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { ago, num, short, sol, usd, type CreatorInfo, type MyPayouts } from "@divvy/shared";
+import { num, short, sol, usd, type CreatorInfo, type MyPayouts } from "@divvy/shared";
 import { api } from "@/lib/api";
 import { useConfig } from "@/lib/config";
-import { errorText, useSession } from "@/lib/session";
+import { useErrorText, useSession } from "@/lib/session";
 import { explorerTx, signAndSend } from "@/lib/tx";
 import { Chip } from "../Chip";
 import { useToast } from "../Toasts";
 import { coinHref } from "@/lib/links";
-
-const STATUS: Record<MyPayouts["items"][number]["status"], string> = { credited: "Credited", sent: "Sent", claimed: "Claimed" };
+import { useAgo, useMsgs } from "@/i18n/client";
+import { common } from "@/i18n/msgs/common";
+import { me as meMsgs } from "@/i18n/msgs/me";
 
 /** The connected wallet's own page: what it can claim, what it was paid, and its coins' creator fees. */
 export function MeView() {
   const config = useConfig();
   const toast = useToast();
+  const t = useMsgs(meMsgs);
+  const tc = useMsgs(common);
+  const ago = useAgo();
+  const errorText = useErrorText();
   const wallet = useWallet();
   const { connection } = useConnection();
   const { setVisible } = useWalletModal();
@@ -39,7 +44,7 @@ export function MeView() {
     try {
       await fn();
     } catch (e) {
-      const m = errorText(e, "That didn't go through. Try again.");
+      const m = errorText(e, t.failed);
       if (m) toast(m);
     } finally {
       setBusy(null);
@@ -50,7 +55,7 @@ export function MeView() {
     run(assetSymbol, async () => {
       const { tx } = await api<{ tx: string }>("/api/claims/build", { method: "POST", body: JSON.stringify({ assetSymbol }) });
       await signAndSend(wallet, connection, tx, { network: config.network, kind: "claim" });
-      toast(`${assetSymbol} claimed`);
+      toast(t.claimed(assetSymbol));
       await Promise.all([refresh(), reloadPayouts()]);
     });
 
@@ -58,16 +63,16 @@ export function MeView() {
     run("creator", async () => {
       const { tx } = await api<{ tx: string }>("/api/me/creator/claim/build", { method: "POST" });
       await signAndSend(wallet, connection, tx, { network: config.network, kind: "creator-claim" });
-      toast("Creator fees claimed");
+      toast(t.creatorClaimed);
       await reloadCreator();
     });
 
   if (!addr) {
     return (
       <>
-        <h1 className="page-h">Your payouts</h1>
-        <p className="page-lede">Connect the wallet that holds your coins to see what it was paid and what it can claim.</p>
-        <button className="btn btn-g btn-lg" type="button" onClick={() => setVisible(true)}>Connect wallet</button>
+        <h1 className="page-h">{t.title}</h1>
+        <p className="page-lede">{t.connectLede}</p>
+        <button className="btn btn-g btn-lg" type="button" onClick={() => setVisible(true)}>{tc.connectWallet}</button>
       </>
     );
   }
@@ -75,13 +80,13 @@ export function MeView() {
   if (!signedIn) {
     return (
       <>
-        <h1 className="page-h">Your payouts</h1>
-        <p className="page-lede">Sign a short message to prove this wallet is yours. It costs nothing and sends no transaction.</p>
+        <h1 className="page-h">{t.title}</h1>
+        <p className="page-lede">{t.signInLede}</p>
         <div className="me-actions">
           <button className="btn btn-g btn-lg" type="button" disabled={busy === "signin"} onClick={() => run("signin", async () => void (await ensureSignedIn()))}>
-            Sign in as {short(addr)}
+            {t.signInAs(short(addr))}
           </button>
-          <button className="btn btn-ghost" type="button" onClick={() => void wallet.disconnect()}>Disconnect</button>
+          <button className="btn btn-ghost" type="button" onClick={() => void wallet.disconnect()}>{t.disconnect}</button>
         </div>
       </>
     );
@@ -90,30 +95,29 @@ export function MeView() {
   const claimable = me?.claimable ?? [];
   return (
     <>
-      <h1 className="page-h">Your payouts</h1>
+      <h1 className="page-h">{t.title}</h1>
       <p className="page-lede">
-        {short(addr)}
-        {me?.x ? ` · @${me.x.handle}` : ""}. {claimModel ? "Every hour your coins credit you their stock. Claim it any time; you pay only the network fee and your token account." : "Every hour your coins send you their stock."}
+        {t.lede(short(addr) + (me?.x ? ` · @${me.x.handle}` : ""), claimModel)}
       </p>
       <div className="me-actions">
-        <button className="btn btn-ghost" type="button" onClick={() => void signOut()}>Sign out</button>
-        <button className="btn btn-ghost" type="button" onClick={() => void signOut().then(() => wallet.disconnect())}>Disconnect</button>
+        <button className="btn btn-ghost" type="button" onClick={() => void signOut()}>{t.signOut}</button>
+        <button className="btn btn-ghost" type="button" onClick={() => void signOut().then(() => wallet.disconnect())}>{t.disconnect}</button>
       </div>
-      {me?.blocked && <p className="note me-warn">uspad isn&apos;t available in your country, so claims are turned off here.</p>}
+      {me?.blocked && <p className="note me-warn">{t.blocked}</p>}
 
       {/* First for creators, so their fees are easy to find. */}
       {creator && creator.coins.length > 0 && (
         <div className="panel" style={{ marginBottom: 18 }} id="creatorFees">
           <div className="panel-h">
-            <h3>Your creator fees</h3>
+            <h3>{t.creatorTitle}</h3>
             <button className="btn btn-g" type="button" disabled={!!busy || creator.claimable.raw === "0"} onClick={() => void claimCreator()}>
-              {busy === "creator" ? "Claiming…" : creator.claimable.raw === "0" ? "Nothing to claim yet" : `Claim ${sol(creator.claimable.ui)}`}
+              {busy === "creator" ? t.claiming : creator.claimable.raw === "0" ? t.nothingToClaim : t.claimAmount(sol(creator.claimable.ui))}
             </button>
           </div>
-          <p className="note">Your {(config.fees.creatorBps / 100).toFixed(2)}% of every trade on the curve collects on chain in your own creator vault. Claiming sends it to this wallet.</p>
+          <p className="note">{t.creatorNote((config.fees.creatorBps / 100).toFixed(2))}</p>
           <div className="table-scroll">
             <table className="t">
-              <thead><tr><th>Coin</th><th className="r">Status</th><th className="r">Creator fees earned</th></tr></thead>
+              <thead><tr><th>{t.colCoin}</th><th className="r">{t.colStatus}</th><th className="r">{t.colEarned}</th></tr></thead>
               <tbody>
                 {creator.coins.map((c) => (
                   <tr key={c.mint}>
@@ -123,7 +127,7 @@ export function MeView() {
                         <img src={c.imageUrl} alt="" width={26} height={26} style={{ borderRadius: 8 }} />${c.ticker}
                       </Link>
                     </td>
-                    <td className="r">{c.status === "graduated" ? "Graduated" : "On the curve"}</td>
+                    <td className="r">{c.status === "graduated" ? t.graduated : t.onCurve}</td>
                     <td className="r">{sol(c.creatorFees.ui)}</td>
                   </tr>
                 ))}
@@ -135,14 +139,14 @@ export function MeView() {
 
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-h">
-          <h3>{claimModel ? "Ready to claim" : "Waiting to be sent"}</h3>
+          <h3>{claimModel ? t.readyToClaim : t.waitingToSend}</h3>
         </div>
         {claimable.length === 0 ? (
-          <p className="note">Nothing yet. Hold a coin through the top of the hour to get its stock.</p>
+          <p className="note">{t.nothingYet}</p>
         ) : (
           <div className="table-scroll">
             <table className="t">
-              <thead><tr><th>Stock</th><th className="r">Amount</th><th className="r">Value</th><th className="r" /></tr></thead>
+              <thead><tr><th>{t.colStock}</th><th className="r">{t.colAmount}</th><th className="r">{t.colValue}</th><th className="r" /></tr></thead>
               <tbody>
                 {claimable.map((c) => (
                   <tr key={c.assetSymbol}>
@@ -152,10 +156,10 @@ export function MeView() {
                     <td className="r">
                       {claimModel ? (
                         <button className="btn btn-g" type="button" disabled={!!busy || !!me?.blocked} onClick={() => void claim(c.assetSymbol)}>
-                          {busy === c.assetSymbol ? "Claiming…" : "Claim"}
+                          {busy === c.assetSymbol ? t.claiming : t.claim}
                         </button>
                       ) : (
-                        <span className="faint">Sent once it&apos;s worth {usd(config.payouts.autoPushMinUsd ?? 1)}</span>
+                        <span className="faint">{t.sentOnce(usd(config.payouts.autoPushMinUsd ?? 1))}</span>
                       )}
                     </td>
                   </tr>
@@ -167,13 +171,13 @@ export function MeView() {
       </div>
 
       <div className="panel" style={{ marginBottom: 80 }}>
-        <div className="panel-h"><h3>Payout history</h3></div>
+        <div className="panel-h"><h3>{t.history}</h3></div>
         {!payouts?.items.length ? (
-          <p className="note">No payouts yet.</p>
+          <p className="note">{t.noPayouts}</p>
         ) : (
           <div className="table-scroll">
             <table className="t">
-              <thead><tr><th>Coin</th><th>When</th><th className="r">Amount</th><th className="r">Value</th><th className="r">Status</th><th className="r">Tx</th></tr></thead>
+              <thead><tr><th>{t.colCoin}</th><th>{t.colWhen}</th><th className="r">{t.colAmount}</th><th className="r">{t.colValue}</th><th className="r">{t.colStatus}</th><th className="r">{t.colTx}</th></tr></thead>
               <tbody>
                 {payouts.items.map((p) => (
                   <tr key={`${p.coin.mint}-${p.hour}`}>
@@ -186,7 +190,7 @@ export function MeView() {
                     <td style={{ whiteSpace: "nowrap" }} suppressHydrationWarning>{ago(p.hour)}</td>
                     <td className="r up" style={{ whiteSpace: "nowrap" }}>{num(p.amount.ui)} {p.assetSymbol}</td>
                     <td className="r">{usd(p.usd)}</td>
-                    <td className="r">{STATUS[p.status]}</td>
+                    <td className="r">{t.status[p.status]}</td>
                     <td className="r">{p.sig ? <a className="tx" href={explorerTx(p.sig, config.network)} target="_blank" rel="noreferrer">{short(p.sig)}</a> : ""}</td>
                   </tr>
                 ))}
