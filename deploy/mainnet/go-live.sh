@@ -38,6 +38,9 @@
 #                                 a coin's hourly holders' share under this waits for the next hour ($1).
 #   go-live.sh token-ca <address> shows the platform token's contract address in the hero; token-ca off
 #                                 puts back "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
+#   go-live.sh domain             moves the live site to hwai.ai on this server: certificate, Nginx,
+#                                 WEB_ORIGIN; uspad.fun redirects there (and keeps serving old coins'
+#                                 pictures and metadata). Needs hwai.ai and www.hwai.ai pointing here.
 #   go-live.sh platform-info name | all
 #                                 dry run: the name (and with "all" the web link and picture, once hwai.ai
 #                                 serves the site) Raydium shows for the PlatformConfig, uspad → hwai.
@@ -52,13 +55,16 @@
 # deploy/mainnet/README.md. Every step can be run again: what exists is kept.
 set -euo pipefail
 
-DOMAIN=uspad.fun
-# The product's name and domain since the owner's rename (2026-10-31). The site still serves $DOMAIN
-# until the domain move; the PlatformConfig's name, web and picture use these (go-live.sh platform-info).
+# The domain the live site serves: uspad.fun until `go-live.sh domain` moves it (it writes the new one here).
+DOMAIN_FILE=/root/divvy-domain
+DOMAIN=$(cat "$DOMAIN_FILE" 2>/dev/null || echo uspad.fun)
+# The product's name and domain since the owner's rename (2026-10-31): the domain move, and the
+# PlatformConfig's name, web and picture (go-live.sh platform-info), use these.
 BRAND=hwai
 BRAND_DOMAIN=hwai.ai
 REPO=https://github.com/fourtisf/uspad.git
-BRANCH=claude/new-session-qmy02t
+# The hwai rename, the Chinese site and design A are on this branch (2026-10-31).
+BRANCH=claude/tender-curie-4uer50
 SECRETS=/root/uspad-secrets.env
 GEN=/root/uspad-generated.env          # database and Redis passwords made by this script
 ADMIN_KEY=/root/uspad-keys/platform-admin.json
@@ -932,6 +938,130 @@ token_ca() {
 }
 
 # --------------------------------------------------------------------------------------------------
+reload_nginx() { if has_systemd; then systemctl reload nginx; else nginx -s reload; fi; }
+# Whether an address is this server's (a VPS has its public address on an interface; else ask out).
+ip_is_mine() { hostname -I | tr ' ' '\n' | grep -qx "$1" || [ "$1" = "$(curl -fsS -4 --max-time 5 https://api.ipify.org 2>/dev/null)" ]; }
+
+# Moves the live site to $BRAND_DOMAIN on this server (owner, 2026-10-31: uspad.fun → hwai.ai): a
+# certificate for it and www, the Nginx site, WEB_ORIGIN and the media base, and the old name kept as a
+# redirect. The old name still serves /api/media/ itself: coins launched before the move have their
+# metadata (on chain) and pictures (in the database) there, so the new site's CSP allows its pictures.
+# Anything that fails puts the old Nginx config and env files back.
+domain_move() {
+  local new=$BRAND_DOMAIN old=$DOMAIN conf=/etc/nginx/sites-available/uspad-live.conf acme=/etc/nginx/sites-enabled/hwai-acme.conf
+  [ "$old" = "$new" ] && { note "situs sudah di https://$new"; return 0; }
+  [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
+  [ -f "$conf" ] || die "$conf tidak ada: situs live belum dipasang di server ini"
+  load_secrets
+  say "Pindah domain: $old → $new"
+  local h ip
+  for h in "$new" "www.$new"; do
+    ip=$(getent ahostsv4 "$h" | awk 'NR==1{print $1}')
+    [ -n "$ip" ] && ip_is_mine "$ip" || die "$h mengarah ke ${ip:-(belum ada)}, bukan server ini ($(hostname -I | awk '{print $1}')). Atur DNS (A untuk @, CNAME www), tunggu beberapa menit, lalu ulangi."
+  done
+
+  if [ ! -f "/etc/letsencrypt/live/$new/fullchain.pem" ]; then
+    say "Sertifikat $new dan www.$new"
+    install -d -m 755 /var/www/certbot
+    # Port 80 answers ACME for the new name only while certbot runs.
+    printf 'server {\n    listen 80;\n    server_name %s www.%s;\n    location ^~ /.well-known/acme-challenge/ { root /var/www/certbot; default_type text/plain; }\n    location / { return 404; }\n}\n' "$new" "$new" > "$acme"
+    nginx -t > /dev/null 2>&1 || { rm -f "$acme"; die "Nginx menolak blok ACME sementara"; }
+    reload_nginx
+    if ! certbot certonly --webroot -w /var/www/certbot -d "$new" -d "www.$new" --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring; then
+      rm -f "$acme"; reload_nginx
+      die "certbot gagal (alasan di atas); situs tetap di $old"
+    fi
+    rm -f "$acme"
+  fi
+
+  say "Nginx: https://$new, dan $old dialihkan ke sana"
+  local f bak=/root/divvy-before-domain
+  install -d -m 700 "$bak"
+  cp "$conf" "$bak/uspad-live.conf"
+  for f in $ENV_DIR/api.env $ENV_DIR/web.env $ENV_DIR/worker.env; do [ -f "$f" ] && cp -p "$f" "$bak/"; done
+  restore() {
+    cp "$bak/uspad-live.conf" "$conf"
+    for f in api.env web.env worker.env; do [ -f "$bak/$f" ] && cp -p "$bak/$f" "$ENV_DIR/$f"; done
+    reload_nginx
+    pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+    pm2as divvy-web reload "$ECO" --only divvy-web --update-env > /dev/null
+    restart_worker
+  }
+  local rpc_host=$new
+  case $BROWSER_RPC in https://*) rpc_host=${BROWSER_RPC#https://}; rpc_host=${rpc_host%%/*} ;; esac
+  {
+    sed -e "s/rpc\.divvy\.example/$rpc_host/g" -e "s/divvy\.example/$new/g" \
+        -e "s#img-src 'self' data: blob:#img-src 'self' data: blob: https://$old#" "$CUR/deploy/nginx/divvy.conf"
+    cat <<EOF
+
+# ---- $old, the name before the rename (go-live.sh domain, $(date -u +%F)) ----
+# Coins launched before the move keep their metadata and pictures under https://$old/api/media/ (on
+# chain and in the database), so that path is still served here; everything else moves to $new.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $old www.$old;
+    server_tokens off;
+    location ^~ /.well-known/acme-challenge/ { root /var/www/certbot; default_type text/plain; }
+    location / { return 301 https://$new\$request_uri; }
+}
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $old www.$old;
+    server_tokens off;
+    ssl_certificate     /etc/letsencrypt/live/$old/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$old/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location ^~ /api/media/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_pass http://divvy_api;
+    }
+    location / { return 301 https://$new\$request_uri; }
+}
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name www.$new;
+    server_tokens off;
+    ssl_certificate     /etc/letsencrypt/live/$new/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$new/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    return 301 https://$new\$request_uri;
+}
+EOF
+  } > "$conf"
+  if ! nginx -t > /dev/null 2>&1; then
+    nginx -t 2>&1 | grep -q "Address family not supported" && sed -i '/listen \[::\]/d' "$conf"
+    if ! nginx -t; then restore; die "konfigurasi Nginx ditolak (lihat di atas); semuanya dikembalikan ke $old"; fi
+  fi
+  reload_nginx
+  nginx_launch_limit
+
+  say "Env: WEB_ORIGIN dan media ke https://$new"
+  for f in $ENV_DIR/api.env $ENV_DIR/web.env $ENV_DIR/worker.env; do
+    [ -f "$f" ] && sed -i -e "s#^WEB_ORIGIN=https://$old\$#WEB_ORIGIN=https://$new#" -e "s#^PUBLIC_MEDIA_BASE=https://$old/#PUBLIC_MEDIA_BASE=https://$new/#" -e "s#^X_REDIRECT_URI=https://$old/#X_REDIRECT_URI=https://$new/#" "$f"
+  done
+  pm2as divvy-api reload "$ECO" --only divvy-api --update-env > /dev/null
+  pm2as divvy-web reload "$ECO" --only divvy-web --update-env > /dev/null
+  restart_worker
+  sleep 6
+  if ! curl -fsS "https://$new/api/health" > /dev/null; then
+    restore
+    die "https://$new/api/health tidak menjawab; semuanya dikembalikan ke $old (log: /var/log/divvy/api/, /var/log/nginx/divvy.error.log)"
+  fi
+  echo "$new" > "$DOMAIN_FILE"
+  DOMAIN=$new
+  note "https://$new jalan. https://$old dan https://www.$new dialihkan ke sana."
+  note "config: $(curl -fsS "https://$new/api/config" 2>/dev/null | jq -c '{network, demo}' 2>/dev/null || echo '?')"
+  grep -q '^X_REDIRECT_URI=' $ENV_DIR/api.env 2>/dev/null && note "Link X dipakai: ganti callback di X Developer Portal ke https://$new/api/auth/x/callback"
+  note "Berikutnya: go-live.sh platform-info all (nama, web dan gambar di Raydium)."
+}
+
+# --------------------------------------------------------------------------------------------------
 # The name, web link and picture Raydium shows for the PlatformConfig (owner, 2026-10-31: uspad → hwai).
 #   platform-info name    only the name, which needs nothing else
 #   platform-info all     name, web https://$BRAND_DOMAIN and picture, once $BRAND_DOMAIN serves the site
@@ -1018,6 +1148,7 @@ case "${1:-}" in
   token-ca) token_ca "${2:-}" ;;
   socials) socials "${2:-}" "${3:-}" ;;
   platform-info) platform_info "${2:-}" "${3:-}" ;;
+  domain) domain_move ;;
   status) status ;;
   *) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 1 ;;
 esac

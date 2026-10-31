@@ -211,7 +211,7 @@ Still named uspad, each waiting for the owner:
 
 - **The $USPAD token** and its posts in `brand/uspad/social/`. The hero's CA pill shows whatever `NEXT_PUBLIC_TOKEN_CA` holds (`go-live.sh token-ca off` hides it).
 - **The PlatformConfig on mainnet** keeps name `uspad`, web `https://uspad.fun` and image `https://uspad.fun/brand/uspad-mark-512.png` (VERIFIED item 27) until the owner runs `go-live.sh platform-info` (VERIFIED item 30; the owner asked for it on 2026-10-31). `platform-info name` changes the name now; `platform-info all` also points web and picture at hwai.ai, once hwai.ai serves the site. Meanwhile `apps/web/public/brand/uspad-mark-512.png` holds the hwai mark, so that image URL already shows hwai.
-- **The production domain**: `deploy/mainnet/go-live.sh` still serves `uspad.fun`. Moving to `hwai.ai` means pointing its DNS at the server, a certificate, the Nginx server name and `WEB_ORIGIN`; keep `uspad.fun` redirecting so links in posts keep working.
+- **The production domain**: `go-live.sh domain` moves the live site to `hwai.ai` on the same server (certificate, Nginx, `WEB_ORIGIN`) and keeps `uspad.fun` as a redirect that still serves old coins' metadata and pictures (deploy/mainnet/README.md, "The hwai rename"). The owner pointed hwai.ai's DNS on 2026-10-31.
 
 ## Stock token logos
 

@@ -22,6 +22,19 @@ I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh fee-rate --send
 /root/go-live.sh status
 ```
 
+**The hwai rename (owner, 2026-10-31).** The code lives on `claude/tender-curie-4uer50` (go-live.sh's `BRANCH`). Point `hwai.ai` (A record) and `www.hwai.ai` (CNAME) at this server, then:
+
+```bash
+sudo -u divvy git -C /srv/divvy/repo.git fetch -q origin
+sudo -u divvy git -C /srv/divvy/repo.git show refs/heads/claude/tender-curie-4uer50:deploy/mainnet/go-live.sh > /root/go-live.sh && chmod 700 /root/go-live.sh
+/root/go-live.sh update                  # the hwai site: design A, Chinese first
+/root/go-live.sh domain                  # certificate, Nginx and WEB_ORIGIN for hwai.ai; uspad.fun redirects there
+/root/go-live.sh platform-info all       # dry run: the name, web and picture Raydium shows; then, with the owner's OK:
+I_HAVE_OWNER_APPROVAL=yes /root/go-live.sh platform-info all --send
+```
+
+`domain` checks that both names point here, gets the certificate with certbot (webroot), writes the hwai.ai site from `deploy/nginx/divvy.conf` and adds the old name as a redirect that still serves `/api/media/` (coins launched before the move have their metadata on chain and their pictures in the database under uspad.fun; the new site's CSP allows those pictures). It moves `WEB_ORIGIN`, `PUBLIC_MEDIA_BASE` and `X_REDIRECT_URI`, reloads the apps and checks `https://hwai.ai/api/health`; anything that fails puts the old Nginx config and env files back (copies in `/root/divvy-before-domain/`). The domain it moved to is kept in `/root/divvy-domain`, which the script's other commands read. Signed-in sessions don't carry over: people sign in again on hwai.ai.
+
 The rest of this file is what the script does and why.
 
 **Two wallets** (owner decision 2026-10-27): the **platform admin** (signs the PlatformConfig and its updates, never read by the apps; 0.02 SOL once) and one **operations wallet** (`/etc/divvy/keys/fee-claimer.json`) that launches coins, claims and sells fees, buys the stocks and sends them. It is also the PlatformConfig's fee wallet and Fee Key wallet. Keep its balance small.
