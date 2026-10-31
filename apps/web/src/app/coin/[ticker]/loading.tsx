@@ -19,14 +19,14 @@ export default function CoinLoading() {
   return (
     <div aria-busy="true">
       <Link className="back" href="/"><Icon name="back" />{tc.backToBoard}</Link>
-      <div className="coin-head">
-        <div className="coin3d"><div className="skel skel-coin" /></div>
+      <div className="chead">
+        <div className="skel skel-coin" />
         <div style={{ minWidth: 0 }}>
           <h1>{label}</h1>
-          <div className="sub">{m.loading}</div>
+          <div className="meta">{m.loading}</div>
         </div>
       </div>
-      <div className="kpis">
+      <div className="panel kpis">
         {KPIS.map((k) => (
           <div key={k}>
             <span>{k}</span>

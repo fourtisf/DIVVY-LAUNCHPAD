@@ -26,7 +26,6 @@ import { useAgo, useLang, useMsgs } from "@/i18n/client";
 import { common } from "@/i18n/msgs/common";
 import { coinMsgs } from "@/i18n/msgs/coin";
 import { Chip } from "../Chip";
-import { CoinFlip3D } from "../Coin3D";
 import { Countdown } from "../Countdown";
 import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
@@ -99,14 +98,17 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
   return (
     <>
       <Link className="back" href="/"><Icon name="back" />{tc.backToBoard}</Link>
-      <div className="coin-head">
-        <CoinFlip3D src={coin.imageUrl} back={s} label={"$" + coin.ticker} title={t.coinTitle(coin.ticker, coin.dividendAsset)} />
+      <div className="chead">
+        <span className="av" title={t.coinTitle(coin.ticker, coin.dividendAsset)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={coin.imageUrl} alt="" width={92} height={92} />
+        </span>
         <div style={{ minWidth: 0 }}>
           <h1>
             {coin.name}
-            <span className="t">${coin.ticker}</span>
+            <small>${coin.ticker}</small>
           </h1>
-          <div className="sub">
+          <div className="meta">
             <span suppressHydrationWarning>{t.createdBy(coin.creator.label, ago(coin.createdAt))}</span>
             <button className="ca" type="button" id="copyCa" title={t.copyCa} onClick={copyCa}>
               <Icon name="copy" />
@@ -122,7 +124,7 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
         </div>
       </div>
 
-      <div className="kpis">
+      <div className="panel kpis">
         <div><span>{t.kpiMcap}</span><b className="up">{usd(coin.marketCapUsd)}</b></div>
         <div><span>{t.kpiChange}</span><b className={coin.change24hPct >= 0 ? "up" : "down"}>{pct(coin.change24hPct)}</b></div>
         <div><span>{t.kpiVolume}</span><b>{usd(coin.volume24hUsd)}</b></div>
@@ -152,7 +154,7 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
             />
             <div className="legend">
               <span>{t.ath(usd(coin.athUsd))}</span>
-              <span><i style={{ background: "var(--teal)" }} />{t.hourlyPayout}</span>
+              <span><i style={{ background: "var(--gold-deep)" }} />{t.hourlyPayout}</span>
             </div>
           </div>
           <div className="panel">
@@ -280,15 +282,15 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
           <div className="panel">
             <h3>{t.whereFee}</h3>
             <div className="split" aria-hidden="true">
-              <i style={{ flex: f.holdersBps, background: "var(--g)" }} />
-              <i style={{ flex: f.creatorBps, background: "var(--teal)" }} />
-              <i style={{ flex: f.divvyBps, background: "var(--lime)" }} />
+              <i style={{ flex: f.holdersBps, background: "var(--red)" }} />
+              <i style={{ flex: f.creatorBps, background: "var(--gold)" }} />
+              <i style={{ flex: f.divvyBps, background: "var(--gold-deep)" }} />
               <i style={{ flex: f.protocolBps, background: "rgba(255,255,255,.14)" }} />
             </div>
             <div className="split-legend">
-              <span><i style={{ background: "var(--g)" }} />{t.buysFor(coin.dividendAsset)}<b>{bpsLabel(f.holdersBps)}</b></span>
-              <span><i style={{ background: "var(--teal)" }} />{t.creator}<b>{bpsLabel(f.creatorBps)}</b></span>
-              <span><i style={{ background: "var(--lime)" }} />{BRAND}<b>{bpsLabel(f.divvyBps)}</b></span>
+              <span><i style={{ background: "var(--red)" }} />{t.buysFor(coin.dividendAsset)}<b>{bpsLabel(f.holdersBps)}</b></span>
+              <span><i style={{ background: "var(--gold)" }} />{t.creator}<b>{bpsLabel(f.creatorBps)}</b></span>
+              <span><i style={{ background: "var(--gold-deep)" }} />{BRAND}<b>{bpsLabel(f.divvyBps)}</b></span>
               <span><i style={{ background: "rgba(255,255,255,.14)" }} />{t.raydiumProtocol}<b>{bpsLabel(f.protocolBps)}</b></span>
             </div>
           </div>
@@ -298,8 +300,8 @@ export function CoinView({ coin: initialCoin, initialMeter, initialPayouts }: { 
               <span className={"status " + meter.status}><i />{statusLabel}</span>
             </div>
             <div className="meter-bar" aria-hidden="true">
-              <i style={{ flex: meter.paid24hUsd / tot, background: "var(--g)" }} />
-              <i style={{ flex: meter.pendingUsd / tot, background: "var(--teal)" }} />
+              <i style={{ flex: meter.paid24hUsd / tot, background: "var(--red)" }} />
+              <i style={{ flex: meter.pendingUsd / tot, background: "var(--gold)" }} />
             </div>
             <div className="kv"><span>{t.paid24h}</span><b>{usd(meter.paid24hUsd)}</b></div>
             <div className="kv"><span>{t.waiting}</span><b suppressHydrationWarning>{usd(meter.pendingUsd)}</b></div>

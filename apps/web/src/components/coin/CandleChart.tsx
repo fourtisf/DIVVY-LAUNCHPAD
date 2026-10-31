@@ -29,7 +29,7 @@ const css = (name: string, fallback: string) => getComputedStyle(document.docume
 type Shown = { o: number; h: number; l: number; c: number; volUsd: number };
 
 /**
- * Candlesticks with volume underneath (TradingView's lightweight-charts), in local time. Teal dots under
+ * Candlesticks with volume underneath (TradingView's lightweight-charts), in local time. Gold dots under
  * the bars mark the hours the coin paid its holders. The legend shows the hovered candle, else the last.
  */
 export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: CandleList | undefined; solUsd: number; payoutHours: number[]; label: string }) {
@@ -50,11 +50,11 @@ export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: 
       if (off || !box.current) return;
       const up = css("--up", "#4ADE80");
       const down = css("--down", "#FF6B81");
-      const faint = css("--faint", "#7F978B");
+      const faint = css("--ink-3", "#9A6F6B");
       chart = lw.createChart(box.current, {
         autoSize: true,
         layout: { background: { type: lw.ColorType.Solid, color: "transparent" }, textColor: faint, fontFamily: "inherit", fontSize: 11 },
-        grid: { vertLines: { color: "rgba(255,255,255,.04)" }, horzLines: { color: "rgba(255,255,255,.04)" } },
+        grid: { vertLines: { color: "rgba(43,3,6,.05)" }, horzLines: { color: "rgba(43,3,6,.07)" } },
         crosshair: { mode: lw.CrosshairMode.Normal },
         rightPriceScale: { borderVisible: false },
         timeScale: {
@@ -108,7 +108,7 @@ export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: 
       .filter((t): t is number => t !== undefined)
       .filter((t, i, all) => all.indexOf(t) === i)
       .sort((x, y) => x - y)
-      .map((t) => ({ time: t as Time, position: "belowBar" as const, shape: "circle" as const, color: css("--teal", "#5EEAD4"), size: 0.6 }));
+      .map((t) => ({ time: t as Time, position: "belowBar" as const, shape: "circle" as const, color: css("--gold-deep", "#B98A1E"), size: 0.6 }));
     a.marks.setMarkers(marks);
     // Fit once per time frame and unit; later refreshes keep where the viewer scrolled to.
     const key = `${candles.tf}:${candles.unit}`;

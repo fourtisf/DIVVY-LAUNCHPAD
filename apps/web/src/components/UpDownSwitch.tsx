@@ -8,11 +8,11 @@ export function UpDownSwitch() {
   const [upDown, setUpDown] = useUpDown();
   const t = useMsgs(common);
   return (
-    <div className="updown-switch" role="group" aria-label={t.upDown}>
+    <div className="ud" role="group" aria-label={t.upDown}>
       <span>{t.upDown}</span>
       <div className="seg">
-        <button type="button" aria-pressed={upDown === "intl"} onClick={() => setUpDown("intl")}>{t.upDownIntl}</button>
         <button type="button" aria-pressed={upDown === "cn"} onClick={() => setUpDown("cn")}>{t.upDownCn}</button>
+        <button type="button" aria-pressed={upDown === "intl"} onClick={() => setUpDown("intl")}>{t.upDownIntl}</button>
       </div>
     </div>
   );

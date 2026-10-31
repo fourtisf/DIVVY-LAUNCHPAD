@@ -11,7 +11,6 @@ import type { Config } from "@divvy/shared";
 import { fetcher } from "@/lib/api";
 import { ConfigProvider } from "@/lib/config";
 import { SessionProvider } from "@/lib/session";
-import { TiltController } from "./Tilt";
 import { ToastProvider } from "./Toasts";
 
 /**
@@ -35,7 +34,6 @@ export function Providers({ config, children }: { config: Config; children: Reac
             <WalletModalProvider>
               <SessionProvider>
                 <ToastProvider>
-                  <TiltController />
                   {children}
                 </ToastProvider>
               </SessionProvider>

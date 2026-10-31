@@ -10,9 +10,10 @@ import os
 import sys
 
 OUT = sys.argv[1]
-BG, TEXT, INK, MUTED, MUTED_INK = "#0A0F0D", "#EAFBF1", "#03140A", "#97ACA2", "#5B7065"
-FOIL = [(0, "#C9FFE0"), (.26, "#86EFAC"), (.52, "#E4FFA6"), (.76, "#7EF2D8"), (1, "#C9FFE0")]
-DEEP_FOIL = [(0, "#14532D"), (.3, "#16A34A"), (.52, "#4ADE80"), (.76, "#15803D"), (1, "#14532D")]
+# Design A (owner, 2026-10-31): red lacquer and gold. TEXT is the wordmark on red, INK on light backgrounds.
+BG, TEXT, INK, MUTED, MUTED_INK = "#A3121C", "#F4C24E", "#2B0306", "#FBE3A1", "#9A6F6B"
+FOIL = [(0, "#FFE8A8"), (.5, "#F4C24E"), (1, "#B98A1E")]  # the gold coin
+DEEP_FOIL = [(0, "#E9B23A"), (.5, "#C8952A"), (1, "#8A6512")]  # deeper gold, for light backgrounds
 W, XH, BASE, ASC, DESC, O = 8.0, 40.0, 80.0, 12.0, 100.0, 1.3
 
 
@@ -178,8 +179,8 @@ def mark(p, mono=None):
     if mono:
         return f'<path d="{body}" fill="{fill}"/>'
     return (f'<path d="{body}" fill="{fill}"/>'
-            f'<circle cx="50" cy="50" r="34.5" fill="none" stroke="{INK}" stroke-opacity=".28" stroke-width="1.8"/>'
-            f'<path d="{square(50, 50, 18)}" fill="none" stroke="{INK}" stroke-opacity=".28" stroke-width="1.8"/>'
+            f'<circle cx="50" cy="50" r="34.5" fill="none" stroke="#5A0A0F" stroke-opacity=".38" stroke-width="1.8"/>'
+            f'<path d="{square(50, 50, 18)}" fill="none" stroke="#5A0A0F" stroke-opacity=".38" stroke-width="1.8"/>'
             f'<circle cx="50" cy="50" r="40.6" fill="none" stroke="#FFFFFF" stroke-opacity=".45" stroke-width="1.1"/>'
             f'<path d="{body}" fill="url(#{p}-sheen)"/>')
 
@@ -217,7 +218,7 @@ def word_only(text, light, p):
 
 
 def app_icon(p):
-    defs = foil_defs(p) + f'<radialGradient id="{p}-bg" cx=".5" cy=".38" r=".75"><stop offset="0" stop-color="#14301F"/><stop offset="1" stop-color="{BG}"/></radialGradient>'
+    defs = foil_defs(p) + f'<radialGradient id="{p}-bg" cx=".5" cy=".38" r=".75"><stop offset="0" stop-color="#D62532"/><stop offset="1" stop-color="#7A0C14"/></radialGradient>'
     return svg(512, 512, f'<rect width="512" height="512" rx="112" fill="url(#{p}-bg)"/><g transform="translate(96 96) scale(3.2)">{mark(p)}</g>', defs, 512, 512)
 
 

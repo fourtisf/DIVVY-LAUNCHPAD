@@ -1,135 +1,286 @@
 /*
- * Styles the prototype didn't need. Built only from its tokens.
- * - Meter states for carried / late rounds (HANDOFF §3.3: "carried to next round"; red when late).
- * - The Solana wallet-adapter modal, re-skinned to match the prototype's modal.
+ * Design A for the parts of the app the prototype (prototype/hwai-a-prototype.html) doesn't draw, and the
+ * app's own class names mapped onto the prototype's look. Built only from globals.css's tokens.
  */
-.status.carried{background:rgba(94,234,212,.12);color:var(--teal)}
-.status.late{background:var(--red-soft);color:var(--red)}
-.status.late i{box-shadow:0 0 0 3px rgba(255,107,129,.2)}
 
-.wallet-adapter-modal-wrapper{background:var(--s1)!important;border:1px solid var(--hair2);border-radius:26px!important;box-shadow:0 40px 80px -30px rgba(0,0,0,.9),0 0 0 1px rgba(74,222,128,.05)!important;font-family:var(--ui)!important}
-.wallet-adapter-modal-overlay{background:rgba(3,8,6,.72)!important;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
-.wallet-adapter-modal-title{font-family:var(--display)!important;font-weight:600!important;letter-spacing:-.035em;color:var(--text)!important}
-.wallet-adapter-modal-button-close{background:rgba(255,255,255,.04)!important}
-.wallet-adapter-modal-list .wallet-adapter-button{font-family:var(--ui)!important;font-weight:700!important;border-radius:12px!important;color:var(--text)!important}
-.wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover{background:var(--g-soft)!important}
-.wallet-adapter-modal-list-more{font-family:var(--ui)!important;color:var(--muted)!important}
-.wallet-adapter-modal-middle-button{background:var(--g)!important;color:var(--g-ink)!important;font-family:var(--ui)!important}
+/* ---------- tokens the app adds ---------- */
+/* Up/down colours (footer switch, src/i18n): "cn", the default, is red up like the prototype; "intl" is green up. */
+:root[data-updown="intl"]{--up:#1E7A55;--down:#D11F2D;--up-soft:#DDF1E7;--down-soft:#FDE1DF}
+.down{color:var(--down)}
+.chg.down{background:var(--down-soft);color:var(--down)}
+.muted{color:var(--ink-2)}
+.faint{color:var(--ink-3)}
+.link{color:var(--red);font-weight:700}
+.link:hover{text-decoration:underline}
+button.link{border:0;background:none;padding:0;font:inherit;cursor:pointer}
+.r{text-align:right}
+/* English headlines use the condensed numeral face; Han headlines keep the poster face. */
+:lang(en) :is(.hero h1,.sec-h h2,.page-h,.chead h1,.create-head h1,.modal h2,.poster){font-family:var(--num);font-weight:800;letter-spacing:-.01em}
+:lang(en) .hero h1{font-size:clamp(46px,6.4vw,88px);line-height:.98}
 
-/* Trade box: max slippage (live mode only; the prototype has no such row). */
+/* ---------- buttons ---------- */
+/* .btn-g is the app's primary button: gold on the red page, red on cream panels (as the prototype draws them). */
+.btn-g{background:linear-gradient(180deg,var(--gold-hi),var(--gold));color:var(--ink);box-shadow:0 4px 0 var(--gold-deep),0 10px 22px -10px rgba(0,0,0,.6)}
+.btn-g:active{box-shadow:0 2px 0 var(--gold-deep)}
+:is(.panel,.fsec,.modal,.foil-card,.terms) .btn-g{background:var(--red);color:var(--cream);box-shadow:0 4px 0 var(--red-deep)}
+.btn-buy{background:var(--up);color:#fff;box-shadow:0 4px 0 rgba(0,0,0,.25)}
+.btn-sell{background:var(--down);color:#fff;box-shadow:0 4px 0 rgba(0,0,0,.25)}
+:is(.panel,.fsec,.modal,.foil-card,.terms) .btn-ghost{color:var(--ink);border-color:var(--cream-line)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;transform:none}
+.btn-lg{width:auto}
+.panel .btn-lg,.fsec .btn-lg{width:100%}
+
+/* ---------- header extras ---------- */
+.search .ico{position:absolute;left:13px;top:12px;color:var(--gold-soft);display:flex}
+.search kbd{position:absolute;right:10px;top:9px;font-family:var(--zh);font-size:12px;color:rgba(251,227,161,.7);border:1px solid rgba(244,194,78,.35);border-radius:6px;padding:1px 7px}
+.wallet-av{width:20px;height:20px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE6A3,#E9B23A 60%,#B98A1E)}
+.lbl-short{display:none}
+@media (max-width:760px){
+  .search kbd,#connectBtn .lbl-long{display:none}
+  #connectBtn .lbl-short{display:inline}
+}
+
+/* ---------- strip, chips and pills ---------- */
+.ev img{width:20px;height:20px;border-radius:6px}
+.chip-stock{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;font:700 10px/1 var(--num);flex:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.35)}
+.chip-stock.m3{font-size:8px}
+.chip-logo{position:relative;overflow:hidden;background:#fff}
+.chip-logo img{width:100%;height:100%;display:block;object-fit:cover}
+.chip-logo::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.35)}
+.tag,.eyecatch,.ca{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;border:1px solid rgba(244,194,78,.4);background:rgba(43,3,6,.28);color:var(--gold-soft);font-size:13px;font-weight:500;white-space:nowrap}
+.eyecatch b,.ca-pill b{color:var(--gold);font-weight:700}
+.eyecatch .dot{display:grid;place-items:center;color:var(--gold)}
+button.ca,button.ca-pill,a.x-pill,.tag.report{cursor:pointer;font:inherit;font-size:13px}
+button.ca:hover,button.ca-pill:hover,a.x-pill:hover,.tag.report:hover{border-color:var(--gold);color:var(--cream)}
+.x-pill svg{flex:none}
+
+/* ---------- panels in the app ---------- */
+/* App panels hold their content directly, so they pad themselves; the prototype's structured panels keep their own. */
+.panel{padding:18px}
+.panel.board{padding:14px 18px 6px}
+.panel.kpis,.panel.tiles,.panel.divcard{padding:0}
+.panel.ticket{padding:14px 16px}
+.panel h3{margin:0 0 12px;font-size:17px;font-weight:900;line-height:1.25}
+.panel-h{padding:0;margin-bottom:12px}
+.panel-h h3{margin:0}
+.stack>*+*{margin-top:16px}
+.legend{padding:0;margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.panel .tabs{margin:-18px -18px 4px;padding:0 18px}
+.empty{grid-column:1/-1}
+
+/* ---------- board card (CoinCard: the ticker list page and the create preview) ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:40px}
+.lcard .badge{margin-left:auto}
+.lcard .stat{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+.lcard .stat b{font:800 32px/1 var(--num);color:var(--ink)}
+.lcard .stat span{font-size:12.5px;color:var(--ink-3);text-align:right}
+
+/* ---------- coin page ---------- */
+.chead .av img{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block}
+.coin-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;align-items:start;margin-bottom:30px}
+.chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap}
+.tf{display:inline-flex;background:var(--cream-2);border-radius:11px;padding:3px;gap:2px;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.tf::-webkit-scrollbar{display:none}
+.tf button{flex:none;border:0;background:transparent;color:var(--ink-2);height:30px;padding:0 11px;border-radius:8px;font-weight:700;font-size:13px}
+.tf button[aria-pressed="true"]{background:var(--red);color:var(--cream)}
+.cchart-legend{display:flex;flex-wrap:wrap;gap:4px 14px;min-height:20px;margin-bottom:6px;font-size:12.5px;color:var(--ink-3)}
+.cchart-legend b{color:var(--ink);font-family:var(--num);font-size:14px}
+.cchart-plot{height:340px}
+@media (max-width:640px){.cchart-plot{height:260px}}
+table.t{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
+table.t th{text-align:left;font-weight:700;color:var(--ink-3);font-size:12.5px;padding:12px 10px 9px;white-space:nowrap}
+table.t td{padding:10px;border-top:1px solid var(--cream-line)}
+table.t tbody tr:hover{background:#fff}
+table.t .r{text-align:right}
+.tx{color:var(--red);font-weight:700}
+.side-buy{color:var(--up);font-weight:700}.side-sell{color:var(--down);font-weight:700}
+.table-scroll{overflow-x:auto}
+/* trade box */
+.field>span{display:flex;justify-content:space-between;gap:10px}
+.input{display:flex;align-items:center;gap:10px;border:1.5px solid var(--cream-line);background:#fff;border-radius:12px;padding:0 12px;height:58px}
+.input:focus-within{border-color:var(--red)}
+.input input{flex:1;width:100%;min-width:0;border:0;outline:0;background:transparent;font:700 28px var(--num);color:var(--ink)}
+.input .unit{display:inline-flex;align-items:center;gap:6px;font-weight:900;background:var(--cream-2);border-radius:999px;padding:5px 10px 5px 5px;white-space:nowrap}
+.quick{display:flex;gap:6px}
+.quick button{flex:1}
+.quick button[aria-pressed="true"]{border-color:var(--red);color:var(--red)}
 .kv .slip{background:transparent;border:0;color:inherit;font:inherit;font-weight:inherit;text-align:right;cursor:pointer;padding:0}
-.kv .slip:focus-visible{outline:2px solid var(--g);outline-offset:2px;border-radius:4px}
-.kv .slip option{background:var(--s1,#0F1714);color:var(--text,#E6F2EC)}
+.kv .slip option{background:var(--cream);color:var(--ink)}
+.bar-row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-3);margin:14px 0 6px}
+/* the dividend card: an envelope with its flap open */
+.foil-card{background:var(--cream);color:var(--ink);border-radius:var(--r);overflow:hidden;box-shadow:0 22px 40px -26px rgba(0,0,0,.75)}
+.foil-top{position:relative;background:linear-gradient(170deg,#D62532,#9E101A);color:var(--cream);padding:16px 18px;display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center}
+.foil-top .chip-stock{width:48px;height:48px;font-size:16px;box-shadow:0 0 0 3px var(--gold),0 8px 16px -8px rgba(0,0,0,.6)}
+.foil-top .chip-stock.m3{font-size:13px}
+.foil-top small{display:block;font-size:12px;color:rgba(255,244,226,.8)}
+.foil-top strong{display:block;font:800 26px/1 var(--num);color:var(--cream)}
+.foil-top .cd{text-align:right}
+.foil-top .cd b{display:block;font:800 30px/1 var(--num);color:var(--gold)}
+.foil-body{padding:16px 18px 18px;border-top:2px dashed var(--gold)}
+.paid-row{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+.paid-row b{font:800 30px/1 var(--num)}
+.calc{background:var(--cream-2);border-radius:12px;padding:14px 16px;margin-top:16px}
+.calc label{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-2)}
+.calc label b{color:var(--ink)}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:99px;background:linear-gradient(90deg,var(--gold-deep) var(--p,20%),var(--cream-line) var(--p,20%));margin:14px 0 12px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE6A3,#E9B23A 60%,#B98A1E);box-shadow:0 2px 0 var(--gold-deep);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:50%;background:var(--gold);cursor:pointer}
+.calc .out{font-size:14px;color:var(--ink-2)}
+.calc .out b{color:var(--up);font-weight:700}
+.split{display:flex;height:10px;border-radius:99px;overflow:hidden;margin:2px 0 14px;gap:3px}
+.split i{display:block;height:100%;border-radius:3px}
+.split-legend{display:grid;gap:9px;font-size:13.5px;color:var(--ink-2)}
+.split-legend span{display:grid;grid-template-columns:10px 1fr auto;gap:10px;align-items:center}
+.split-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.split-legend b{color:var(--ink);font-weight:700}
+.meter-bar{display:flex;height:12px;border-radius:99px;overflow:hidden;background:var(--cream-2);gap:3px;margin:6px 0 12px}
+.meter-bar i{display:block;height:100%;border-radius:3px}
+.status{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;border-radius:999px;padding:4px 10px}
+.status.ok{background:var(--down-soft);color:#1E7A55}
+.status.carried{background:var(--cream-2);color:var(--gold-deep)}
+.status.late{background:#FDE1DF;color:#D11F2D}
+.status i{width:7px;height:7px;border-radius:50%;background:currentColor}
 
-/* /me and /admin (not in the prototype; built from its panels, tables and buttons). */
+/* ---------- create ---------- */
+.create-head{margin:4px 0 22px}
+.create-head h1{font-family:var(--poster);font-weight:400;font-size:clamp(40px,6vw,64px);line-height:1.05;margin:0 0 8px;letter-spacing:.03em}
+.create-head p{color:rgba(255,244,226,.85);margin:0;max-width:44em;line-height:1.75}
+.create-grid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start;margin-bottom:30px}
+.fsec{background:var(--cream);color:var(--ink);border-radius:var(--r);box-shadow:0 22px 40px -26px rgba(0,0,0,.75)}
+.fsec-h .n{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE6A3,#E9B23A 60%,#B98A1E);font:800 18px var(--num);color:var(--ink);flex:none;box-shadow:0 3px 0 var(--gold-deep)}
+.fsec-h h2{margin:0;font-size:18px;font-weight:900;line-height:1.2}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.fld{margin-bottom:12px}
+.fld:last-child{margin-bottom:0}
+.lbl{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:700;color:var(--ink-2);margin-bottom:6px}
+.lbl em{font-style:normal;font-weight:500;color:var(--ink-3)}
+.tinput{width:100%;height:46px;border:1.5px solid var(--cream-line);background:#fff;border-radius:11px;padding:0 13px;outline:none;color:var(--ink)}
+textarea.tinput{height:84px;padding:11px 13px;resize:vertical}
+.tinput::placeholder{color:var(--ink-3)}
+.tinput:focus{border-color:var(--red)}
+.tinput.bad{border-color:#D11F2D;background:#FFF6F5}
+.drop{cursor:pointer}
+.drop:hover,.drop.over{border-color:var(--red)}
+.drop img,.drop .ph{width:56px;height:56px;border-radius:14px;object-fit:cover;background:var(--cream-2);flex:none;display:grid;place-items:center;color:var(--red)}
+.drop p{margin:0;font-weight:700}
+.drop p small{display:block;color:var(--ink-3);font-weight:500;margin-top:2px}
+.stock-opt{display:flex;align-items:center;gap:9px;border:1.5px solid var(--cream-line);background:#fff;border-radius:12px;padding:10px;text-align:left;color:var(--ink)}
+.stock-opt .chip-stock{width:32px;height:32px;font-size:12px}
+.stock-opt .chip-stock.m3{font-size:10px}
+.stock-opt b{display:block;font-size:14px}
+.stock-opt span{display:flex;justify-content:space-between;gap:6px;font-size:12px;color:var(--ink-3)}
+.stock-opt>div,.stock-opt>span:last-child{min-width:0;flex:1}
+.stock-opt[aria-checked="true"]{border-color:var(--red);box-shadow:0 0 0 2px rgba(163,18,28,.15)}
+.sumline{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed var(--cream-line);font-size:14px;color:var(--ink-2)}
+.sumline:first-of-type{border-top:0}
+.sumline b{color:var(--ink);font-weight:700;text-align:right}
+ul.checks{list-style:none;margin:0;padding:0}
+ul.checks li{display:grid;grid-template-columns:24px 1fr;gap:10px;padding:9px 0;border-top:1px dashed var(--cream-line);font-size:14px}
+ul.checks li:first-child{border-top:0;padding-top:2px}
+ul.checks li small{display:block;color:var(--ink-3);font-size:12.5px}
+.ck{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--cream-2);color:var(--ink-3)}
+.ck.ok{background:#1E7A55;color:#fff}
+.ck.fail{background:#D11F2D;color:#fff}
+
+/* ---------- payouts, how, terms, me, admin ---------- */
+.tiles{background:var(--cream);color:var(--ink);border-radius:var(--r);box-shadow:0 22px 40px -26px rgba(0,0,0,.75)}
+ol.steps{list-style:none;margin:0 0 24px;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+ol.steps li{background:var(--cream);color:var(--ink);border-radius:var(--r);padding:18px;position:relative;overflow:hidden;box-shadow:0 22px 40px -26px rgba(0,0,0,.75)}
+ol.steps li::before{content:"";position:absolute;inset:0 0 auto;height:6px;background:linear-gradient(90deg,var(--red),var(--gold),var(--red))}
+ol.steps .n{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE6A3,#E9B23A 60%,#B98A1E);font:800 18px var(--num);color:var(--ink);box-shadow:0 3px 0 var(--gold-deep);margin-bottom:10px}
+ol.steps h3{margin:0 0 6px;font-size:18px;font-weight:900}
+ol.steps p{margin:0;color:var(--ink-2);font-size:14px;line-height:1.75}
+.how-fees{background:var(--cream);color:var(--ink);border-radius:var(--r);padding:6px 18px 12px;margin:0 0 24px;overflow-x:auto;box-shadow:0 22px 40px -26px rgba(0,0,0,.75)}
+.how-fees td b{color:var(--red)}
+.fine{color:rgba(255,244,226,.8);font-size:13.5px;max-width:74ch;margin-bottom:28px}
+.fine p{margin:0 0 8px}
+.terms{background:var(--cream);color:var(--ink);border-radius:var(--r);padding:22px 24px;max-width:800px;margin-bottom:40px;box-shadow:0 22px 40px -26px rgba(0,0,0,.75)}
+.terms h3{margin:22px 0 8px;font-size:18px;font-weight:900}
+.terms h3:first-of-type{margin-top:4px}
+.terms p{color:var(--ink-2);line-height:1.75}
+.terms-draft{color:var(--gold-soft)}
+.terms .terms-draft{color:var(--red)}
 .me-actions{display:flex;gap:10px;flex-wrap:wrap;margin:-6px 0 22px}
-.me-warn{color:var(--red);margin:-8px 0 18px}
+.me-warn{color:var(--gold-hi);margin:-8px 0 18px}
 .admin-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .admin-row .tinput{flex:1;min-width:220px}
 .admin-acts{white-space:nowrap}
-.admin-acts .btn{padding:6px 10px;font-size:13px;margin-left:6px}
+.admin-acts .btn{height:32px;padding:0 10px;font-size:13px;margin-left:6px}
 
-/* /terms */
-.terms{max-width:760px;margin-bottom:80px}
-.terms h3{margin:26px 0 8px}
-.terms p{color:var(--muted);line-height:1.6}
-.terms-draft{color:var(--lime)}
-.foot a{color:inherit;text-decoration:underline;text-underline-offset:2px}
-
-/* Coin page: report a coin (moderation queue). */
-.tag.report{cursor:pointer;font:inherit;font-size:13px}
-.tag.report:hover{color:var(--red);border-color:var(--red-soft)}
+/* ---------- modals, toasts, wallet picker ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(40,2,6,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:90;padding:20px}
+.modal-bg.on{display:flex}
+.modal{background:var(--cream);color:var(--ink);border-radius:22px;width:min(460px,100%);max-height:calc(100vh - 40px);overflow:auto;box-shadow:0 40px 80px -30px rgba(0,0,0,.9),inset 0 0 0 2px rgba(244,194,78,.5);animation:pop .22s ease-out}
+@keyframes pop{from{opacity:0;transform:translateY(10px) scale(.98)}}
+.modal .mcoin{height:150px;display:grid;place-items:center;background:linear-gradient(170deg,#DE2A37,#8C0D17);position:relative}
+.modal .mcoin img{width:92px;height:92px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 5px var(--gold),0 16px 30px -12px rgba(0,0,0,.6)}
+.modal .in{padding:18px 24px 24px}
+.modal h2{font-family:var(--poster);font-weight:400;font-size:30px;margin:0 0 6px;line-height:1.1;letter-spacing:.03em}
+.modal p{color:var(--ink-2);margin:0 0 14px}
+ul.prog{list-style:none;margin:0;padding:0}
+ul.prog li{display:grid;grid-template-columns:26px 1fr;gap:12px;align-items:center;padding:8px 0;color:var(--ink-3)}
+ul.prog li.done,ul.prog li.now{color:var(--ink)}
+ul.prog .ck{width:26px;height:26px}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--red);border-right-color:transparent;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:18px}
+.modal-actions .btn-lg{grid-column:1/-1}
+.modal-actions .btn-ghost{color:var(--ink);border-color:var(--cream-line)}
+.mint-copy{display:inline-flex;align-items:center;gap:6px;border:0;background:none;color:inherit;font:inherit;padding:0;cursor:pointer}
+.mint-copy:hover{color:var(--red)}
 .report-modal .in{padding:24px}
 .report-reasons{display:grid;gap:8px;margin:14px 0}
-.report-reason{display:flex;gap:10px;align-items:center;color:var(--muted);cursor:pointer}
-.report-reason input{accent-color:var(--g)}
+.report-reason{display:flex;gap:10px;align-items:center;color:var(--ink-2);cursor:pointer}
+.report-reason input{accent-color:var(--red)}
 .report-modal textarea{width:100%;resize:vertical;min-height:72px}
 .report-acts{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+.report-acts .btn-ghost{color:var(--ink);border-color:var(--cream-line)}
+.toasts{position:fixed;bottom:calc(24px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);z-index:95;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{display:flex;align-items:center;gap:10px;background:var(--cream);color:var(--ink);border-radius:12px;padding:11px 16px;font-size:14px;font-weight:700;box-shadow:0 16px 40px -16px rgba(0,0,0,.8),inset 0 0 0 1.5px var(--gold);animation:pop .2s ease-out}
+.toast i{width:8px;height:8px;border-radius:50%;background:var(--red)}
+@media (max-width:760px){.toasts{bottom:calc(92px + env(safe-area-inset-bottom,0px))}}
+.wallet-adapter-modal-wrapper{background:var(--cream)!important;color:var(--ink)!important;border-radius:22px!important;box-shadow:0 40px 80px -30px rgba(0,0,0,.9),inset 0 0 0 2px rgba(244,194,78,.5)!important}
+.wallet-adapter-modal-overlay{background:rgba(40,2,6,.72)!important;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.wallet-adapter-modal-title{font-family:var(--zh)!important;font-weight:900!important;color:var(--ink)!important}
+.wallet-adapter-modal-button-close{background:var(--cream-2)!important}
+.wallet-adapter-modal-button-close svg{fill:var(--ink-2)!important}
+.wallet-adapter-modal-list .wallet-adapter-button{font-family:var(--zh)!important;font-weight:700!important;border-radius:12px!important;color:var(--ink)!important}
+.wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover{background:#fff!important}
+.wallet-adapter-modal-list-more{font-family:var(--zh)!important;color:var(--ink-2)!important}
+.wallet-adapter-modal-list-more svg{fill:var(--ink-2)!important}
+.wallet-adapter-modal-middle-button{background:var(--red)!important;color:var(--cream)!important;font-family:var(--zh)!important}
 
-/* hwai lockup in the header (replaces the prototype's foil mark and "divvy" text). */
-.logo-lockup{display:block;height:36px;width:auto}
-@media (max-width:760px){.logo-lockup{height:32px}}
-
-/* Hero badges: the payout badge and the token's contract address side by side. */
-.hero-chips{display:flex;flex-wrap:wrap;gap:8px 10px;margin-bottom:22px}
-.hero-chips .eyecatch{margin-bottom:0}
-.ca-pill{gap:5px;padding:0 12px;color:var(--text);font-family:inherit;cursor:default}
-.ca-pill b{color:var(--g-hi);font-weight:600}
-button.ca-pill{cursor:pointer}
-button.ca-pill:hover{border-color:var(--hair3)}
-
-/* Stock chips with the token's own icon (lib/logos.ts); the ring sits on top of the picture. */
-.chip-logo{position:relative;overflow:hidden;background:#0A0F0D}
-.chip-logo img{width:100%;height:100%;display:block;object-fit:cover}
-.chip-logo::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.28)}
-
-/* How it works: the fee table, in the same card as the steps. */
-.how-fees{background:var(--s1);border:1px solid var(--hair);border-radius:var(--r-xl);padding:4px 14px 6px;box-shadow:var(--lift);margin:0 0 36px;overflow-x:auto}
-.how-fees td b{color:var(--g-hi);font-weight:600}
-@media (max-width:760px){.how-fees{padding:2px 6px 4px}.how-fees table.t{font-size:13px}}
-
-/* Hero: follow hwai on X, next to the CA badge (components/XFollow.tsx). */
-a.x-pill{text-decoration:none;cursor:pointer}
-a.x-pill:hover{border-color:var(--hair3);color:var(--text)}
-.x-pill svg{flex:none;opacity:.9}
-
-/* Coin page candlestick chart (owner request 2026-10-27; lightweight-charts, CandleChart.tsx). */
-.cchart-legend{display:flex;flex-wrap:wrap;gap:4px 14px;min-height:20px;margin-bottom:6px;font-size:12.5px;color:var(--faint)}
-.cchart-legend b{color:var(--text);font-weight:600}
-.cchart-plot{height:340px}
-@media (max-width:640px){.cchart-plot{height:260px}}
-
-/* Launch modal, once the coin is live (LaunchModal.tsx). */
-.modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:18px}
-.modal-actions .btn-lg{grid-column:1 / -1}
-.modal-actions .btn{justify-content:center;text-align:center}
-.mint-copy{display:inline-flex;align-items:center;gap:6px;border:0;background:none;color:inherit;font:inherit;padding:0;cursor:pointer}
-.mint-copy:hover{color:var(--g-hi)}
-
-/* Coin page while it loads (app/coin/[ticker]/loading.tsx). */
-.skel{display:block;border-radius:10px;background:rgba(255,255,255,.05);animation:skel 1.2s ease-in-out infinite}
-.skel-coin{width:110px;height:110px;margin:20px;border-radius:50%}
+/* ---------- loading skeleton (app/coin/[ticker]/loading.tsx) ---------- */
+.skel{display:block;border-radius:10px;background:rgba(255,244,226,.14);animation:skel 1.2s ease-in-out infinite}
+.panel .skel{background:var(--cream-2)}
+.skel-coin{width:92px;height:92px;border-radius:24px}
 b.skel-line{width:70%;height:24px;margin-top:4px}
-.skel-panel{height:340px;border-radius:var(--r-lg);border:1px solid var(--hair)}
+.skel-panel{height:340px;border-radius:var(--r)}
 @keyframes skel{50%{opacity:.45}}
-@media (prefers-reduced-motion:reduce){.skel{animation:none}}
 
-/* A button that reads as a link (TradeBox's "I checked it"). */
-button.link{border:0;background:none;padding:0;font:inherit;cursor:pointer}
+/* ---------- footer extras ---------- */
+footer.foot .ud span{white-space:nowrap}
 
-/* The creator's dev buy on a board card (owner decision 2026-10-28): quiet, like the graduated badge. */
-.badge-dev{background:rgba(255,255,255,.07);color:var(--muted)}
-/* The dev buy's quick pick that matches the amount (create form). */
-.quick button[aria-pressed="true"]{color:var(--g-hi);border-color:var(--hair3)}
-
-/* ---------- Chinese and English (owner, 2026-10-31; src/i18n) ---------- */
-/* Han characters fall through the prototype's Latin faces to Noto Sans SC. */
-:root{
-  --display:"Clash Display","Plus Jakarta Sans","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
-  --ui:"Satoshi","Plus Jakarta Sans","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+/* ---------- tablets and phones ---------- */
+@media (max-width:1060px){
+  .coin-grid,.create-grid{grid-template-columns:minmax(0,1fr)}
+  ol.steps{grid-template-columns:1fr 1fr}
 }
-/* Han type doesn't take the negative tracking the Latin display face uses, and needs more leading. */
-:lang(zh) :is(.hero h1,.sec-h h2,.page-h,.create-head h1,.coin-head h1,.leader-name,.modal h2,.how-step h3){letter-spacing:.01em}
-:lang(zh) .hero h1{font-weight:900;line-height:1.12}
-:lang(zh) .hero p.lede{line-height:1.75;max-width:30em}
-:lang(zh) :is(nav.links a,.seg button,.tabbar a){letter-spacing:.04em}
-
-.lang-switch{display:inline-flex;align-items:center;height:42px;border-radius:12px;border:1px solid var(--hair2);background:rgba(255,255,255,.03);padding:3px;gap:2px;flex:none}
-.lang-switch button{border:0;background:transparent;color:var(--faint);height:34px;min-width:34px;padding:0 9px;border-radius:9px;font-weight:700;font-size:13.5px;transition:color .15s,background .15s}
-.lang-switch button:hover{color:var(--text)}
-.lang-switch button[aria-pressed="true"]{background:var(--g-soft);color:var(--g-hi)}
-/* Phones: one button that names the other language, so the search box keeps its room. */
 @media (max-width:760px){
-  .lang-switch{height:38px;padding:0}
-  .lang-switch button{height:36px;min-width:38px;padding:0 9px;font-size:13px;color:var(--muted)}
-  .lang-switch button[aria-pressed="true"]{display:none}
+  .form-row{grid-template-columns:1fr}
+  ol.steps{grid-template-columns:1fr}
+  .foil-top{grid-template-columns:auto 1fr}
+  .foil-top .cd{grid-column:1/-1;text-align:left;display:flex;align-items:baseline;gap:10px}
+  .grid{grid-template-columns:1fr}
 }
 
-/* Up/down colours (footer switch). "cn" shows gains in red like Chinese stock apps. */
-:root{--up:var(--g);--down:var(--red);--up-soft:var(--g-soft);--down-soft:var(--red-soft)}
-:root[data-updown="cn"]{--up:var(--red);--down:var(--g);--up-soft:var(--red-soft);--down-soft:var(--g-soft)}
-.up{color:var(--up)} .down{color:var(--down)}
-.chg.up{background:var(--up-soft)} .chg.down{background:var(--down-soft)}
-.updown-switch{display:flex;align-items:center;gap:10px;flex-basis:100%}
-.updown-switch .seg{padding:2px}
-.updown-switch .seg button{height:28px;padding:0 11px;font-size:12.5px}
+/* Graduated keeps its green whichever way the up/down colours point. */
+.badge.grad{background:#DDF1E7;color:#1E7A55}
+img.av{display:block;background:var(--cream-2)}
+/* The header search's icon sits in its own span here (the prototype puts the svg straight in the label). */
+.search .ico svg{position:static}
+/* Short pages keep the footer at the bottom of the window. */
+body{min-height:100vh;display:flex;flex-direction:column}
+main#app{flex:1 0 auto;width:100%}

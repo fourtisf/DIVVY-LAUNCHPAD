@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { defineMsgs } from "../lang";
 
-/** The board: hero, stats, leaders, coin grid, cards and their coupons (components/board, CoinCard, Coupon). */
+/** The board: hero, stats, leaders, coin grid, coin table and envelope cards (components/board, CoinCard). */
 export const board = defineMsgs(
   {
     paidThisHour: (usd: string) => `Holders paid ${usd} in stocks this hour`,
+    untilNext: "until the next payout",
     h1: (
       <>
-        Memecoins that pay you <span className="glow">real stock dividends.</span>
+        Memecoins that pay you <em>real stock dividends.</em>
       </>
     ),
     lede: (paidLaunch: boolean, tail: string) => `Launch a coin${paidLaunch ? " in seconds" : " for free"}. Every trade buys the stock you picked, like NVDAx or SPYx, ${tail}`,
@@ -28,6 +29,16 @@ export const board = defineMsgs(
     leadersP: "Ranked by what holders were paid in the last 24 hours.",
     leaderTick: (ticker: string, mcap: string) => `$${ticker}, ${mcap} market cap`,
     paidToday: "paid today",
+    leaderTotal: (paid: string, holders: string) => `${paid} paid · ${holders} holders`,
+    colCoin: "Coin",
+    colMcap: "Market cap",
+    col24h: "24h",
+    colCurve: "Bonding curve",
+    colPays: "Pays in",
+    colPaid: "Paid out",
+    colHolders: "Holders",
+    colAge: "Age",
+    ageShort: (ago: string) => ago.replace(/ ago$/, ""),
     allCoins: "All coins",
     sort: "Sort",
     sorts: { trending: "Trending", new: "New", payers: "Top payers", graduate: "About to graduate" },
@@ -50,12 +61,13 @@ export const board = defineMsgs(
     holders: "holders",
   },
   {
-    paidThisHour: (usd: string) => `本小时持有人已领 ${usd} 美股分红`,
+    paidThisHour: (usd: string) => `本小时已发 ${usd} 美股红包`,
+    untilNext: "距离下一个红包",
     h1: (
       <>
         土狗也分红，
         <br />
-        <span className="glow">分的是美股。</span>
+        <em>分的是美股。</em>
       </>
     ),
     lede: (paidLaunch: boolean, tail: string) => `${paidLaunch ? "几秒钟就能发币。" : "免费发币。"}每一笔交易都会买入你选的股票代币，比如 NVDAx、SPYx，${tail}`,
@@ -76,6 +88,16 @@ export const board = defineMsgs(
     leadersP: "按过去 24 小时持有人所得排名。",
     leaderTick: (ticker: string, mcap: string) => `$${ticker}，市值 ${mcap}`,
     paidToday: "今日已分",
+    leaderTotal: (paid: string, holders: string) => `累计 ${paid} · ${holders} 人`,
+    colCoin: "代币",
+    colMcap: "市值",
+    col24h: "24h",
+    colCurve: "内盘进度",
+    colPays: "分红资产",
+    colPaid: "已分红",
+    colHolders: "持有人",
+    colAge: "上线",
+    ageShort: (ago: string) => ago.replace(/前$/, ""),
     allCoins: "全部代币",
     sort: "排序",
     sorts: { trending: "热门", new: "最新", payers: "分红最多", graduate: "即将毕业" },

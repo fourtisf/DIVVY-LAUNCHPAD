@@ -1,7 +1,6 @@
-import { BRAND } from "../../lib/brand";
 import { defineMsgs } from "../lang";
 
-/** The hero's pills (XFollow, TelegramJoin, TokenCa) and the 3D stage's label (Coin3D). */
+/** The hero's pills (XFollow, TelegramJoin, TokenCa). */
 export const hero = defineMsgs(
   {
     follow: "Follow",
@@ -11,7 +10,6 @@ export const hero = defineMsgs(
     caSoon: "coming soon",
     caCopied: "Contract address copied",
     copyCa: (ca: string) => `Copy contract address ${ca}`,
-    stage: `A 3D ${BRAND} coin with stock tokens orbiting around it`,
   },
   {
     follow: "关注",
@@ -21,6 +19,5 @@ export const hero = defineMsgs(
     caSoon: "即将公布",
     caCopied: "合约地址已复制",
     copyCa: (ca: string) => `复制合约地址 ${ca}`,
-    stage: `一枚 3D 的 ${BRAND} 硬币，股票代币围着它转`,
   },
 );

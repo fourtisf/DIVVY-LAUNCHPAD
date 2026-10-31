@@ -10,6 +10,7 @@ import { BRAND } from "@/lib/brand";
 import { useLang, useMsgs } from "@/i18n/client";
 import { common } from "@/i18n/msgs/common";
 import { Icon } from "./Icon";
+import { Mark } from "./Mark";
 import { useToast } from "./Toasts";
 
 /** Which nav item a path belongs to (prototype `route` nav map). */
@@ -59,7 +60,7 @@ export function LangSwitch() {
   const [lang, setLang] = useLang();
   const t = useMsgs(common);
   return (
-    <div className="lang-switch" role="group" aria-label={t.language}>
+    <div className="lang" role="group" aria-label={t.language}>
       <button type="button" lang="zh-CN" aria-pressed={lang === "zh"} onClick={() => lang !== "zh" && setLang("zh")}>中</button>
       <button type="button" lang="en" aria-pressed={lang === "en"} onClick={() => lang !== "en" && setLang("en")}>EN</button>
     </div>
@@ -107,9 +108,8 @@ export function Header() {
     <header className="top">
       <div className="wrap">
         <Link className="logo" href="/" aria-label={t.home}>
-          {/* The Koin belah mark and the drawn "hwai" wordmark (brand/hwai). */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="logo-lockup" src="/brand/hwai-lockup.svg" alt={BRAND} width={99} height={36} />
+          <Mark size={30} />
+          {BRAND}
         </Link>
         <nav className="links" aria-label="Main">
           <Link href="/" {...cur("board")}>{t.navBoard}</Link>

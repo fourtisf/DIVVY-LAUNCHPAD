@@ -192,7 +192,7 @@ export function TradeBox({ coin }: { coin: CoinDetail }) {
         </div>
       )}
       <button
-        className={"btn btn-lg " + (!wallet || side === "buy" ? "btn-g" : "btn-red")}
+        className={"btn btn-lg " + (!wallet ? "btn-g" : side === "buy" ? "btn-buy" : "btn-sell")}
         style={{ width: "100%", marginTop: 14 }}
         id="tradeBtn"
         type="button"

@@ -38,25 +38,21 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#0A0F0D" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#7A0C14" };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const [config, stats, lang, upDown] = await Promise.all([sharedApi<Config>("/api/config"), sharedApi<Stats>("/api/stats"), getLang(), getUpDown()]);
   return (
     <html lang={htmlLang(lang)} data-updown={upDown}>
       <head>
-        <link rel="preconnect" href="https://api.fontshare.com" />
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* Design A's faces (prototype/hwai-a-prototype.html). Google splits the Han fonts by unicode-range, so a page only loads the slices it uses. */}
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-        {/* Han characters for the Chinese copy. Google splits it by unicode-range, so a page only loads the slices it uses. */}
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=ZCOOL+QingKe+HuangYou&family=Barlow+Condensed:wght@500;600;700;800&display=swap" rel="stylesheet" />
       </head>
       <body>
+        <div className="bgpat" aria-hidden="true" />
         <LangProvider lang={lang} upDown={upDown}>
           <Providers config={config}>
             <Suspense fallback={null}>

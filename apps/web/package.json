@@ -23,15 +23,13 @@
     "next": "15.5.28",
     "react": "19.2.9",
     "react-dom": "19.2.9",
-    "swr": "^2.5.1",
-    "three": "0.128.0"
+    "swr": "^2.5.1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@types/three": "0.128.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }

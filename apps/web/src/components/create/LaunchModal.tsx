@@ -11,12 +11,11 @@ import {
   type LaunchStep,
 } from "@divvy/shared";
 import { api } from "@/lib/api";
-import { useAssets, useConfig } from "@/lib/config";
+import { useConfig } from "@/lib/config";
 import { useErrorText } from "@/lib/session";
 import { checkCreate, UnsafeTransaction } from "@/lib/txcheck";
 import { useMsgs } from "@/i18n/client";
 import { create } from "@/i18n/msgs/create";
-import { CoinSpin3D } from "../Coin3D";
 import { Icon } from "../Icon";
 import { useToast } from "../Toasts";
 
@@ -60,7 +59,6 @@ export function LaunchModal({
   onDone: (s: LaunchStatus) => void;
   onAnother: () => void;
 }) {
-  const back = useAssets()[pays];
   const config = useConfig();
   const toast = useToast();
   const t = useMsgs(create);
@@ -199,7 +197,10 @@ export function LaunchModal({
       aria-labelledby="modalTitle"
     >
       <div className="modal" id="modalBody">
-        <CoinSpin3D src={img} back={back} label={"$" + ticker} />
+        <div className="mcoin">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={img} alt={"$" + ticker} />
+        </div>
         {live ? (
           <div className="in">
             <h2 id="modalTitle">{t.isLive(ticker)}</h2>

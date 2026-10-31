@@ -1,0 +1,789 @@
+<title>hwai 红包 Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=ZCOOL+QingKe+HuangYou&family=Barlow+Condensed:wght@500;600;700;800&display=swap">
+<style>
+/* Layout: red lacquer page with gold accents; anything you read or operate sits on cream "envelope paper" panels.
+   Display: ZCOOL QingKe HuangYou for Chinese headlines, Barlow Condensed for numbers and the wordmark, Noto Sans SC for text.
+   One deliberate look (always red), so every colour is explicit. */
+:root{
+  color-scheme:dark;
+  --red:#A3121C; --red-hi:#C51D29; --red-deep:#7A0C14; --band:#8A0E17; --lacquer:#3E050A;
+  --gold:#F4C24E; --gold-hi:#FFE08A; --gold-deep:#B98A1E; --gold-soft:#FBE3A1;
+  --cream:#FFF4E2; --cream-2:#F9E8CC; --cream-line:#EBD3AE; --ink:#2B0306; --ink-2:#6B3A3E; --ink-3:#9A6F6B;
+  --up:#D11F2D; --down:#1E7A55; --up-soft:#FDE1DF; --down-soft:#DDF1E7;
+  --zh:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --poster:"ZCOOL QingKe HuangYou","Noto Sans SC",sans-serif;
+  --num:"Barlow Condensed","Noto Sans SC",sans-serif;
+  --r:16px;
+}
+:root.greenup{--up:#1E7A55;--down:#D11F2D;--up-soft:#DDF1E7;--down-soft:#FDE1DF}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--red);color:var(--cream);font-family:var(--zh);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:80;background:var(--red-deep)}
+.bgpat{position:fixed;inset:0;z-index:-1;pointer-events:none;background:
+  radial-gradient(900px 460px at 82% -8%,rgba(255,80,80,.25),transparent 60%),
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cpath d='M4 4h26v26H9V9h16v16H14v-6h6' fill='none' stroke='%23F4C24E' stroke-opacity='.08' stroke-width='1.5'/%3E%3C/svg%3E"),var(--red)}
+a{color:inherit;text-decoration:none}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:6px}
+.wrap{max-width:1220px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.num{font-family:var(--num);font-variant-numeric:tabular-nums}
+.tab{font-variant-numeric:tabular-nums}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.up{color:var(--up)}.dn{color:var(--down)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* header */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:60;background:rgba(122,12,20,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid rgba(244,194,78,.22)}
+.top .wrap{display:flex;align-items:center;gap:18px;height:66px}
+.logo{display:flex;align-items:center;gap:9px;font:800 27px/1 var(--num);color:var(--gold);letter-spacing:.02em;flex:none}
+nav.links{display:flex;gap:4px}
+nav.links a{padding:7px 12px;border-radius:9px;font-weight:700;font-size:15px;color:rgba(255,244,226,.78)}
+nav.links a:hover{color:var(--cream)}
+nav.links a[aria-current="page"]{color:var(--gold);background:rgba(244,194,78,.12)}
+.search{flex:1;max-width:380px;margin-left:auto;position:relative}
+.search input{width:100%;height:40px;border-radius:10px;border:1px solid rgba(244,194,78,.3);background:rgba(43,3,6,.28);padding:0 14px 0 38px;outline:none;color:var(--cream)}
+.search input::placeholder{color:rgba(251,227,161,.6)}
+.search input:focus{border-color:var(--gold)}
+.search svg{position:absolute;left:13px;top:12px;color:var(--gold-soft)}
+.lang{display:inline-flex;border:1px solid rgba(244,194,78,.4);border-radius:10px;padding:3px;gap:2px;flex:none}
+.lang button{border:0;background:transparent;color:rgba(251,227,161,.7);height:32px;min-width:32px;padding:0 8px;border-radius:7px;font-weight:700;font-size:13.5px}
+.lang button[aria-pressed="true"]{background:var(--gold);color:var(--ink)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;padding:0 18px;border-radius:11px;border:0;font-weight:900;font-size:15px;white-space:nowrap;transition:transform .1s,box-shadow .1s,filter .15s}
+.btn:active{transform:translateY(2px)}
+.btn-gold{background:linear-gradient(180deg,var(--gold-hi),var(--gold));color:var(--ink);box-shadow:0 4px 0 var(--gold-deep),0 10px 22px -10px rgba(0,0,0,.6)}
+.btn-gold:active{box-shadow:0 2px 0 var(--gold-deep)}
+.btn-ghost{background:transparent;color:var(--cream);border:1.5px solid rgba(255,244,226,.45)}
+.btn-ghost:hover{border-color:var(--cream)}
+.btn-red{background:var(--red);color:var(--cream);box-shadow:0 4px 0 var(--red-deep)}
+.btn-lg{height:54px;padding:0 26px;font-size:17px;border-radius:14px}
+.btn-block{width:100%}
+.lbl-s{display:none}
+
+/* live strip */
+.strip{background:var(--band);border-bottom:1px solid rgba(244,194,78,.2);overflow:hidden;height:38px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent)}
+.strip-track{display:flex;gap:34px;align-items:center;height:38px;white-space:nowrap;width:max-content;animation:marq 70s linear infinite}
+.strip:hover .strip-track{animation-play-state:paused}
+@keyframes marq{to{transform:translateX(-50%)}}
+.ev{display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(255,244,226,.82)}
+.ev b{color:var(--cream)} .ev .amt{color:var(--gold);font-weight:700}
+
+/* shared pieces */
+.av{display:grid;place-items:center;color:#fff;font-weight:900;flex:none;border-radius:12px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.25)}
+.chip{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;font:700 10px/1 var(--num);flex:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.35)}
+.panel{background:var(--cream);color:var(--ink);border-radius:var(--r);box-shadow:0 22px 40px -26px rgba(0,0,0,.75)}
+.panel-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px 0}
+.panel-h h3{margin:0;font-size:17px;font-weight:900}
+.poster{font-family:var(--poster);font-weight:400;letter-spacing:.03em}
+.sec{padding-block:30px}
+.sec-h{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.sec-h h2{margin:0;font-family:var(--poster);font-weight:400;font-size:clamp(28px,3.4vw,36px);letter-spacing:.03em}
+.sec-h p{margin:4px 0 0;font-size:14px;color:rgba(255,244,226,.78)}
+.pill{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;border:1px solid rgba(244,194,78,.4);background:rgba(43,3,6,.28);color:var(--gold-soft);font-size:13px;font-weight:500;white-space:nowrap}
+button.pill:hover{border-color:var(--gold)}
+.seg{display:inline-flex;background:var(--cream-2);border-radius:11px;padding:3px;gap:2px;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.seg::-webkit-scrollbar{display:none}
+.seg button{flex:none}
+.seg button{border:0;background:transparent;color:var(--ink-2);height:32px;padding:0 13px;border-radius:8px;font-weight:700;font-size:13.5px}
+.seg button[aria-pressed="true"]{background:var(--red);color:var(--cream)}
+.fchips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px;min-width:0}
+.fchips::-webkit-scrollbar{display:none}
+.fchip{flex:none;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px 0 4px;border-radius:999px;border:1.5px solid var(--cream-line);background:transparent;color:var(--ink-2);font-size:13px;font-weight:700}
+.fchip.all{padding:0 13px}
+.fchip[aria-pressed="true"]{border-color:var(--red);color:var(--red);background:#fff}
+.chg{display:inline-block;font:700 13.5px/1.2 var(--num);padding:2px 8px;border-radius:6px}
+.chg.up{background:var(--up-soft);color:var(--up)} .chg.dn{background:var(--down-soft);color:var(--down)}
+.bar{height:7px;border-radius:99px;background:var(--cream-2);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--gold-deep),var(--gold))}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px dashed var(--cream-line);font-size:14px;color:var(--ink-2)}
+.kv b{color:var(--ink);font-weight:700}
+.note{font-size:13px;color:var(--ink-3);margin:10px 0 0}
+.back{display:inline-flex;align-items:center;gap:6px;margin:22px 0 12px;font-weight:700;color:var(--gold-soft)}
+.page-h{font-family:var(--poster);font-weight:400;font-size:clamp(40px,6vw,64px);line-height:1.05;margin:26px 0 8px;letter-spacing:.03em}
+.page-lede{max-width:44em;color:rgba(255,244,226,.85);margin:0 0 22px;line-height:1.75}
+
+/* home: hero */
+.hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:30px;align-items:center;padding-block:42px 34px}
+.hero-chips{display:flex;flex-wrap:wrap;gap:8px}
+.hero h1{font-family:var(--poster);font-weight:400;font-size:clamp(50px,7.4vw,100px);line-height:1.02;margin:18px 0 16px;letter-spacing:.02em;text-wrap:balance}
+.hero h1 em{font-style:normal;color:var(--gold)}
+.lede{font-size:17px;line-height:1.75;max-width:30em;color:rgba(255,244,226,.92);margin:0 0 24px}
+.ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+.promises{display:flex;flex-wrap:wrap;gap:8px}
+.stage{position:relative;display:flex;align-items:center;justify-content:center;min-height:360px}
+.env{width:min(260px,78%);aspect-ratio:3/4.1;border-radius:20px;background:linear-gradient(170deg,#DE2A37,#8C0D17);position:relative;box-shadow:0 34px 60px -22px rgba(0,0,0,.65),inset 0 0 0 2px rgba(244,194,78,.55);overflow:hidden;animation:bob 5s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-8px) rotate(-1deg)}}
+.env::before{content:"";position:absolute;inset:-40% -22% 52%;border-radius:0 0 50% 50%;background:linear-gradient(180deg,#EC3643,#B8141F);box-shadow:0 6px 0 rgba(0,0,0,.14)}
+.env .seal{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%)}
+.env .amt{position:absolute;bottom:13%;left:0;right:0;text-align:center}
+.env .amt b{display:block;font:800 46px/1 var(--num);color:var(--gold)}
+.env .amt>span{font-size:13px;color:rgba(255,244,226,.85)}
+.ticket{position:relative;flex:none;width:min(250px,48%);margin:150px 0 0 -64px;padding:14px 16px;transform:rotate(3deg)}
+.ticket .k{font-size:12.5px;color:var(--ink-3)}
+.ticket .v{font:800 32px/1.05 var(--num);color:var(--ink)}
+.ticket .rows{margin-top:8px;border-top:1px dashed var(--cream-line)}
+.ticket .row{display:flex;align-items:center;gap:8px;padding-top:7px;font-size:13px}
+.ticket .row b{margin-left:auto;color:var(--up);font-family:var(--num);font-size:14px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid rgba(244,194,78,.25);border-bottom:1px solid rgba(244,194,78,.25)}
+.stats>div{padding:16px 4px}
+.stats b{display:block;font:800 32px/1.1 var(--num);color:var(--gold)}
+.stats span{font-size:13px;color:rgba(255,244,226,.8)}
+
+/* leaders: envelope cards */
+.leaders{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.lcard{background:var(--cream);color:var(--ink);border-radius:var(--r);overflow:hidden;box-shadow:0 20px 34px -20px rgba(0,0,0,.75);transition:transform .2s}
+.lcard:hover{transform:translateY(-4px)}
+.lcard .top{background:linear-gradient(180deg,#D62532,#B8141F);color:var(--cream);padding:14px 16px 28px;display:flex;gap:12px;align-items:center;position:relative}
+.lcard .top::after{content:"";position:absolute;left:50%;bottom:-17px;width:34px;height:34px;margin-left:-17px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE6A3,#E9B23A 60%,#B98A1E);box-shadow:0 0 0 4px var(--cream)}
+.lcard .rank{margin-left:auto;font:800 30px/1 var(--num);color:var(--gold)}
+.lcard .nm{font-weight:900;font-size:18px;line-height:1.2}
+.lcard .tk{font-size:13px;color:rgba(255,244,226,.8)}
+.lcard .bd{padding:26px 16px 16px;display:grid;gap:10px}
+.lcard .paid{display:flex;justify-content:space-between;align-items:flex-end}
+.lcard .paid b{font:800 36px/1 var(--num);color:var(--up)}
+.lcard .paid span{font-size:12.5px;color:var(--ink-3);text-align:right}
+.lcard .pays{display:flex;justify-content:space-between;align-items:center;border-top:1.5px dashed var(--cream-line);padding-top:10px;font-size:13px;color:var(--ink-2)}
+.lcard .pays strong{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
+
+/* coin table (rows reflow into cards on phones) */
+.board{padding:14px 18px 6px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.toolbar .fwrap{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 360px}
+.toolbar .fwrap>span{font-size:13px;color:var(--ink-3);flex:none}
+.trow{display:grid;grid-template-columns:minmax(0,2.2fr) repeat(2,minmax(0,.9fr)) minmax(0,1.2fr) minmax(0,1fr) repeat(3,minmax(0,.8fr));gap:10px;align-items:center;padding:11px 8px;border-bottom:1px solid var(--cream-line);font-size:14px}
+.trow.th{font-size:12.5px;color:var(--ink-3);font-weight:700;padding-block:10px}
+.trow>*:not(:first-child){text-align:right}
+a.trow:hover{background:#fff;border-radius:10px}
+.trow:last-child{border-bottom:0}
+.coin{display:flex;align-items:center;gap:10px;min-width:0}
+.coin b{display:block;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.coin small{color:var(--ink-3);font-size:12.5px}
+.badge{display:inline-block;font-size:11px;font-weight:900;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.badge.new{background:var(--gold);color:var(--ink)} .badge.grad{background:var(--down-soft);color:var(--down)} .badge.dev{background:var(--cream-2);color:var(--ink-2)}
+.prog{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end;width:100%}
+.prog .bar{width:60px;height:6px}
+.paychip{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end;font-weight:700}
+.empty{text-align:center;padding:40px 10px;color:var(--ink-3)}
+
+/* coin page */
+.chead{display:flex;gap:18px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
+.chead .av{width:92px;height:92px;border-radius:24px;font-size:48px;box-shadow:0 0 0 4px var(--gold),0 18px 30px -12px rgba(0,0,0,.6)}
+.chead h1{margin:0;font-family:var(--poster);font-weight:400;font-size:clamp(36px,5vw,54px);line-height:1.05;letter-spacing:.03em}
+.chead h1 small{font:700 20px var(--num);color:var(--gold-soft);margin-left:10px;letter-spacing:0}
+.chead .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;font-size:13.5px;color:rgba(255,244,226,.85)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);margin-bottom:16px}
+.kpis>div{padding:14px 18px;border-left:1px solid var(--cream-line)}
+.kpis>div:first-child{border-left:0}
+.kpis span{display:block;font-size:12.5px;color:var(--ink-3)}
+.kpis b{font:800 28px/1.15 var(--num)}
+.cgrid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;align-items:start}
+.chart-top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 16px 0}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-3);padding:8px 16px 0}
+.legend b{color:var(--ink);font-family:var(--num);font-size:14px}
+.chart{display:block;width:100%;height:300px}
+.chart-foot{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-3);padding:0 16px 14px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--gold-deep);margin-right:5px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--cream-line);padding:0 16px}
+.tabs button{border:0;background:transparent;padding:12px 6px;margin-right:12px;font-weight:700;color:var(--ink-3);border-bottom:2.5px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--red);border-color:var(--red)}
+.lrow{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.8fr);gap:10px;padding:10px 16px;border-bottom:1px solid var(--cream-line);font-size:13.5px}
+.lrow>*:not(:first-child){text-align:right}
+.lrow.th{font-size:12px;color:var(--ink-3);font-weight:700}
+.trade{padding:16px}
+.toggle{display:grid;grid-template-columns:1fr 1fr;background:var(--cream-2);border-radius:12px;padding:4px;gap:4px;margin-bottom:14px}
+.toggle button{border:0;background:transparent;height:42px;border-radius:9px;font-weight:900;color:var(--ink-2)}
+.toggle .b[aria-pressed="true"]{background:var(--up);color:#fff}
+.toggle .s[aria-pressed="true"]{background:var(--down);color:#fff}
+.field{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;margin-bottom:12px}
+.field>span{font-size:13px;color:var(--ink-3);font-weight:700}
+.amount{display:flex;align-items:center;border:1.5px solid var(--cream-line);background:#fff;border-radius:12px;padding:0 12px;height:58px}
+.amount input{flex:1;width:100%;border:0;outline:0;background:transparent;font:700 28px var(--num);color:var(--ink);min-width:0}
+.amount .unit{display:inline-flex;align-items:center;gap:6px;font-weight:900;background:var(--cream-2);border-radius:999px;padding:5px 10px 5px 5px}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px}
+.quick button{border:1.5px solid var(--cream-line);background:transparent;border-radius:9px;height:34px;font:700 14px var(--num);color:var(--ink-2)}
+.quick button:hover{border-color:var(--red);color:var(--red)}
+.divcard{margin-top:16px;overflow:hidden}
+.divcard .head{background:linear-gradient(170deg,#D62532,#9E101A);color:var(--cream);padding:16px;display:flex;gap:14px;align-items:center}
+.divcard .head b{display:block;font:800 34px/1 var(--num);color:var(--gold)}
+.divcard .head span{font-size:12.5px;color:rgba(255,244,226,.85)}
+.divcard .bd{padding:6px 16px 16px}
+.warn{display:flex;gap:10px;align-items:flex-start;background:var(--cream-2);border-radius:12px;padding:12px 14px;margin-top:16px;font-size:13.5px;color:var(--ink-2)}
+
+/* create */
+.cgrid2{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start;padding-bottom:30px}
+.fsec{padding:18px;margin-bottom:16px}
+.fsec-h{display:flex;gap:12px;align-items:center;margin-bottom:14px}
+.step{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFE6A3,#E9B23A 60%,#B98A1E);font:800 18px var(--num);color:var(--ink);flex:none;box-shadow:0 3px 0 var(--gold-deep)}
+.fsec-h h3{margin:0;font-size:18px;font-weight:900}
+.fsec-h p{margin:2px 0 0;font-size:13px;color:var(--ink-3)}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.inp{display:grid;gap:6px;margin-bottom:12px}
+.inp>span{font-size:13px;font-weight:700;color:var(--ink-2);display:flex;justify-content:space-between}
+.inp>span small{font-weight:500;color:var(--ink-3)}
+.inp input,.inp textarea{width:100%;border:1.5px solid var(--cream-line);background:#fff;border-radius:11px;padding:11px 13px;outline:none;color:var(--ink)}
+.inp input:focus,.inp textarea:focus{border-color:var(--red)}
+.inp textarea{min-height:76px;resize:vertical}
+.drop{display:flex;gap:14px;align-items:center;border:2px dashed var(--cream-line);border-radius:14px;padding:14px;background:#fff8ec}
+.drop .ico{width:56px;height:56px;border-radius:14px;background:var(--cream-2);display:grid;place-items:center;color:var(--red);flex:none}
+.drop b{display:block}
+.drop small{color:var(--ink-3)}
+.stocks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stock{display:flex;align-items:center;gap:9px;border:1.5px solid var(--cream-line);background:#fff;border-radius:12px;padding:10px;text-align:left}
+.stock b{display:block;font-size:14px}
+.stock small{display:block;font-size:12px;color:var(--ink-3)}
+.stock[aria-pressed="true"]{border-color:var(--red);box-shadow:0 0 0 2px rgba(163,18,28,.15)}
+.sticky{position:sticky;top:84px;display:grid;gap:16px}
+.checks{padding:16px}
+.check{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px dashed var(--cream-line)}
+.check:first-of-type{border-top:0}
+.check i{width:20px;height:20px;border-radius:50%;flex:none;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:900;margin-top:1px}
+.check i.ok{background:var(--down);color:#fff} .check i.idle{background:var(--cream-2);color:var(--ink-3)}
+.check b{display:block;font-size:14px}
+.check small{color:var(--ink-3);font-size:12.5px}
+
+/* payouts */
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:16px}
+.tiles>div{padding:16px 18px;border-left:1px solid var(--cream-line)}
+.tiles>div:first-child{border-left:0}
+.tiles b{display:block;font:800 30px/1.1 var(--num)}
+.tiles span{font-size:12.5px;color:var(--ink-3)}
+.meter{padding:16px}
+.meter .bar{height:12px;margin:12px 0 8px}
+.meter .bar i{background:linear-gradient(90deg,var(--red),var(--up))}
+.meter .lg{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-3)}
+.rtable{overflow-x:auto}
+.rtable table{width:100%;border-collapse:collapse;font-size:14px;min-width:640px}
+.rtable th{text-align:right;font-size:12.5px;color:var(--ink-3);font-weight:700;padding:10px 12px;border-bottom:1px solid var(--cream-line);white-space:nowrap}
+.rtable td{text-align:right;padding:11px 12px;border-bottom:1px solid var(--cream-line);white-space:nowrap}
+.rtable th:first-child,.rtable td:first-child{text-align:left}
+.rtable a{color:var(--red);font-weight:700}
+
+/* how */
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:24px}
+.hstep{padding:18px;position:relative;overflow:hidden}
+.hstep::before{content:"";position:absolute;inset:0 0 auto;height:6px;background:linear-gradient(90deg,var(--red),var(--gold),var(--red))}
+.hstep .step{margin-bottom:10px}
+.hstep h3{margin:0 0 6px;font-size:18px;font-weight:900}
+.hstep p{margin:0;color:var(--ink-2);font-size:14px;line-height:1.75}
+.fees{padding:6px 18px 12px;margin-bottom:30px;overflow-x:auto}
+.fees table{width:100%;border-collapse:collapse;min-width:460px}
+.fees td,.fees th{padding:12px 6px;border-bottom:1px solid var(--cream-line);text-align:left;font-size:14.5px}
+.fees td:last-child,.fees th:last-child{text-align:right}
+.fees tr:last-child td{border-bottom:0;font-weight:900}
+.fees .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:0}
+
+/* me */
+.connect{display:grid;place-items:center;text-align:center;padding:40px 20px;gap:10px}
+.connect h3{margin:0;font-size:20px;font-weight:900}
+.connect p{margin:0;color:var(--ink-2);max-width:32em}
+
+/* footer + tabbar */
+footer.foot{background:var(--lacquer);color:rgba(255,244,226,.75);font-size:13px;margin-top:20px;border-top:1px solid rgba(244,194,78,.2)}
+footer.foot .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:24px 30px}
+footer.foot a{color:var(--gold-soft);text-decoration:underline}
+.ud{display:flex;align-items:center;gap:10px}
+.ud .seg{background:rgba(255,244,226,.08)}
+.ud .seg button{color:rgba(255,244,226,.75);height:28px;font-size:12.5px}
+.ud .seg button[aria-pressed="true"]{background:var(--gold);color:var(--ink)}
+.tabbar{display:none}
+
+[data-view]{display:none}
+[data-view].on{display:block}
+
+/* tablets */
+@media (max-width:1060px){
+  .hero{grid-template-columns:1fr}
+  .stage{min-height:340px}
+  .cgrid,.cgrid2{grid-template-columns:minmax(0,1fr)}
+  .sticky{position:static}
+  .leaders{grid-template-columns:1fr 1fr}
+  .leaders .lcard:nth-child(3){display:none}
+  .steps{grid-template-columns:1fr 1fr}
+}
+/* phones */
+@media (max-width:760px){
+  .top .wrap{height:58px;gap:10px}
+  .logo{font-size:23px}
+  nav.links,#createTop,.lbl-l{display:none}
+  .lbl-s{display:inline}
+  .search{max-width:none}
+  .search input{height:38px}
+  .lang button[aria-pressed="true"]{display:none}
+  .lang{padding:0}
+  .top .btn{height:38px;padding:0 12px;font-size:14px}
+  .hero{padding-top:24px}
+  .stage{order:-1;min-height:300px}
+  .stage{min-height:0;gap:14px;padding-top:6px;flex-direction:column}
+  .env{width:min(220px,64%)}
+  .ticket{position:static;transform:none;width:100%;margin:0}
+  .stats,.tiles{grid-template-columns:1fr 1fr}
+  .stats>div:nth-child(n+3){border-top:1px solid rgba(244,194,78,.2)}
+  .tiles>div:nth-child(3){border-left:0}
+  .tiles>div:nth-child(n+3){border-top:1px solid var(--cream-line)}
+  .leaders{grid-template-columns:1fr}
+  .leaders .lcard:nth-child(3){display:block}
+  .trow.th{display:none}
+  .trow{grid-template-columns:minmax(0,1fr) auto;row-gap:6px;padding:12px 4px}
+  .trow>.c-mcap{grid-column:2;grid-row:1;text-align:right}
+  .trow>.c-chg{grid-column:2;grid-row:2}
+  .trow>.c-prog{grid-column:1;grid-row:2;justify-content:flex-start}
+  .trow>.c-pays{grid-column:1;grid-row:3;justify-content:flex-start}
+  .trow>.c-paid{grid-column:2;grid-row:3}
+  .trow>.c-h,.trow>.c-age{display:none}
+  .kpis{grid-template-columns:1fr 1fr}
+  .kpis>div:nth-child(odd){border-left:0}
+  .kpis>div:nth-child(n+3){border-top:1px solid var(--cream-line)}
+  .kpis>div:last-child{grid-column:1/-1}
+  .frow{grid-template-columns:1fr}
+  .stocks{grid-template-columns:1fr 1fr}
+  .steps{grid-template-columns:1fr}
+  .lrow{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,.9fr)}
+  .lrow>:nth-child(4){display:none}
+  .seg button{padding:0 10px}
+  .tabbar{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:70;background:rgba(62,5,10,.96);backdrop-filter:blur(12px);border-top:1px solid rgba(244,194,78,.25);padding:6px max(6px,env(safe-area-inset-left,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-right,0px))}
+  .tabbar a{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11.5px;font-weight:700;color:rgba(255,244,226,.65);padding:5px 0}
+  .tabbar a[aria-current="page"]{color:var(--gold)}
+  .tabbar .mk span{width:44px;height:30px;border-radius:10px;background:linear-gradient(180deg,var(--gold-hi),var(--gold));color:var(--ink);display:grid;place-items:center;box-shadow:0 3px 0 var(--gold-deep)}
+  body{padding-bottom:78px}
+}
+</style>
+
+<div class="bgpat" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="#home" aria-label="hwai 首页"><span data-mark="30"></span>hwai</a>
+    <nav class="links" aria-label="主导航">
+      <a href="#home" data-nav="home">发现</a>
+      <a href="#payouts" data-nav="payouts">分红记录</a>
+      <a href="#how" data-nav="how">玩法</a>
+    </nav>
+    <label class="search">
+      <span class="sr">搜索代币</span>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="搜索代币、股票或合约地址" autocomplete="off">
+    </label>
+    <div class="lang" role="group" aria-label="语言"><button type="button" aria-pressed="true">中</button><button type="button" aria-pressed="false">EN</button></div>
+    <a class="btn btn-gold" id="createTop" href="#create">创建代币</a>
+    <a class="btn btn-ghost" href="#me"><span class="lbl-l">连接钱包</span><span class="lbl-s">连接</span></a>
+  </div>
+</header>
+<div class="strip" aria-label="实时动态"><div class="strip-track" id="strip"></div></div>
+
+<main>
+  <!-- ============ HOME ============ -->
+  <section data-view="home" class="wrap">
+    <div class="hero">
+      <div>
+        <div class="hero-chips">
+          <span class="pill">⚡ 本小时已发 <b class="num" style="color:var(--gold)">$1,634</b> 美股红包</span>
+          <button class="pill" type="button" id="caPill">CA：即将公布</button>
+        </div>
+        <h1>土狗也分红，<br><em>分的是美股。</em></h1>
+        <p class="lede">免费发币。每一笔交易都会买入你选的股票代币，比如 NVDAx、SPYx，每小时分给所有持有人。</p>
+        <div class="ctas"><a class="btn btn-gold btn-lg" href="#create">创建代币</a><a class="btn btn-ghost btn-lg" href="#how">玩法说明</a></div>
+        <div class="promises">
+          <span class="pill">免费发币，开发者首买公开</span><span class="pill">流动性永久锁定</span><span class="pill">0 号区块无狙击</span><span class="pill">每笔分红链上可查</span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="env" aria-label="下一个红包倒计时">
+          <span class="seal" data-mark="88" data-variant="red"></span>
+          <div class="amt"><b class="tab" data-countdown>--:--</b><span>距离下一个红包</span></div>
+        </div>
+        <div class="panel ticket">
+          <div class="k">上一轮分红</div>
+          <div class="v">$1,634</div>
+          <div class="k">已分给 7,593 个钱包</div>
+          <div class="rows" id="roundRows"></div>
+        </div>
+      </div>
+    </div>
+    <div class="stats"><div><b>$49,751</b><span>累计分红</span></div><div><b>$8.37M</b><span>24 小时交易额</span></div><div><b>30</b><span>在线代币</span></div><div><b>11</b><span>可分红股票</span></div></div>
+
+    <div class="sec">
+      <div class="sec-h"><div><h2>今日分红最多</h2><p>按过去 24 小时持有人所得排名。</p></div></div>
+      <div class="leaders" id="leaders"></div>
+    </div>
+
+    <div class="sec" style="padding-top:6px">
+      <div class="sec-h"><div><h2>全部代币</h2></div></div>
+      <div class="panel board">
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="排序" id="sorts">
+            <button type="button" data-sort="hot" aria-pressed="true">热门</button>
+            <button type="button" data-sort="new" aria-pressed="false">最新</button>
+            <button type="button" data-sort="paid" aria-pressed="false">分红最多</button>
+            <button type="button" data-sort="grad" aria-pressed="false">即将毕业</button>
+          </div>
+          <div class="fwrap"><span>分红资产</span><div class="fchips" role="group" aria-label="按股票筛选" id="pays"></div></div>
+        </div>
+        <div class="trow th"><span>代币</span><span>市值</span><span>24h</span><span>内盘进度</span><span>分红资产</span><span>已分红</span><span>持有人</span><span>上线</span></div>
+        <div id="grid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COIN ============ -->
+  <section data-view="coin" class="wrap">
+    <a class="back" href="#home">‹ 返回首页</a>
+    <div class="chead">
+      <span class="av" id="cAv"></span>
+      <div style="min-width:0">
+        <h1 id="cName">躺赚<small>$TANG</small></h1>
+        <div class="meta">
+          <span>7xKp…3fQa · 5 小时前创建</span>
+          <button class="pill" type="button" id="cCa">合约地址 ug3P…2kMY</button>
+          <span class="pill">私密捆绑发币</span><span class="pill">开发者首买 2.4%</span>
+          <button class="pill" type="button">举报</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel kpis"><div><span>市值</span><b class="up num">$413K</b></div><div><span>24 小时涨跌</span><b class="up num">+18.4%</b></div><div><span>24 小时交易额</span><b class="num">$142K</b></div><div><span>持有人</span><b class="num">1,284</b></div><div><span>累计分红</span><b class="up num">$3,120</b></div></div>
+    <div class="cgrid">
+      <div style="min-width:0">
+        <div class="panel">
+          <div class="chart-top">
+            <div class="seg" role="group" aria-label="K 线周期" id="tfs"><button type="button" aria-pressed="false">1m</button><button type="button" aria-pressed="true">15m</button><button type="button" aria-pressed="false">1h</button><button type="button" aria-pressed="false">4h</button><button type="button" aria-pressed="false">1D</button></div>
+            <div class="seg" role="group" aria-label="单位"><button type="button" aria-pressed="false">价格</button><button type="button" aria-pressed="true">市值</button></div>
+          </div>
+          <div class="legend" id="legend"></div>
+          <svg class="chart" id="chart" viewBox="0 0 800 300" preserveAspectRatio="none" role="img" aria-label="市值 K 线图"></svg>
+          <div class="chart-foot"><span><i class="dot"></i>每小时持有人分红</span><span>历史最高市值 $431K</span></div>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="tabs" role="tablist"><button type="button" role="tab" aria-selected="true" data-ctab="trades">交易</button><button type="button" role="tab" aria-selected="false" data-ctab="holders">持有人</button><button type="button" role="tab" aria-selected="false" data-ctab="divs">分红</button></div>
+          <div id="ctab"></div>
+        </div>
+      </div>
+      <aside>
+        <div class="panel trade">
+          <div class="toggle" role="group" aria-label="买入或卖出"><button type="button" class="b" aria-pressed="true" data-side="buy">买入</button><button type="button" class="s" aria-pressed="false" data-side="sell">卖出</button></div>
+          <label class="field"><span id="payLbl">你支付</span>
+            <div class="amount"><input id="amt" inputmode="decimal" value="0.5" aria-label="金额"><span class="unit"><span class="chip" style="background:#B08CFF;color:#1E0C44">SOL</span><span id="unit">SOL</span></span></div>
+          </label>
+          <div class="quick" id="quick"><button type="button">0.1</button><button type="button">0.5</button><button type="button">1</button><button type="button">5</button></div>
+          <div class="kv"><span>你将收到</span><b class="num" id="recv">143.5K $TANG</b></div>
+          <div class="kv"><span>路径</span><b>SOL 进入内盘</b></div>
+          <div class="kv"><span>交易手续费</span><b>1.25%，其中 0.50% 分给持有人</b></div>
+          <div class="kv"><span>最大滑点</span><b>5%</b></div>
+          <a class="btn btn-red btn-lg btn-block" href="#me" style="margin-top:12px" id="tradeBtn">连接钱包后交易</a>
+        </div>
+        <div class="panel divcard">
+          <div class="head"><span data-mark="54" data-variant="gold"></span><div><span>下次分红</span><b class="tab" data-countdown>--:--</b></div></div>
+          <div class="bd">
+            <div class="kv" style="border-top:0"><span>分红资产</span><b style="display:inline-flex;gap:6px;align-items:center"><span class="chip" style="background:#76B900;color:#0D2200">NV</span>NVDAx</b></div>
+            <div class="kv"><span>上一轮</span><b class="num">0.0127 NVDAx · 412 个钱包</b></div>
+            <div class="kv"><span>内盘进度</span><b class="num">86%</b></div>
+            <div class="bar" style="margin:4px 0 10px"><i style="width:86%"></i></div>
+            <p class="note" style="margin:0">每小时快照时持有 $10 以上的钱包都能分到。内盘满了以后，代币进入 Raydium 池子，分红照常。</p>
+          </div>
+        </div>
+        <div class="warn"><span aria-hidden="true">⚠️</span><span>不同代币可以用同一个代币符号和名称。买入前，先和项目方公布的合约地址核对一下。</span></div>
+      </aside>
+    </div>
+    <div style="height:30px"></div>
+  </section>
+
+  <!-- ============ CREATE ============ -->
+  <section data-view="create" class="wrap">
+    <a class="back" href="#home">‹ 返回首页</a>
+    <h1 class="page-h" style="margin-top:4px">创建代币</h1>
+    <p class="page-lede">完全免费。hwai 的发币程序用私有捆绑交易创建你的代币，代币上链前没人能买入，你的持有人每小时拿到美股分红。</p>
+    <div class="cgrid2">
+      <form id="cform" onsubmit="return false">
+        <div class="panel fsec">
+          <div class="fsec-h"><span class="step">1</span><div><h3>代币</h3><p>名称、代币符号和图片创建后不能修改。</p></div></div>
+          <div class="frow">
+            <label class="inp"><span>名称</span><input id="fName" placeholder="Chip Dog" maxlength="32"></label>
+            <label class="inp"><span>代币符号</span><input id="fTicker" placeholder="CHIPDOG" maxlength="10" style="text-transform:uppercase"></label>
+          </div>
+          <label class="inp"><span>简介 <small>选填</small></span><textarea id="fDesc" placeholder="一句让人记住的话"></textarea></label>
+          <div class="inp"><span>图片</span>
+            <div class="drop"><span class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span><div><b>拖入图片，或点击选择</b><small>PNG、JPG、WEBP 或 GIF，最大 8 MB。</small></div></div>
+          </div>
+        </div>
+        <div class="panel fsec">
+          <div class="fsec-h"><span class="step">2</span><div><h3>分红</h3><p>持有人每小时拿到的股票。代币上线后锁定。</p></div></div>
+          <div class="stocks" id="stocks" role="group" aria-label="分红资产"></div>
+          <p class="note">买家始终用 SOL 买入。股票只是持有人拿到的分红。</p>
+        </div>
+        <div class="panel fsec">
+          <div class="fsec-h"><span class="step">3</span><div><h3>链接</h3><p>全部选填。</p></div></div>
+          <div class="frow">
+            <label class="inp"><span>X 账号</span><input id="fX" placeholder="x.com/yourproject"></label>
+            <label class="inp"><span>Telegram</span><input id="fTg" placeholder="t.me/yourgroup"></label>
+          </div>
+          <label class="inp"><span>网站</span><input id="fWeb" placeholder="https://"></label>
+        </div>
+        <div class="panel fsec">
+          <div class="fsec-h"><span class="step">4</span><div><h3>开发者首买</h3><p>选填。你的买入包含在创建交易里，比任何人都早，代币页面会公开显示。</p></div></div>
+          <label class="field"><span>金额（SOL）</span><div class="amount"><input id="fDev" inputmode="decimal" placeholder="0" aria-label="开发者首买金额"><span class="unit">SOL</span></div></label>
+          <div class="quick" id="devQuick"><button type="button">0.1</button><button type="button">0.5</button><button type="button">1</button><button type="button">最大</button></div>
+        </div>
+      </form>
+      <aside class="sticky">
+        <div>
+          <div class="sec-h" style="margin-bottom:10px"><div><h2 style="font-size:24px">首页预览</h2></div></div>
+          <div id="preview"></div>
+        </div>
+        <div class="panel checks">
+          <h3 style="margin:0 0 6px;font-size:16px;font-weight:900">检查</h3>
+          <div id="checks"></div>
+        </div>
+        <div class="panel checks">
+          <div class="kv" style="border-top:0"><span>发币费用</span><b>免费</b></div>
+          <div class="kv"><span>你在每笔交易中的分成</span><b>0.15%</b></div>
+          <div class="kv"><span>持有人分成</span><b id="sumPays">0.50%，以 NVDAx 发放</b></div>
+          <div class="kv"><span>开发者首买</span><b id="sumDev">无</b></div>
+          <button class="btn btn-red btn-lg btn-block" type="button" style="margin-top:12px" id="launchBtn">发币</button>
+          <p class="note" id="launchNote">请先填写代币符号和名称。</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ PAYOUTS ============ -->
+  <section data-view="payouts" class="wrap">
+    <h1 class="page-h">分红记录</h1>
+    <p class="page-lede">每小时，每个代币的金库买入它的股票，发给持有人。下面是分红收据，最新的在前，每一条都是可以打开查看的链上交易。</p>
+    <div class="panel tiles"><div><b class="up">$49,751</b><span>已分给持有人</span></div><div><b>164</b><span>分红轮次</span></div><div><b>45,974</b><span>钱包分红笔数</span></div><div><b>$1,418</b><span>等待下一轮</span></div></div>
+    <div class="panel meter" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0;font-size:17px;font-weight:900">本小时进度，全部代币</h3><span class="chg up" style="font-family:var(--zh);font-size:12.5px">所有代币都准时</span></div>
+      <div class="bar"><i id="hourBar" style="width:50%"></i></div>
+      <div class="lg"><span>已过 <b class="tab" id="hourPct">50%</b></span><span>距离下一轮 <b class="tab" data-countdown>--:--</b></span><span>延迟会按代币标红</span></div>
+    </div>
+    <div class="panel" style="margin-bottom:30px">
+      <div class="panel-h"><h3>收据</h3></div>
+      <div class="fchips" style="padding:12px 18px 4px" id="rpays"></div>
+      <div class="rtable" style="padding:0 6px 8px"><table class="tab"><thead><tr><th>代币</th><th>时间</th><th>分红</th><th>价值</th><th>钱包数</th><th>交易</th></tr></thead><tbody id="receipts"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ HOW ============ -->
+  <section data-view="how" class="wrap">
+    <h1 class="page-h">hwai 是怎么运作的</h1>
+    <p class="page-lede">用 SOL 买入代币，分红用真实的股票代币发放。下面是从填写表单到收到分红的完整流程。</p>
+    <div class="steps">
+      <div class="panel hstep"><span class="step">1</span><h3>填写表单</h3><p>填上名称、代币符号、图片，再选好持有人将获得的股票：NVDAx、SPYx、TSLAx 等。发币免费，代币上线后分红资产就锁定了。</p></div>
+      <div class="panel hstep"><span class="step">2</span><h3>名称和代币符号不设限</h3><p>不同代币可以用同一个代币符号、名称和图片，所以要靠合约地址区分。每个代币页面都会显示合约地址。</p></div>
+      <div class="panel hstep"><span class="step">3</span><h3>私密捆绑发币</h3><p>创建交易通过 Jito 私有捆绑提交，代币上链前没人知道合约地址，0 号区块里没有狙击。</p></div>
+      <div class="panel hstep"><span class="step">4</span><h3>每笔交易都付手续费</h3><p>内盘上的每次买入和卖出都付 1.25% 手续费，由 Raydium LaunchLab 在链上收取，并按下表分配。</p></div>
+      <div class="panel hstep"><span class="step">5</span><h3>每小时给持有人分红</h3><p>每个整点，金库买入代币对应的股票代币，按持仓比例发给持有 $10 以上的钱包。每一轮都是分红记录里的一张收据。</p></div>
+      <div class="panel hstep"><span class="step">6</span><h3>毕业</h3><p>内盘满了以后，代币进入 Raydium 池子，流动性通过 Burn &amp; Earn 永久锁定。毕业后分红照常，每小时继续发放。</p></div>
+    </div>
+    <div class="sec-h"><div><h2>每笔交易的 1.25% 去了哪里</h2></div></div>
+    <div class="panel fees">
+      <table class="tab"><thead><tr><th style="color:var(--ink-3);font-size:12.5px">分给</th><th style="color:var(--ink-3);font-size:12.5px">比例</th></tr></thead>
+        <tbody>
+          <tr><td><span class="sw" style="background:var(--red)"></span>持有人（以股票代币分红）</td><td class="num">0.50%</td></tr>
+          <tr><td><span class="sw" style="background:var(--gold)"></span>hwai</td><td class="num">0.35%</td></tr>
+          <tr><td><span class="sw" style="background:#E58A7A"></span>Raydium</td><td class="num">0.25%</td></tr>
+          <tr><td><span class="sw" style="background:#B98A1E"></span>创建者</td><td class="num">0.15%</td></tr>
+          <tr><td>合计</td><td class="num">1.25%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ ME ============ -->
+  <section data-view="me" class="wrap">
+    <h1 class="page-h">我的分红</h1>
+    <p class="page-lede">连接钱包，查看你持有的代币、收到的每一笔美股分红和可以领取的创建者手续费。</p>
+    <div class="panel connect" id="meBox">
+      <span data-mark="72" data-variant="red"></span>
+      <h3>连接钱包查看分红</h3>
+      <p>支持 Phantom、Solflare、Backpack。只需要签名登录，不会花费任何资金。</p>
+      <button class="btn btn-red btn-lg" type="button" id="meConnect">连接钱包</button>
+    </div>
+    <div id="meList" hidden></div>
+    <div style="height:30px"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span>hwai 演示原型。页面上的数字都是演示数据。</span>
+    <span>股票代币由第三方发行，并非所有地区都能使用。本站内容不构成投资建议。<a href="#how">条款</a></span>
+    <div class="ud" role="group" aria-label="涨跌颜色"><span>涨跌颜色</span><div class="seg"><button type="button" data-ud="red" aria-pressed="true">红涨绿跌</button><button type="button" data-ud="green" aria-pressed="false">绿涨红跌</button></div></div>
+  </div>
+</footer>
+
+<nav class="tabbar" aria-label="底部导航">
+  <a href="#home" data-nav="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>发现</a>
+  <a href="#create" class="mk" data-nav="create"><span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>创建</a>
+  <a href="#payouts" data-nav="payouts"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>分红</a>
+  <a href="#how" data-nav="how"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4zM20 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z"/></svg>玩法</a>
+</nav>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function rng(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+/* the hwai mark: a square-holed cash coin */
+function mark(size,variant="gold"){
+  const id="m"+Math.random().toString(36).slice(2,7);
+  const g=variant==="red"?[["0","#E33240"],["1","#8C0D17"]]:[["0","#FFE8A8"],[".5","#F4C24E"],["1","#B98A1E"]];
+  const rim=variant==="red"?"#FFE6A3":"#5A0A0F";
+  return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">${g.map(([o,c])=>`<stop offset="${o}" stop-color="${c}"/>`).join("")}</linearGradient></defs>
+  <path d="M8 50A42 42 0 1 1 92 50A42 42 0 1 1 8 50Z M38 38V62H62V38Z" fill="url(#${id})" fill-rule="evenodd"/>
+  <circle cx="50" cy="50" r="34" fill="none" stroke="${rim}" stroke-opacity=".38" stroke-width="2"/><rect x="32" y="32" width="36" height="36" fill="none" stroke="${rim}" stroke-opacity=".38" stroke-width="2"/></svg>`;
+}
+$$("[data-mark]").forEach(el=>el.innerHTML=mark(+el.dataset.mark,el.dataset.variant||"gold"));
+
+const STOCK={NVDAx:{m:"NV",bg:"#76B900",fg:"#0D2200",n:"英伟达"},SPYx:{m:"SPY",bg:"#6D88FF",fg:"#0B1440",n:"标普 500"},TSLAx:{m:"TS",bg:"#EF5A65",fg:"#3A0A10",n:"特斯拉"},AAPLx:{m:"AP",bg:"#E1E5EA",fg:"#1B1F27",n:"苹果"},QQQx:{m:"QQQ",bg:"#3CCBEB",fg:"#06303A",n:"纳斯达克 100"},GOOGLx:{m:"GO",bg:"#FBC52C",fg:"#3A2A00",n:"谷歌"},MSTRx:{m:"MS",bg:"#F7931A",fg:"#331A00",n:"Strategy"},COINx:{m:"CB",bg:"#3F70F7",fg:"#EEF3FF",n:"Coinbase"},HOODx:{m:"HO",bg:"#C8F552",fg:"#223300",n:"Robinhood"}};
+const chip=s=>`<span class="chip" style="background:${STOCK[s].bg};color:${STOCK[s].fg};${STOCK[s].m.length>2?"font-size:8px":""}">${STOCK[s].m}</span>`;
+const COINS=[
+ {n:"韭菜之王",tk:"JIUCAI",pays:"SPYx",mcap:1265000,ch:6.2,paid:9840,paid24:1840,h:3412,prog:null,age:2880,c:"#8E5CF6",dev:0},
+ {n:"打工人",tk:"DAGONG",pays:"GOOGLx",mcap:521000,ch:3.3,paid:4210,paid24:960,h:1890,prog:null,age:4320,c:"#0EA5A4",dev:1.2},
+ {n:"躺赚",tk:"TANG",pays:"NVDAx",mcap:413000,ch:18.4,paid:3120,paid24:712,h:1284,prog:86,age:300,c:"#E0565B",dev:2.4},
+ {n:"财神爷",tk:"CAISHEN",pays:"AAPLx",mcap:286000,ch:-4.1,paid:1870,paid24:410,h:906,prog:64,age:720,c:"#D9A21B",dev:0},
+ {n:"梭哈",tk:"SUOHA",pays:"MSTRx",mcap:175000,ch:-12.3,paid:960,paid24:220,h:577,prog:41,age:1500,c:"#F08A24",dev:5},
+ {n:"佛系",tk:"FOXI",pays:"COINx",mcap:138000,ch:1.4,paid:705,paid24:150,h:462,prog:33,age:980,c:"#6B7FD7",dev:0},
+ {n:"发财猫",tk:"FACAI",pays:"TSLAx",mcap:98000,ch:42.7,paid:412,paid24:120,h:318,prog:22,age:52,c:"#D9488B",dev:0.8},
+ {n:"土狗",tk:"TUGOU",pays:"QQQx",mcap:63000,ch:9.8,paid:188,paid24:60,h:204,prog:12,age:8,c:"#2FA36B",dev:0},
+ {n:"摸鱼",tk:"MOYU",pays:"HOODx",mcap:42000,ch:-2.6,paid:96,paid24:30,h:131,prog:7,age:5,c:"#3B82F6",dev:0}
+];
+const usd=v=>v>=1e6?"$"+(v/1e6).toFixed(2)+"M":v>=1e3?"$"+(v/1e3).toFixed(v>=1e5?0:1)+"K":"$"+Math.round(v);
+const usdFull=v=>"$"+Math.round(v).toLocaleString("en-US");
+const pct=v=>(v>=0?"+":"")+v.toFixed(1)+"%";
+const ago=m=>m<60?`${m} 分钟`:m<1440?`${Math.floor(m/60)} 小时`:`${Math.floor(m/1440)} 天`;
+const av=(c,s=40,r=11)=>`<span class="av" style="width:${s}px;height:${s}px;border-radius:${r}px;background:${c.c};font-size:${Math.round(s*.5)}px" aria-hidden="true">${[...c.n][0]}</span>`;
+
+/* strip */
+(function(){
+  const ev=COINS.slice(0,7).map((c,i)=>`<span class="ev">${av(c,20,6)}$${c.tk} 持有人领到 <span class="amt">${(c.paid/900/(i+1)).toFixed(4)} ${c.pays}</span></span>`);
+  ev.splice(2,0,`<span class="ev">${av(COINS[8],20,6)}<b>$MOYU</b> 5 分钟前上线</span>`);
+  ev.splice(5,0,`<span class="ev">${av(COINS[0],20,6)}<b>$JIUCAI</b> 已毕业，进入 Raydium</span>`);
+  const h=ev.join("");$("#strip").innerHTML=h+h.replace(/<span class="ev/g,'<span aria-hidden="true" class="ev');
+})();
+
+/* home */
+$("#roundRows").innerHTML=[["JIUCAI","0.0213 SPYx"],["DAGONG","0.0391 GOOGLx"],["TANG","0.0127 NVDAx"]].map(([t,a])=>{const c=COINS.find(x=>x.tk===t);return`<div class="row">${av(c,20,6)}<span>$${t}</span><b>${a}</b></div>`}).join("");
+$("#leaders").innerHTML=COINS.slice(0,3).map((c,i)=>`
+  <a class="lcard" href="#coin">
+    <div class="top">${av(c,44,12)}<div style="min-width:0"><div class="nm">${c.n}</div><div class="tk">$${c.tk}，市值 ${usd(c.mcap)}</div></div><span class="rank">${i+1}</span></div>
+    <div class="bd">
+      <div class="paid"><b class="num">${usd(c.paid24)}</b><span>今日已分<br>${(c.paid24/600).toFixed(2)} ${c.pays}</span></div>
+      <div class="pays"><strong>${chip(c.pays)}${c.pays}</strong><span class="tab">累计 ${usd(c.paid)} · ${c.h.toLocaleString("en-US")} 人</span></div>
+    </div>
+  </a>`).join("");
+const state={sort:"hot",pays:"all",q:""};
+const used=[...new Set(COINS.map(c=>c.pays))];
+$("#pays").innerHTML=`<button type="button" class="fchip all" data-pays="all" aria-pressed="true">全部</button>`+used.map(s=>`<button type="button" class="fchip" data-pays="${s}" aria-pressed="false">${chip(s)}${s}</button>`).join("");
+function renderGrid(){
+  let l=COINS.filter(c=>(state.pays==="all"||c.pays===state.pays)&&(!state.q||c.n.includes(state.q)||c.tk.toLowerCase().includes(state.q.toLowerCase().replace(/^\$/,""))||c.pays.toLowerCase().includes(state.q.toLowerCase())));
+  const by={hot:(a,b)=>b.mcap*(1+b.ch/100)-a.mcap*(1+a.ch/100),new:(a,b)=>a.age-b.age,paid:(a,b)=>b.paid24-a.paid24,grad:(a,b)=>(b.prog??-1)-(a.prog??-1)}[state.sort];
+  l=l.slice().sort(by);
+  $("#grid").innerHTML=l.length?l.map(c=>`
+    <a class="trow" href="#coin">
+      <div class="coin">${av(c,38,10)}<div style="min-width:0"><b>${c.n}${c.age<60?'<span class="badge new">新币</span>':""}${c.prog==null?'<span class="badge grad">已毕业</span>':""}${c.dev?`<span class="badge dev">首买 ${c.dev}%</span>`:""}</b><small>$${c.tk} · ${ago(c.age)}前</small></div></div>
+      <span class="c-mcap num" style="font-size:17px;font-weight:700">${usd(c.mcap)}</span>
+      <span class="c-chg"><span class="chg ${c.ch>=0?"up":"dn"}">${pct(c.ch)}</span></span>
+      <span class="c-prog prog">${c.prog==null?'<span style="color:var(--down);font-weight:700;font-size:13px">已毕业</span>':`<span class="bar"><i style="width:${c.prog}%"></i></span><span class="num">${c.prog}%</span>`}</span>
+      <span class="c-pays paychip">${chip(c.pays)}${c.pays}</span>
+      <span class="c-paid num up">${usd(c.paid)}</span>
+      <span class="c-h num">${c.h.toLocaleString("en-US")}</span>
+      <span class="c-age">${ago(c.age)}</span>
+    </a>`).join(""):`<div class="empty">没有匹配“${esc(state.q)}”的代币。试试代币符号、名称、合约地址或股票，或者<a href="#create" style="color:var(--red);font-weight:700">自己创建一个</a>。</div>`;
+}
+$$("#sorts button").forEach(b=>b.onclick=()=>{state.sort=b.dataset.sort;$$("#sorts button").forEach(x=>x.setAttribute("aria-pressed",x===b));renderGrid()});
+$("#pays").addEventListener("click",e=>{const b=e.target.closest("[data-pays]");if(!b)return;state.pays=b.dataset.pays;$$("#pays [data-pays]").forEach(x=>x.setAttribute("aria-pressed",x===b));renderGrid()});
+$("#q").addEventListener("input",e=>{state.q=e.target.value.trim();if(location.hash!=="#home"&&location.hash!=="")location.hash="home";renderGrid()});
+renderGrid();
+$("#caPill").onclick=()=>{};
+
+/* coin page */
+const TANG=COINS[2];
+$("#cAv").outerHTML=av(TANG,92,24).replace('class="av"','class="av" id="cAv"');
+function candles(){
+  const r=rng(7);let v=180,out=[];
+  for(let i=0;i<44;i++){const o=v;v=Math.max(20,v*(1+(r()-.42)*.09));const h=Math.max(o,v)*(1+r()*.03),l=Math.min(o,v)*(1-r()*.03);out.push({o,c:v,h,l,vol:20+r()*80})}
+  return out;
+}
+function drawChart(){
+  const d=candles(),W=800,H=300,top=14,bot=70,max=Math.max(...d.map(x=>x.h)),min=Math.min(...d.map(x=>x.l));
+  const y=v=>top+(max-v)/(max-min)*(H-top-bot);const bw=W/d.length;const vmax=Math.max(...d.map(x=>x.vol));
+  const cs=getComputedStyle(document.documentElement),up=cs.getPropertyValue("--up").trim(),dn=cs.getPropertyValue("--down").trim();
+  let s=`<g stroke="#EBD3AE" stroke-width="1">${[0,1,2,3].map(i=>`<line x1="0" x2="${W}" y1="${top+i*(H-top-bot)/3}" y2="${top+i*(H-top-bot)/3}" stroke-dasharray="3 5"/>`).join("")}</g>`;
+  d.forEach((k,i)=>{const x=i*bw+bw/2,col=k.c>=k.o?up:dn;
+    s+=`<line x1="${x}" x2="${x}" y1="${y(k.h)}" y2="${y(k.l)}" stroke="${col}" stroke-width="1.4"/>`;
+    s+=`<rect x="${x-bw*.32}" y="${Math.min(y(k.o),y(k.c))}" width="${bw*.64}" height="${Math.max(1.5,Math.abs(y(k.o)-y(k.c)))}" fill="${col}" rx="1"/>`;
+    s+=`<rect x="${x-bw*.32}" y="${H-k.vol/vmax*52}" width="${bw*.64}" height="${k.vol/vmax*52}" fill="${col}" fill-opacity=".28"/>`;
+    if(i%4===2)s+=`<circle cx="${x}" cy="${y(k.l)+10}" r="4" fill="#B98A1E"/>`;
+  });
+  $("#chart").innerHTML=s;
+  const last=d[d.length-1],f=v=>"$"+(v*2.3).toFixed(1)+"K",c=(last.c-last.o)/last.o*100;
+  $("#legend").innerHTML=`<span>开 <b>${f(last.o)}</b></span><span>高 <b>${f(last.h)}</b></span><span>低 <b>${f(last.l)}</b></span><span>收 <b>${f(last.c)}</b></span><span class="${c>=0?"up":"dn"}"><b style="color:inherit">${pct(c)}</b></span><span>量 <b>$${(last.vol*.4).toFixed(1)}K</b></span>`;
+}
+drawChart();
+$$("#tfs button").forEach(b=>b.onclick=()=>{$$("#tfs button").forEach(x=>x.setAttribute("aria-pressed",x===b))});
+const CTABS={
+  trades:()=>`<div class="lrow th"><span>钱包</span><span>类型</span><span>金额</span><span>时间</span></div>`+[["7xKp…3fQa","买入","2.10 SOL",1],["Bw3e…k9Ld","卖出","0.84 SOL",2],["9Dme…Lw2k","买入","5.00 SOL",4],["Hk8s…mW1e","买入","0.30 SOL",6],["2PnV…xQ4r","卖出","1.20 SOL",9]].map(([w,t,a,m])=>`<div class="lrow"><span class="tab">${w}</span><span class="${t==="买入"?"up":"dn"}" style="font-weight:700">${t}</span><span class="num">${a}</span><span>${m} 分钟前</span></div>`).join(""),
+  holders:()=>`<div class="lrow th"><span>钱包</span><span>持仓</span><span>占比</span><span>已收分红</span></div>`+[["内盘","412.0M","41.2%","—"],["9Dme…Lw2k","38.2M","3.8%","0.091 NVDAx"],["7xKp…3fQa","24.0M","2.4%","0.057 NVDAx"],["Cq1d…Nf6p","19.6M","2.0%","0.047 NVDAx"],["6Lzc…Tq3v","12.1M","1.2%","0.029 NVDAx"]].map(r=>`<div class="lrow">${r.map((x,i)=>`<span class="${i?"num":"tab"}">${x}</span>`).join("")}</div>`).join(""),
+  divs:()=>`<div class="lrow th"><span>时间</span><span>分红</span><span>价值</span><span>钱包数</span></div>`+[[1,"0.0127 NVDAx","$2.32",412],[2,"0.0119 NVDAx","$2.17",398],[3,"0.0141 NVDAx","$2.57",377],[4,"0.0098 NVDAx","$1.79",360]].map(([h,a,v,w])=>`<div class="lrow"><span>${h} 小时前</span><span class="num up">${a}</span><span class="num">${v}</span><span class="num">${w}</span></div>`).join("")
+};
+function setTab(k){$$("[data-ctab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.ctab===k));$("#ctab").innerHTML=CTABS[k]()}
+$$("[data-ctab]").forEach(b=>b.onclick=()=>setTab(b.dataset.ctab));setTab("trades");
+let side="buy";
+function quote(){const a=parseFloat($("#amt").value)||0;$("#recv").textContent=side==="buy"?`${(a*287).toFixed(1)}K $TANG`:`${(a*0.0035).toFixed(4)} SOL`}
+$$("[data-side]").forEach(b=>b.onclick=()=>{side=b.dataset.side;$$("[data-side]").forEach(x=>x.setAttribute("aria-pressed",x===b));$("#payLbl").textContent=side==="buy"?"你支付":"你卖出";$("#unit").textContent=side==="buy"?"SOL":"$TANG";$("#amt").value=side==="buy"?"0.5":"100";quote()});
+$("#amt").addEventListener("input",quote);
+$$("#quick button").forEach(b=>b.onclick=()=>{$("#amt").value=b.textContent;quote()});quote();
+
+/* create */
+const ORDER=["NVDAx","SPYx","TSLAx","AAPLx","QQQx","GOOGLx"];let pick="NVDAx";
+$("#stocks").innerHTML=ORDER.map(s=>`<button type="button" class="stock" data-stock="${s}" aria-pressed="${s===pick}">${chip(s)}<span><b>${s}</b><small>${STOCK[s].n}</small></span></button>`).join("");
+$("#stocks").addEventListener("click",e=>{const b=e.target.closest("[data-stock]");if(!b)return;pick=b.dataset.stock;$$("#stocks [data-stock]").forEach(x=>x.setAttribute("aria-pressed",x===b));renderPreview()});
+function renderPreview(){
+  const name=$("#fName").value.trim(),tk=$("#fTicker").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,""),dev=parseFloat($("#fDev").value)||0;
+  const c={n:name||"你的代币",c:"#C51D29"};
+  $("#preview").innerHTML=`<div class="lcard"><div class="top">${av(c,44,12)}<div style="min-width:0"><div class="nm">${esc(c.n)}</div><div class="tk">$${esc(tk||"TICKER")} · 刚刚 · 你创建</div></div><span class="badge new" style="margin-left:auto">新币</span></div>
+    <div class="bd"><div class="paid"><b class="num" style="color:var(--ink)">$2.9K</b><span>市值<br>内盘 0%</span></div><div class="bar"><i style="width:2%"></i></div>
+    <div class="pays"><strong>${chip(pick)}${pick}</strong><span>已分 $0 · 1 人</span></div></div></div>`;
+  const ok1=tk.length>=2,ok2=name.length>=2;
+  $("#checks").innerHTML=[["代币符号",ok1?`$${esc(tk)} 可以使用`:"输入代币符号",ok1],["名称",ok2?"没有重复的名称":"输入名称",ok2],["图片","上传一张图片",false],["X 账号","选填",true]].map(([t,s,ok])=>`<div class="check"><i class="${ok?"ok":"idle"}">${ok?"✓":"·"}</i><span><b>${t}</b><small>${s}</small></span></div>`).join("");
+  $("#sumPays").textContent=`0.50%，以 ${pick} 发放`;
+  $("#sumDev").textContent=dev?`${dev} SOL`:"无";
+  $("#launchNote").textContent=ok1&&ok2?"还差一张图片。":"请先填写代币符号和名称。";
+}
+["#fName","#fTicker","#fDev"].forEach(s=>$(s).addEventListener("input",renderPreview));
+$$("#devQuick button").forEach(b=>b.onclick=()=>{$("#fDev").value=b.textContent==="最大"?"3.2":b.textContent;renderPreview()});
+renderPreview();
+
+/* payouts */
+const R=rng(11);
+const rows=[];for(let i=0;i<14;i++){const c=COINS[Math.floor(R()*COINS.length)];rows.push({c,min:1+Math.floor(i/3)*60+Math.floor(R()*3),amt:(R()*.9+.05).toFixed(4),v:Math.round(40+R()*420),w:Math.round(100+R()*1800),sig:Math.random().toString(36).slice(2,6)+"…"+Math.random().toString(36).slice(2,6)})}
+let rp="all";
+$("#rpays").innerHTML=`<button type="button" class="fchip all" data-rp="all" aria-pressed="true">全部</button>`+used.map(s=>`<button type="button" class="fchip" data-rp="${s}" aria-pressed="false">${chip(s)}${s}</button>`).join("");
+function renderReceipts(){$("#receipts").innerHTML=rows.filter(r=>rp==="all"||r.c.pays===rp).map(r=>`<tr><td><span class="coin">${av(r.c,26,7)}<b>$${r.c.tk}</b></span></td><td>${ago(r.min)}前</td><td class="up num">${r.amt} ${r.c.pays}</td><td class="num">$${r.v}</td><td class="num">${r.w.toLocaleString("en-US")}</td><td><a href="#payouts">${r.sig}</a></td></tr>`).join("")||`<tr><td colspan="6" class="empty">这个股票还没有分红收据。</td></tr>`}
+$("#rpays").addEventListener("click",e=>{const b=e.target.closest("[data-rp]");if(!b)return;rp=b.dataset.rp;$$("#rpays [data-rp]").forEach(x=>x.setAttribute("aria-pressed",x===b));renderReceipts()});
+renderReceipts();
+
+/* me */
+$("#meConnect").onclick=()=>{
+  $("#meBox").hidden=true;$("#meList").hidden=false;
+  $("#meList").innerHTML=`<div class="panel tiles"><div><b class="up">$184.20</b><span>累计收到的分红</span></div><div><b>3</b><span>持有的代币</span></div><div><b>0.42 SOL</b><span>可领取的创建者手续费</span></div><div><b class="tab" data-countdown>--:--</b><span>下次分红</span></div></div>
+  <div class="panel" style="margin-bottom:16px"><div class="panel-h"><h3>我持有的代币</h3><span class="note" style="margin:0">示例钱包 7xKp…3fQa</span></div>
+  ${COINS.slice(1,4).map(c=>`<a class="trow" href="#coin" style="grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr))"><div class="coin">${av(c,34,9)}<div><b>${c.n}</b><small>$${c.tk}</small></div></div><span class="num">${usd(c.mcap/40)}</span><span class="paychip">${chip(c.pays)}${c.pays}</span><span class="num up">+${(c.paid/90).toFixed(2)} USD</span></a>`).join("")}</div>`;
+  tick();
+};
+
+/* countdown, routing, up/down */
+function tick(){const d=new Date(),s=3600-(d.getMinutes()*60+d.getSeconds()),t=String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");$$("[data-countdown]").forEach(e=>e.textContent=t);const p=Math.round((3600-s)/36);const hb=$("#hourBar");if(hb){hb.style.width=p+"%";$("#hourPct").textContent=p+"%"}}
+tick();setInterval(tick,1000);
+function route(){
+  const v=(location.hash||"#home").slice(1);const view=$$("[data-view]").some(s=>s.dataset.view===v)?v:"home";
+  $$("[data-view]").forEach(s=>s.classList.toggle("on",s.dataset.view===view));
+  $$("[data-nav]").forEach(a=>a.dataset.nav===(view==="coin"?"home":view)?a.setAttribute("aria-current","page"):a.removeAttribute("aria-current"));
+  window.scrollTo(0,0);
+}
+addEventListener("hashchange",route);route();
+$$("[data-ud]").forEach(b=>b.onclick=()=>{document.documentElement.classList.toggle("greenup",b.dataset.ud==="green");$$("[data-ud]").forEach(x=>x.setAttribute("aria-pressed",x===b));drawChart()});
+$$(".lang button").forEach(b=>b.onclick=()=>{$$(".lang button").forEach(x=>x.setAttribute("aria-pressed",x===b))});
+</script>
