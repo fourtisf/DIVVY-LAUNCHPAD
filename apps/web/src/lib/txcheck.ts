@@ -4,6 +4,8 @@
  * programs and instructions a Divvy trade or claim needs are allowed, and nothing may move the
  * user's funds anywhere but their own accounts.
  */
+import { BRAND } from "./brand";
+import { txErrors } from "../i18n/msgs/errors";
 import { ComputeBudgetProgram, PublicKey, SystemProgram, type VersionedTransaction } from "@solana/web3.js";
 
 // Program IDs (docs/VERIFIED.md item 1; Raydium SDK ALL_PROGRAM_ID / DEVNET_PROGRAM_ID; spl-token constants).
@@ -21,8 +23,8 @@ const MAX_TRADE_PRIORITY_LAMPORTS = 5_000_000n;
 
 export class UnsafeTransaction extends Error {
   override name = "UnsafeTransaction";
-  constructor(reason: string) {
-    super(`uspad stopped this transaction before your wallet saw it: ${reason}.`);
+  constructor(readonly reason: string) {
+    super(txErrors.en.unsafe(reason));
   }
 }
 
@@ -110,8 +112,8 @@ const MAX_PRIORITY_LAMPORTS = 1_000_000n;
 
 /**
  * The coin's create, which the creator's wallet signs and pays for (owner decision 2026-10-27). It may
- * spend the creator's SOL on the new coin's accounts (inside LaunchLab's create), uspad's launch fee to
- * uspad's fee wallet, and one small Jito tip; nothing else. The payer and the coin's creator must both
+ * spend the creator's SOL on the new coin's accounts (inside LaunchLab's create), the launch fee to
+ * the platform's fee wallet, and one small Jito tip; nothing else. The payer and the coin's creator must both
  * be this wallet, the only other signer is the new mint, and no account comes from a lookup table.
  *
  * With `devBuyLamports` (owner decision 2026-10-28) it also holds the dev buy the creator typed, and
@@ -181,7 +183,7 @@ export function checkCreate(tx: VersionedTransaction, wallet: PublicKey, network
         if (lamports !== devBuyLamports) throw new UnsafeTransaction("a dev buy that isn't the amount you typed");
         wraps++;
       } else if (fee.to && to === fee.to && fees === 0) {
-        if (lamports > fee.lamports) throw new UnsafeTransaction("a launch fee above uspad's");
+        if (lamports > fee.lamports) throw new UnsafeTransaction(`a launch fee above ${BRAND}'s`);
         fees++;
       } else if (tips === 0 && lamports <= MAX_TIP_LAMPORTS) tips++;
       else throw new UnsafeTransaction("a SOL transfer that isn't the launch fee or the tip");

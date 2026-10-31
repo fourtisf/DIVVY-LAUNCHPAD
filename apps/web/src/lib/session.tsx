@@ -15,6 +15,11 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import type { Me, NonceResponse } from "@divvy/shared";
 import { api, ApiRequestError } from "./api";
+import { FailedOnChain, SentUnconfirmed, TxExpired } from "./tx";
+import { UnsafeTransaction } from "./txcheck";
+import type { Lang } from "@/i18n/lang";
+import { useLang } from "@/i18n/client";
+import { txErrors } from "@/i18n/msgs/errors";
 
 interface Session {
   me: Me | undefined;
@@ -102,11 +107,26 @@ function toBase64(b: Uint8Array): string {
   return btoa(s);
 }
 
-/** A user-facing message for a failed sign-in or API call ("User rejected" stays quiet). */
-export function errorText(e: unknown, fallback: string): string | null {
+/**
+ * A user-facing message for a failed sign-in or API call ("User rejected" stays quiet), in `lang`.
+ * The API's own messages are in English and are shown as they are. In components, useErrorText().
+ */
+export function errorText(e: unknown, fallback: string, lang: Lang = "en"): string | null {
   if (e instanceof ApiRequestError) return e.message;
-  if (e instanceof Error && (["UnsafeTransaction", "SentUnconfirmed", "TxExpired"].includes(e.name) || e.message.startsWith("The transaction failed on chain"))) return e.message;
+  const t = txErrors[lang];
+  if (e instanceof UnsafeTransaction) return t.unsafe(e.reason);
+  if (e instanceof SentUnconfirmed) return t.sentUnconfirmed;
+  if (e instanceof TxExpired) return t.expired;
+  if (e instanceof FailedOnChain) return t.failedOnChain;
   const m = e instanceof Error ? e.message : "";
+  if (m === txErrors.en.noWallet) return t.noWallet;
+  if (m === txErrors.en.cantSign) return t.cantSign;
   if (/reject|cancel|denied/i.test(m)) return null;
   return fallback;
+}
+
+/** errorText in the visitor's language. */
+export function useErrorText(): (e: unknown, fallback: string) => string | null {
+  const [lang] = useLang();
+  return (e, fallback) => errorText(e, fallback, lang);
 }

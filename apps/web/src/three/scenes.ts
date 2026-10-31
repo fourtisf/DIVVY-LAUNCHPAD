@@ -9,6 +9,7 @@
  * - Loop: one shared requestAnimationFrame; a scene renders only while on screen and the tab is visible.
  * - prefers-reduced-motion stops the idle sway/orbit; pointer and click still work.
  */
+import { BRAND } from "../lib/brand";
 import * as THREE from "three";
 import { mulberry32 } from "@divvy/shared";
 
@@ -117,7 +118,7 @@ function logoFace(): HTMLCanvasElement {
     g.shadowBlur = 0;
     g.fillStyle = "#DFFFEA";
     g.font = `600 46px ${FONT_D}`;
-    g.fillText("uspad", 256, 370);
+    g.fillText(BRAND, 256, 370);
   });
 }
 
@@ -440,7 +441,7 @@ async function fontsReady() {
 
 /* ---------- scenes ---------- */
 
-/** Hero: the uspad coin with six stock coins orbiting it and a field of sparkles. Click spins it. */
+/** Hero: the hwai coin with six stock coins orbiting it and a field of sparkles. Click spins it. */
 export async function heroScene(host: HTMLElement, featured: StockArt[]): Promise<Stop> {
   await fontsReady();
   const faces = await Promise.all(featured.map(stockFace));

@@ -4,8 +4,10 @@ import { notFound } from "next/navigation";
 import type { Me } from "@divvy/shared";
 import { AdminView } from "@/components/admin/AdminView";
 import { serverApi } from "@/lib/server-api";
+import { BRAND } from "@/lib/brand";
 
-export const metadata: Metadata = { title: "Admin · uspad", robots: { index: false, follow: false } };
+// Admin pages stay in English.
+export const metadata: Metadata = { title: `Admin · ${BRAND}`, robots: { index: false, follow: false } };
 
 /**
  * Hidden (owner request 2026-10-28): anyone but a signed-in admin gets the site's plain 404, and nothing

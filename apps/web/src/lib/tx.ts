@@ -3,12 +3,13 @@
 import { PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
 import type { WalletContextState } from "@solana/wallet-adapter-react";
 import { checkTransaction, type TxKind } from "./txcheck";
+import { txErrors } from "../i18n/msgs/errors";
 
 /** The transaction was broadcast but its confirmation wasn't seen: it may still land (audit). */
 export class SentUnconfirmed extends Error {
   override name = "SentUnconfirmed";
   constructor(readonly signature: string) {
-    super("Sent. Confirmation is taking a while; check the explorer before trying again.");
+    super(txErrors.en.sentUnconfirmed);
   }
 }
 
@@ -16,7 +17,7 @@ export class SentUnconfirmed extends Error {
 export class TxExpired extends Error {
   override name = "TxExpired";
   constructor(readonly signature: string) {
-    super("The transaction didn't land in time. Nothing was spent; try again.");
+    super(txErrors.en.expired);
   }
 }
 
@@ -24,7 +25,7 @@ export class TxExpired extends Error {
 export class FailedOnChain extends Error {
   override name = "FailedOnChain";
   constructor(readonly signature: string) {
-    super("The transaction failed on chain. Only the network fee was spent.");
+    super(txErrors.en.failedOnChain);
   }
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -42,14 +43,14 @@ export async function signAndSend(
   /** Called once the wallet has signed and the transaction is out, before confirmation. */
   onSent?: (signature: string) => void,
 ): Promise<string> {
-  if (!wallet.publicKey) throw new Error("Connect a wallet first");
+  if (!wallet.publicKey) throw new Error(txErrors.en.noWallet);
   const tx = VersionedTransaction.deserialize(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
   checkTransaction(tx, wallet.publicKey, check.network, check.kind, check.coinMint ? new PublicKey(check.coinMint) : undefined);
   // An upper bound for the API's blockhash (it was fetched moments ago), so confirmation waits long enough.
   const { lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   let sig: string;
   if (check.kind === "claim" || !wallet.sendTransaction) {
-    if (!wallet.signTransaction) throw new Error("This wallet can't sign transactions");
+    if (!wallet.signTransaction) throw new Error(txErrors.en.cantSign);
     const signed = await wallet.signTransaction(tx);
     sig = await connection.sendRawTransaction(signed.serialize(), { maxRetries: 3 });
   } else {
@@ -61,7 +62,7 @@ export async function signAndSend(
 
 /**
  * Waits for a sent transaction to confirm. By polling, not a websocket subscription: the browser's RPC is
- * uspad's HTTP relay. An RPC hiccup doesn't end the wait (it used to, and reported a payment that went
+ * the site's HTTP relay. An RPC hiccup doesn't end the wait (it used to, and reported a payment that went
  * through as unconfirmed). Once the blockhash has expired and the chain has no trace of the transaction,
  * it can't land any more: TxExpired. `resend` broadcasts it again every few seconds until then.
  */

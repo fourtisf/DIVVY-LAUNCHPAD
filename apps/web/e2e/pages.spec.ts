@@ -2,6 +2,17 @@ import { expect, test } from "@playwright/test";
 
 // Runs against the mock API: deterministic demo data, no wallet, no chain.
 
+test("the site opens in Chinese and the switch changes it to English", async ({ page, context }) => {
+  // playwright.config.ts pins English for the other tests; a first visit has no cookie.
+  await context.clearCookies();
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("土狗也分红");
+  await page.getByRole("group", { name: "语言" }).getByRole("button", { name: "EN" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Memecoins that pay you");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+});
+
 test("board lists coins and opens one", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Memecoins that pay you");

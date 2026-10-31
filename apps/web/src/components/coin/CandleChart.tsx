@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { CandleList } from "@divvy/shared";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time } from "lightweight-charts";
+import { useLang, useMsgs, useUpDown } from "@/i18n/client";
+import { chart as chartMsgs } from "@/i18n/msgs/chart";
 
 /** USD with k/M/B, and enough significant digits for a memecoin's tiny price ($0.000002829). */
 export function fmtUsd(v: number): string {
@@ -17,8 +19,10 @@ export function fmtUsd(v: number): string {
 
 /** The price axis also spans the volume strip below the candles: no labels below zero there. */
 const axisUsd = (v: number) => (v < 0 ? "" : fmtUsd(v));
-const clock = (t: number) => new Date(t * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-const stamp = (t: number) => new Date(t * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+// Dates in the page's language (the visitor's own time zone either way).
+const pageLang = () => (typeof document === "undefined" ? undefined : document.documentElement.lang || undefined);
+const clock = (t: number) => new Date(t * 1000).toLocaleTimeString(pageLang(), { hour: "2-digit", minute: "2-digit" });
+const stamp = (t: number) => new Date(t * 1000).toLocaleString(pageLang(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const css = (name: string, fallback: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 
 /** A candle as the legend shows it, volume in USD. */
@@ -35,14 +39,17 @@ export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: 
   const [ready, setReady] = useState(false);
   const [hover, setHover] = useState<Shown | null>(null);
   const items = candles?.items ?? [];
+  const t = useMsgs(chartMsgs);
+  const [upDown] = useUpDown();
+  const [lang] = useLang();
 
   useEffect(() => {
     let off = false;
     let chart: IChartApi | undefined;
     void import("lightweight-charts").then((lw) => {
       if (off || !box.current) return;
-      const up = css("--g", "#4ADE80");
-      const down = css("--red", "#FF6B81");
+      const up = css("--up", "#4ADE80");
+      const down = css("--down", "#FF6B81");
       const faint = css("--faint", "#7F978B");
       chart = lw.createChart(box.current, {
         autoSize: true,
@@ -55,7 +62,7 @@ export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: 
           timeVisible: true,
           secondsVisible: false,
           tickMarkFormatter: (t: Time, type: number) =>
-            type <= lw.TickMarkType.DayOfMonth ? new Date((t as number) * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : clock(t as number),
+            type <= lw.TickMarkType.DayOfMonth ? new Date((t as number) * 1000).toLocaleDateString(pageLang(), { month: "short", day: "numeric" }) : clock(t as number),
         },
         localization: { timeFormatter: (t: Time) => stamp(t as number), priceFormatter: axisUsd },
       });
@@ -88,8 +95,10 @@ export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: 
   useEffect(() => {
     const a = api.current;
     if (!ready || !a || !candles) return;
-    const up = css("--g", "#4ADE80");
-    const down = css("--red", "#FF6B81");
+    // Read on every update so the footer's up/down switch recolours the chart in place.
+    const up = css("--up", "#4ADE80");
+    const down = css("--down", "#FF6B81");
+    a.bars.applyOptions({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down });
     a.bars.setData(candles.items.map((b) => ({ time: b.t as Time, open: b.o, high: b.h, low: b.l, close: b.c })));
     a.vol.setData(candles.items.map((b) => ({ time: b.t as Time, value: b.vol.ui * solUsd, color: (b.c >= b.o ? up : down) + "55" })));
     // A payout hour sits on the candle that contains it; hours before the first candle are left out.
@@ -107,7 +116,8 @@ export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: 
       a.chart.timeScale().fitContent();
       fitted.current = key;
     }
-  }, [ready, candles, solUsd, payoutHours]);
+    // upDown and lang aren't read directly: they change the CSS variables and the date labels.
+  }, [ready, candles, solUsd, payoutHours, upDown, lang]);
 
   const last = items[items.length - 1];
   const shown: Shown | undefined = hover ?? (last && { ...last, volUsd: last.vol.ui * solUsd });
@@ -117,15 +127,15 @@ export function CandleChart({ candles, solUsd, payoutHours, label }: { candles: 
       <div className="cchart-legend">
         {shown ? (
           <>
-            <span>O <b>{fmtUsd(shown.o)}</b></span>
-            <span>H <b>{fmtUsd(shown.h)}</b></span>
-            <span>L <b>{fmtUsd(shown.l)}</b></span>
-            <span>C <b>{fmtUsd(shown.c)}</b></span>
+            <span>{t.o} <b>{fmtUsd(shown.o)}</b></span>
+            <span>{t.h} <b>{fmtUsd(shown.h)}</b></span>
+            <span>{t.l} <b>{fmtUsd(shown.l)}</b></span>
+            <span>{t.c} <b>{fmtUsd(shown.c)}</b></span>
             <span className={change >= 0 ? "up" : "down"}>{(change >= 0 ? "+" : "") + change.toFixed(2)}%</span>
-            <span>Vol <b>{fmtUsd(shown.volUsd)}</b></span>
+            <span>{t.vol} <b>{fmtUsd(shown.volUsd)}</b></span>
           </>
         ) : (
-          <span>No trades yet. The first one draws the first candle.</span>
+          <span>{t.empty}</span>
         )}
       </div>
       <div ref={box} className="cchart-plot" />

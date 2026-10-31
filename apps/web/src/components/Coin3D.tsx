@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DividendAsset } from "@divvy/shared";
 import type { StockArt } from "@/three/scenes";
 import { stockLogo } from "@/lib/logos";
+import { useMsgs } from "@/i18n/client";
+import { hero } from "@/i18n/msgs/hero";
 
 export const toArt = (a: DividendAsset): StockArt => ({ symbol: a.symbol, name: a.name, mono: a.mono, bg: a.chipBg, fg: a.chipFg, logo: stockLogo(a.symbol) });
 
@@ -66,9 +68,10 @@ export function CoinSpin3D({ src, back, label }: { src: string; back: DividendAs
 
 /** The hero stage: 3D coin with orbiting stocks, or the CSS fallback coin without WebGL. */
 export function HeroStage({ featured, children }: { featured: DividendAsset[]; children: ReactNode }) {
+  const t = useMsgs(hero);
   const { ref, state } = useScene((host, m) => m.heroScene(host, featured.map(toArt)), [featured.map((f) => f.symbol).join()]);
   return (
-    <div className="stage" id="stage" ref={ref} aria-label="A 3D uspad coin with stock tokens orbiting around it">
+    <div className="stage" id="stage" ref={ref} aria-label={t.stage}>
       {state === "fallback" && <div className="fallback-coin" />}
       <div className="halo" />
       <div className="floor" />

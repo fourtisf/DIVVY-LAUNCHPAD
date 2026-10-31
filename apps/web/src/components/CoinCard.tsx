@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { agoMin, pct, usd } from "@divvy/shared";
+import { pct, usd } from "@divvy/shared";
+import { useMsgs } from "@/i18n/client";
+import { board } from "@/i18n/msgs/board";
+import { common } from "@/i18n/msgs/common";
 import { Coupon } from "./Coupon";
 import { Spark } from "./Spark";
 import { coinHref } from "@/lib/links";
@@ -30,6 +33,8 @@ export interface CardCoin {
 
 /** Board card (prototype `card`). `asDiv` renders the create-page preview, which isn't a link. */
 export function CoinCard({ c, asDiv = false }: { c: CardCoin; asDiv?: boolean }) {
+  const t = useMsgs(board);
+  const ago = useMsgs(common).ago;
   const isNew = c.ageMin < 20;
   const body = (
     <>
@@ -40,22 +45,22 @@ export function CoinCard({ c, asDiv = false }: { c: CardCoin; asDiv?: boolean })
           <div className="card-name">{c.name}</div>
           <div className="card-sub">
             <span className="tk">${c.ticker}</span>
-            {isNew && <span className="badge badge-new">New</span>}
-            {c.graduated && <span className="badge badge-grad">Graduated</span>}
+            {isNew && <span className="badge badge-new">{t.badgeNew}</span>}
+            {c.graduated && <span className="badge badge-grad">{t.badgeGraduated}</span>}
             {c.devBuyPct ? (
-              <span className="badge badge-dev" title={`The creator bought ${shareLabel(c.devBuyPct)} of the supply in the create`}>
-                Dev {shareLabel(c.devBuyPct)}
+              <span className="badge badge-dev" title={t.devBadgeTitle(shareLabel(c.devBuyPct))}>
+                {t.devBadge(shareLabel(c.devBuyPct))}
               </span>
             ) : null}
           </div>
           <div className="card-sub" suppressHydrationWarning>
-            {agoMin(c.ageMin)} by {c.creatorLabel}
+            {t.agoBy(ago(c.ageMin), c.creatorLabel)}
           </div>
         </div>
       </div>
       <div className="card-mid">
         <div>
-          <div className="mcap-l">Market cap</div>
+          <div className="mcap-l">{t.marketCap}</div>
           <div className="mcap">{usd(c.mcap)}</div>
         </div>
         <div className="mid-r">
@@ -66,7 +71,7 @@ export function CoinCard({ c, asDiv = false }: { c: CardCoin; asDiv?: boolean })
       {c.graduated ? null : (
         <div>
           <div className="bar-row">
-            <span>Bonding curve</span>
+            <span>{t.bondingCurve}</span>
             <span>{Math.round(c.progress * 100)}%</span>
           </div>
           <div className="bar">

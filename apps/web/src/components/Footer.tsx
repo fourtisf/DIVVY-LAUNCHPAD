@@ -1,17 +1,22 @@
 import Link from "next/link";
 import { TELEGRAM_URL, X_HANDLE, X_URL } from "@/lib/social";
+import { getMsgs } from "@/i18n/server";
+import { common } from "@/i18n/msgs/common";
+import { UpDownSwitch } from "./UpDownSwitch";
 
-export function Footer({ demo }: { demo: boolean }) {
+export async function Footer({ demo }: { demo: boolean }) {
+  const t = await getMsgs(common);
   return (
     <footer className="foot">
       <div className="wrap">
         <span>
-          {demo ? "uspad prototype. Every number here is demo data." : "uspad."} Follow <a href={X_URL} target="_blank" rel="noopener noreferrer">@{X_HANDLE}</a> on X and join us on{" "}
-          <a href={TELEGRAM_URL} target="_blank" rel="noopener noreferrer">Telegram</a>.
+          {demo ? t.footDemo : t.footLive} {t.footFollow} <a href={X_URL} target="_blank" rel="noopener noreferrer">@{X_HANDLE}</a> {t.footOnX}{" "}
+          <a href={TELEGRAM_URL} target="_blank" rel="noopener noreferrer">Telegram</a>{t.footEnd}
         </span>
         <span>
-          Tokenized stocks are issued by third parties and aren&apos;t available everywhere. Nothing here is financial advice. <Link href="/terms">Terms</Link>
+          {t.footStocks} <Link href="/terms">{t.terms}</Link>
         </span>
+        <UpDownSwitch />
       </div>
     </footer>
   );

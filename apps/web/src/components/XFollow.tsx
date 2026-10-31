@@ -1,4 +1,8 @@
+"use client";
+
 import { TELEGRAM_HANDLE, TELEGRAM_URL, X_HANDLE, X_URL } from "@/lib/social";
+import { useMsgs } from "@/i18n/client";
+import { hero } from "@/i18n/msgs/hero";
 
 /** The X logo (a filled glyph, unlike the stroked icons in Icon.tsx). */
 export function XLogo({ size = 12 }: { size?: number }) {
@@ -9,13 +13,14 @@ export function XLogo({ size = 12 }: { size?: number }) {
   );
 }
 
-/** "Follow @uspadfun" in the hero, next to the contract address badge. */
+/** "Follow @<handle>" in the hero, next to the contract address badge. */
 export function XFollow() {
+  const t = useMsgs(hero);
   return (
-    <a className="eyecatch ca-pill x-pill" href={X_URL} target="_blank" rel="noopener noreferrer" aria-label={`Follow @${X_HANDLE} on X`}>
+    <a className="eyecatch ca-pill x-pill" href={X_URL} target="_blank" rel="noopener noreferrer" aria-label={t.followOnX(X_HANDLE)}>
       <XLogo />
       <span>
-        Follow <b>@{X_HANDLE}</b>
+        {t.follow} <b>@{X_HANDLE}</b>
       </span>
     </a>
   );
@@ -30,13 +35,14 @@ export function TelegramLogo({ size = 13 }: { size?: number }) {
   );
 }
 
-/** "Join @uspadfun" on Telegram, next to the X pill. */
+/** "Join @<handle>" on Telegram, next to the X pill. */
 export function TelegramJoin() {
+  const t = useMsgs(hero);
   return (
-    <a className="eyecatch ca-pill x-pill" href={TELEGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label={`Join @${TELEGRAM_HANDLE} on Telegram`}>
+    <a className="eyecatch ca-pill x-pill" href={TELEGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label={t.joinOnTelegram(TELEGRAM_HANDLE)}>
       <TelegramLogo />
       <span>
-        Join <b>@{TELEGRAM_HANDLE}</b>
+        {t.join} <b>@{TELEGRAM_HANDLE}</b>
       </span>
     </a>
   );

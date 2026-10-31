@@ -5,7 +5,9 @@ Read this first in every session.
 ## What this is
 Divvy is a Solana memecoin launchpad built on Raydium LaunchLab. Every coin trades against SOL and pays its holders an hourly dividend in a tokenized stock (NVDAx, SPYx and others). The full spec is in `HANDOFF.md`. The approved UI is `prototype/divvy-prototype.html`.
 
-**Name:** the product is **uspad** (`uspad.fun`, repo `fourtisf/uspad`) since 2026-10-26, the owner's rebrand. Everything users see says uspad, with the Koin belah logo (`brand/uspad/`). Internal names still say Divvy: the `@divvy/*` packages, `DIVVY_*` env vars, `divvy:` Redis keys and these docs.
+**Name:** the product is **hwai** (`hwai.ai`) since 2026-10-31, the owner's rebrand (it was uspad on `uspad.fun` from 2026-10-26; the repo is still `fourtisf/uspad`). Everything users see says hwai, with the Koin belah mark and the drawn "hwai" wordmark (`brand/hwai/`); copy takes the name from `BRAND` in `apps/web/src/lib/brand.ts`. Still named uspad, until the owner decides: the $USPAD token, the X and Telegram handles (@uspadfun), the on-chain PlatformConfig name and web, and the production domain in `deploy/`. Internal names still say Divvy: the `@divvy/*` packages, `DIVVY_*` env vars, `divvy:` Redis keys and these docs.
+
+**Language:** the site is Chinese first (owner, 2026-10-31): Simplified Chinese by default, English with the 中 / EN switch, and a green-up / red-up switch in the footer. How copy is written, the Chinese style and the glossary: `apps/web/src/i18n/README.md`.
 
 ## Stack (do not change without the owner's OK)
 - **Frontend:** Next.js 15 App Router (React 19) in `apps/web`. Upgraded from 14 with the owner's OK on 2026-10-26 (docs/AUDIT.md DEP-1).
@@ -16,7 +18,7 @@ Divvy is a Solana memecoin launchpad built on Raydium LaunchLab. Every coin trad
 - **Deploy:** Hostinger VPS with PM2 and Nginx.
 
 ## Hard rules
-1. **Pixel-faithful to the prototype.** Same tokens, fonts, copy, 3D coins, tilt cards and coupon stubs. If something looks wrong, ask; don't redesign.
+1. **Pixel-faithful to the prototype.** Same tokens, fonts, copy, 3D coins, tilt cards and coupon stubs. If something looks wrong, ask; don't redesign. The Chinese layer the owner approved on 2026-10-31 is `prototype/hwai-zh-mockup.html`: the same prototype with Chinese copy, Noto Sans SC for Han characters and the up/down switch. Its square-holed hero coin and red seal were mockup ideas and aren't on the site: the 3D coin stays.
 2. **No invented on-chain facts.** Program IDs, mints, fee fields and SDK calls must be confirmed against the SDK source/IDL or on-chain data, and logged in `docs/VERIFIED.md` with the source.
 3. **No mainnet spend** (PlatformConfig creation, funding wallets, test launches) without the owner's explicit approval in chat.
 4. **Private keys** never go in the repo, the database, logs or client bundles. Hot wallets keep minimal balances with spend caps.
@@ -42,3 +44,4 @@ Divvy is a Solana memecoin launchpad built on Raydium LaunchLab. Every coin trad
 - Anti-vamp: `packages/shared/src/antivamp.ts` and `imagehash.ts`. The API re-runs every check on launch.
 - 3D coins: `apps/web/src/three/scenes.ts` (`three@0.128.0`, same as the prototype's r128), loaded with a dynamic import from `apps/web/src/components/Coin3D.tsx`.
 - Styles: `apps/web/src/app/globals.css` is the prototype's CSS verbatim; anything new goes in `additions.css`.
+- Copy in both languages: `apps/web/src/i18n/msgs/` (one file per area, `defineMsgs(en, zh)`); English stays the prototype's wording.

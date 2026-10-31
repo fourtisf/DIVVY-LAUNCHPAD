@@ -46,7 +46,7 @@
 .report-modal textarea{width:100%;resize:vertical;min-height:72px}
 .report-acts{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
 
-/* uspad lockup in the header (replaces the prototype's foil mark and "divvy" text). */
+/* hwai lockup in the header (replaces the prototype's foil mark and "divvy" text). */
 .logo-lockup{display:block;height:36px;width:auto}
 @media (max-width:760px){.logo-lockup{height:32px}}
 
@@ -68,7 +68,7 @@ button.ca-pill:hover{border-color:var(--hair3)}
 .how-fees td b{color:var(--g-hi);font-weight:600}
 @media (max-width:760px){.how-fees{padding:2px 6px 4px}.how-fees table.t{font-size:13px}}
 
-/* Hero: follow uspad on X, next to the CA badge (components/XFollow.tsx). */
+/* Hero: follow hwai on X, next to the CA badge (components/XFollow.tsx). */
 a.x-pill{text-decoration:none;cursor:pointer}
 a.x-pill:hover{border-color:var(--hair3);color:var(--text)}
 .x-pill svg{flex:none;opacity:.9}
@@ -101,3 +101,35 @@ button.link{border:0;background:none;padding:0;font:inherit;cursor:pointer}
 .badge-dev{background:rgba(255,255,255,.07);color:var(--muted)}
 /* The dev buy's quick pick that matches the amount (create form). */
 .quick button[aria-pressed="true"]{color:var(--g-hi);border-color:var(--hair3)}
+
+/* ---------- Chinese and English (owner, 2026-10-31; src/i18n) ---------- */
+/* Han characters fall through the prototype's Latin faces to Noto Sans SC. */
+:root{
+  --display:"Clash Display","Plus Jakarta Sans","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --ui:"Satoshi","Plus Jakarta Sans","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+/* Han type doesn't take the negative tracking the Latin display face uses, and needs more leading. */
+:lang(zh) :is(.hero h1,.sec-h h2,.page-h,.create-head h1,.coin-head h1,.leader-name,.modal h2,.how-step h3){letter-spacing:.01em}
+:lang(zh) .hero h1{font-weight:900;line-height:1.12}
+:lang(zh) .hero p.lede{line-height:1.75;max-width:30em}
+:lang(zh) :is(nav.links a,.seg button,.tabbar a){letter-spacing:.04em}
+
+.lang-switch{display:inline-flex;align-items:center;height:42px;border-radius:12px;border:1px solid var(--hair2);background:rgba(255,255,255,.03);padding:3px;gap:2px;flex:none}
+.lang-switch button{border:0;background:transparent;color:var(--faint);height:34px;min-width:34px;padding:0 9px;border-radius:9px;font-weight:700;font-size:13.5px;transition:color .15s,background .15s}
+.lang-switch button:hover{color:var(--text)}
+.lang-switch button[aria-pressed="true"]{background:var(--g-soft);color:var(--g-hi)}
+/* Phones: one button that names the other language, so the search box keeps its room. */
+@media (max-width:760px){
+  .lang-switch{height:38px;padding:0}
+  .lang-switch button{height:36px;min-width:38px;padding:0 9px;font-size:13px;color:var(--muted)}
+  .lang-switch button[aria-pressed="true"]{display:none}
+}
+
+/* Up/down colours (footer switch). "cn" shows gains in red like Chinese stock apps. */
+:root{--up:var(--g);--down:var(--red);--up-soft:var(--g-soft);--down-soft:var(--red-soft)}
+:root[data-updown="cn"]{--up:var(--red);--down:var(--g);--up-soft:var(--red-soft);--down-soft:var(--g-soft)}
+.up{color:var(--up)} .down{color:var(--down)}
+.chg.up{background:var(--up-soft)} .chg.down{background:var(--down-soft)}
+.updown-switch{display:flex;align-items:center;gap:10px;flex-basis:100%}
+.updown-switch .seg{padding:2px}
+.updown-switch .seg button{height:28px;padding:0 11px;font-size:12.5px}

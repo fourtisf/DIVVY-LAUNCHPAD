@@ -8,6 +8,8 @@ import { num, usd, usdFull, type CoinList, type CoinSort, type CoinSummary, type
 import { coinsKey } from "@/lib/keys";
 import { useAssets, useConfig } from "@/lib/config";
 import { deliveryCopy } from "@/lib/copy";
+import { useLang, useMsgs } from "@/i18n/client";
+import { board } from "@/i18n/msgs/board";
 import { Chip } from "../Chip";
 import { CoinCard } from "../CoinCard";
 import { HeroStage } from "../Coin3D";
@@ -20,16 +22,12 @@ import { TelegramJoin, XFollow } from "../XFollow";
 import { coinHref } from "@/lib/links";
 import { toCard } from "@/lib/cards";
 
-
-const SORTS: [CoinSort, string][] = [
-  ["trending", "Trending"],
-  ["new", "New"],
-  ["payers", "Top payers"],
-  ["graduate", "About to graduate"],
-];
+const SORTS: CoinSort[] = ["trending", "new", "payers", "graduate"];
 
 export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats: Stats; leaders: CoinSummary[]; initialCoins: CoinList; now: number }) {
   const config = useConfig();
+  const t = useMsgs(board);
+  const [lang] = useLang();
   // Cards' ages ("New", the sparkline) start from the server's clock, so hydration matches the HTML, then
   // follow the browser's (audit: a coin crossing 10 or 20 minutes in between broke hydration).
   const [now, setNow] = useState(renderedAt);
@@ -61,39 +59,37 @@ export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats
               <span className="dot">
                 <Icon name="bolt" size={12} />
               </span>
-              Holders paid {usd(roundUsd)} in stocks this hour
+              {t.paidThisHour(usd(roundUsd))}
             </span>
             <TokenCa />
             <XFollow />
             <TelegramJoin />
           </div>
-          <h1>
-            Memecoins that pay you <span className="glow">real stock dividends.</span>
-          </h1>
-          <p className="lede">Launch a coin{config.launchFee.to ? " in seconds" : " for free"}. Every trade buys the stock you picked, like NVDAx or SPYx, {deliveryCopy(config).heroTail}</p>
+          <h1>{t.h1}</h1>
+          <p className="lede">{t.lede(!!config.launchFee.to, deliveryCopy(config, lang).heroTail)}</p>
           <div className="ctas">
-            <Link className="btn btn-g btn-lg" href="/create">Create a coin</Link>
-            <Link className="btn btn-ghost btn-lg" href="/how">How it works</Link>
+            <Link className="btn btn-g btn-lg" href="/create">{t.createCoin}</Link>
+            <Link className="btn btn-ghost btn-lg" href="/how">{t.howItWorks}</Link>
           </div>
           <div className="promises">
-            <Link className="tag" href="/how"><Icon name="gift" />{config.launchFee.to ? "Dev buys shown" : "Free, dev buys shown"}</Link>
-            <Link className="tag" href="/how"><Icon name="lock" />Liquidity locked for good</Link>
-            <Link className="tag" href="/how"><Icon name="shield" />No sniper in block 0</Link>
-            <Link className="tag" href="/payouts"><Icon name="receipt" />Every payout on chain</Link>
+            <Link className="tag" href="/how"><Icon name="gift" />{t.devBuysShown(!!config.launchFee.to)}</Link>
+            <Link className="tag" href="/how"><Icon name="lock" />{t.liquidityLocked}</Link>
+            <Link className="tag" href="/how"><Icon name="shield" />{t.noSniper}</Link>
+            <Link className="tag" href="/payouts"><Icon name="receipt" />{t.payoutsOnChain}</Link>
           </div>
         </div>
         <HeroStage featured={featured}>
           <div className="glass next-card">
             <Ring nextAt={stats.nextRoundAt} intervalSec={config.payouts.intervalSec} />
             <div>
-              <div className="k">Next payout</div>
+              <div className="k">{t.nextPayout}</div>
               <b><Countdown nextAt={stats.nextRoundAt} /></b>
             </div>
           </div>
           <div className="glass round-card">
-            <div className="k">Last hourly round</div>
+            <div className="k">{t.lastRound}</div>
             <div className="v"><CountUp value={roundUsd} format={usdFull} /></div>
-            <div className="k">paid to {(round?.wallets ?? 0).toLocaleString("en-US")} wallets</div>
+            <div className="k">{t.paidToWallets((round?.wallets ?? 0).toLocaleString("en-US"))}</div>
             <div className="rows">
               {round?.items.map((p) => (
                 <div className="row" key={p.mint}>
@@ -109,17 +105,17 @@ export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats
       </section>
 
       <div className="stats-band">
-        <div><b><CountUp value={stats.paidToHoldersUsd} format={usdFull} /></b><span>Paid to holders</span></div>
-        <div><b><CountUp value={stats.volume24hUsd} format={usdFull} /></b><span>Traded in 24h</span></div>
-        <div><b>{stats.coinsLive}</b><span>Coins live</span></div>
-        <div><b>{stocksToEarn}</b><span>Stocks to earn</span></div>
+        <div><b><CountUp value={stats.paidToHoldersUsd} format={usdFull} /></b><span>{t.paidToHolders}</span></div>
+        <div><b><CountUp value={stats.volume24hUsd} format={usdFull} /></b><span>{t.traded24h}</span></div>
+        <div><b>{stats.coinsLive}</b><span>{t.coinsLive}</span></div>
+        <div><b>{stocksToEarn}</b><span>{t.stocksToEarn}</span></div>
       </div>
 
       <section aria-labelledby="leadH">
         <div className="sec-h">
           <div>
-            <h2 id="leadH">Paying the most today</h2>
-            <p>Ranked by what holders were paid in the last 24 hours.</p>
+            <h2 id="leadH">{t.leadersH}</h2>
+            <p>{t.leadersP}</p>
           </div>
         </div>
         <div className="leaders">
@@ -131,12 +127,12 @@ export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats
                 <img src={c.imageUrl} alt="" width={64} height={64} />
                 <div>
                   <div className="leader-name">{c.name}</div>
-                  <div className="leader-tick">${c.ticker}, {usd(c.marketCapUsd)} market cap</div>
+                  <div className="leader-tick">{t.leaderTick(c.ticker, usd(c.marketCapUsd))}</div>
                 </div>
               </div>
               <div className="leader-paid">
                 <b>{usd(c.paid24hUsd)}</b>
-                <span>paid today<br />{num(c.paid24h.ui)} {c.dividendAsset}</span>
+                <span>{t.paidToday}<br />{num(c.paid24h.ui)} {c.dividendAsset}</span>
               </div>
               <Coupon pays={c.dividendAsset} paidUsd={c.paidUsd} holders={c.holders} />
             </Link>
@@ -147,20 +143,20 @@ export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats
       <section aria-labelledby="allH">
         <div className="sec-h">
           <div>
-            <h2 id="allH">All coins</h2>
+            <h2 id="allH">{t.allCoins}</h2>
           </div>
         </div>
         <div className="toolbar">
-          <div className="seg" role="group" aria-label="Sort">
-            {SORTS.map(([k, l]) => (
+          <div className="seg" role="group" aria-label={t.sort}>
+            {SORTS.map((k) => (
               <button type="button" key={k} aria-pressed={sort === k} onClick={() => setSort(k)}>
-                {l}
+                {t.sorts[k]}
               </button>
             ))}
           </div>
-          <div className="pays-filter" role="group" aria-label="Filter by stock">
-            <span>Pays in</span>
-            <button type="button" className="fchip all" aria-pressed={pays === "all"} onClick={() => setPays("all")}>All</button>
+          <div className="pays-filter" role="group" aria-label={t.filterByStock}>
+            <span>{t.paysIn}</span>
+            <button type="button" className="fchip all" aria-pressed={pays === "all"} onClick={() => setPays("all")}>{t.all}</button>
             {stats.assetsInUse.filter((s) => assets[s]).map((s) => (
               <button type="button" className="fchip" key={s} aria-pressed={pays === s} onClick={() => setPays(s)}>
                 <Chip sym={s} />
@@ -173,9 +169,7 @@ export function Board({ stats, leaders, initialCoins, now: renderedAt }: { stats
           {list.length ? (
             list.map((c) => <CoinCard key={c.mint} c={toCard(c, now)} />)
           ) : data ? (
-            <div className="empty">
-              No coin matches “{q}”. Try a ticker, a name, a CA or a stock like NVDAx, or <Link className="link" href="/create">create it yourself</Link>.
-            </div>
+            <div className="empty">{t.noMatch(q)}</div>
           ) : null}
         </div>
       </section>

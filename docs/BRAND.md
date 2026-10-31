@@ -193,6 +193,21 @@ The owner proposed renaming the product to **uspad.fun**: "us" for "kita" (we) a
 
 The owner confirmed the name on 2026-10-26 and the site now uses it: the header lockup (`apps/web/public/brand/uspad-lockup.svg`), the favicon and app icons, the share image (`social.cjs` renders it as `social/og-1200x630.png`) and every user-facing "Divvy" in the copy and the 3D coin. Internal names (`@divvy/*`, env vars, Redis keys) and these docs keep Divvy. Keep the US geofence (xStocks can't be offered to US persons), and include the name in the legal review. Regenerate with `python3 -I brand/uspad/src/uspad.py brand/uspad && node brand/uspad/src/board.cjs brand/uspad`.
 
+## hwai.ai (the owner's name, 2026-10-31)
+
+The owner renamed the product **hwai** and bought `hwai.ai` on 2026-10-31, together with a Chinese-first site (Simplified Chinese by default, English one click away; `apps/web/src/i18n/README.md`). Before deciding they were told three things, and chose hwai anyway: "HW" is a common short form of Huawei (华为) in China and a "HuaweiAI" token exists on Solana, so Chinese readers may read HWAI as Huawei AI; `.ai` suggests an AI product; and "huai" in the fourth tone is 坏 ("bad"). No Han characters have been picked for the name; the site shows the Latin "hwai". Include the name in the legal review (trademark search), with the US geofence as before.
+
+[`brand/hwai/`](../brand/hwai/) holds the identity: the same Koin belah mark, with a drawn "hwai" and "hwai.ai" wordmark in uspad's geometric system (`src/hwai.py` adds h, w and i to `brand/uspad/src/uspad.py`'s letters). The ".ai" is muted and its dot is a foil coin, like ".fun" was. `src/social.cjs` renders the share image (`social/og-1200x630.png`, copied to `apps/web/src/app/opengraph-image.png` and `twitter-image.png`) and an X profile photo and header with the Chinese hero line. Regenerate with `python3 -I brand/hwai/src/hwai.py brand/hwai && node brand/hwai/src/social.cjs brand/hwai` (the second needs Google Fonts for Noto Sans SC).
+
+What the site uses: the header lockup `apps/web/public/brand/hwai-lockup.svg`, the favicon and app icons (the mark alone, unchanged), the share image, `BRAND` in every user-facing string and on the 3D coin's face. The hero coin's ring text stays English, as an engraving.
+
+Still uspad, each waiting for the owner:
+
+- **The $USPAD token** and its posts in `brand/uspad/social/`. The hero's CA pill still shows its address.
+- **X and Telegram** (@uspadfun, `apps/web/src/lib/social.ts`) until the accounts are renamed.
+- **The PlatformConfig on mainnet** keeps name `uspad`, web `https://uspad.fun` and image `https://uspad.fun/brand/uspad-mark-512.png` (VERIFIED item 27). Changing them is a mainnet transaction: it needs the update instruction confirmed against the LaunchLab IDL (rule 2) and the owner's approval (rule 3). Keep `apps/web/public/brand/uspad-mark-512.png` until then; `hwai-mark-512.png` is the same picture under the new name.
+- **The production domain**: `deploy/mainnet/go-live.sh` still serves `uspad.fun`. Moving to `hwai.ai` means pointing its DNS at the server, a certificate, the Nginx server name and `WEB_ORIGIN`; keep `uspad.fun` redirecting so links in posts keep working.
+
 ## Stock token logos
 
 Every dividend asset shows its own token icon: in the round chips (filters, coupons, payouts, the trade box) and on the face of the 3D stock coins. They are the tokens' official icons from the Trust Wallet assets registry (`github.com/trustwallet/assets`, `blockchains/solana/assets/<mint>/logo.png`), fetched on 2026-10-26 by the mints verified in `docs/verified/jito-jupiter-xstocks.md`; each registry entry's `info.json` symbol matched (NVDAX, TSLAX, ...). They live in `apps/web/public/stocks/<SYMBOL>.png` (256 px); `apps/web/src/lib/logos.ts` lists them, and a symbol without one falls back to the prototype's initials. `scripts/fetch-stock-logos.sh` downloads them again.
