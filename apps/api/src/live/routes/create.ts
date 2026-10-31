@@ -24,6 +24,7 @@ import {
   type CheckResult,
   type LaunchStatus,
   type UploadResponse,
+  BRAND,
 } from "@divvy/shared";
 import { getLaunchSettings } from "@divvy/server";
 import { createFits } from "@divvy/solana/live";
@@ -245,7 +246,7 @@ export async function liveCreateRoutes(app: FastifyInstance, { d }: { d: LiveDep
             if (!v.isAdmin && (await tx.launch.count({ where: { userId: v.userId, step: { in: ["checking", "signing", "bundling"] } } })) > 0) {
               throw new Refusal(429, "LAUNCH_IN_PROGRESS", "Your last launch is still on its way. Approve it in your wallet, or wait a few minutes for it to finish.");
             }
-            if (all >= p.launchesPerDayGlobal) throw new Refusal(429, "GLOBAL_LIMIT", "uspad hit today's launch limit. Try again tomorrow.");
+            if (all >= p.launchesPerDayGlobal) throw new Refusal(429, "GLOBAL_LIMIT", `${BRAND} hit today's launch limit. Try again tomorrow.`);
             // On this transaction's connection: the lock holder must not wait for a second pooled
             // connection while other launches hold the rest waiting on the lock (audit).
             const again = await launchChecks({ ...d, prisma: tx as unknown as LiveDeps["prisma"] }, b, v.userId);

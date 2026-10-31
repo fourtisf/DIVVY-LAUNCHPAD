@@ -1,7 +1,7 @@
-"""hwai.ai brand (owner, 2026-10-31): the Koin belah mark with a custom-drawn "hwai" / "hwai.ai" wordmark.
+"""hwai.ai brand (owner, 2026-10-31): a square-holed cash coin mark with a custom-drawn "hwai" / "hwai.ai" wordmark.
 
 Usage: python3 -I brand/hwai/src/hwai.py brand/hwai
-The glyph system is uspad's (brand/uspad/src/uspad.py) with h, w and i added.
+Letters: a geometric system (x-height 40, stems 8), every one a filled path, so no font file is needed.
 Same geometric system as the divvy concept wordmark: x-height 40, baseline 80, ascender 12,
 descender 100, stems 8. Every letter is a filled path, so no font file or license is needed.
 """
@@ -165,24 +165,23 @@ def foil_defs(p, light=False):
             + f'<radialGradient id="{p}-sheen" cx=".32" cy=".22" r=".75"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".55"/><stop offset=".45" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>')
 
 
-def half_disc(cx, cy, r, side, closed=True):
-    sweep = 0 if side < 0 else 1
-    return f"M{f(cx)} {f(cy - r)}A{f(r)} {f(r)} 0 0 {sweep} {f(cx)} {f(cy + r)}" + ("Z" if closed else "")
+def square(cx, cy, h, ccw=False):
+    pts = [(cx - h, cy - h), (cx + h, cy - h), (cx + h, cy + h), (cx - h, cy + h)]
+    return poly(pts[::-1] if ccw else pts)
 
 
 def mark(p, mono=None):
-    """Koin belah: one coin cut in two, the right half lifted."""
+    """The hwai mark (owner, 2026-10-31): a square-holed cash coin (方孔钱), money and China in one shape.
+    Foil like the prototype's coins, with an engraved rim and an engraved frame round the hole."""
     fill = mono or f"url(#{p}-foil)"
-    g, r, lift = 3.2, 40, 7
-    left = half_disc(50 - g, 50 + lift / 2, r, -1)
-    right = half_disc(50 + g, 50 - lift / 2, r, 1)
+    body = circle(50, 50, 42) + square(50, 50, 12, ccw=True)
     if mono:
-        return f'<path d="{left}{right}" fill="{fill}"/>'
-    arcs = lambda rr: half_disc(50 - g, 50 + lift / 2, rr, -1, False) + half_disc(50 + g, 50 - lift / 2, rr, 1, False)
-    return (f'<path d="{left}{right}" fill="{fill}"/>'
-            f'<path d="{arcs(r - 9)}" fill="none" stroke="{INK}" stroke-opacity=".28" stroke-width="1.6"/>'
-            f'<path d="{arcs(r - 1.2)}" fill="none" stroke="#FFFFFF" stroke-opacity=".45" stroke-width="1.1"/>'
-            f'<path d="{left}{right}" fill="url(#{p}-sheen)"/>')
+        return f'<path d="{body}" fill="{fill}"/>'
+    return (f'<path d="{body}" fill="{fill}"/>'
+            f'<circle cx="50" cy="50" r="34.5" fill="none" stroke="{INK}" stroke-opacity=".28" stroke-width="1.8"/>'
+            f'<path d="{square(50, 50, 18)}" fill="none" stroke="{INK}" stroke-opacity=".28" stroke-width="1.8"/>'
+            f'<circle cx="50" cy="50" r="40.6" fill="none" stroke="#FFFFFF" stroke-opacity=".45" stroke-width="1.1"/>'
+            f'<path d="{body}" fill="url(#{p}-sheen)"/>')
 
 
 def svg(vw, vh, body, defs="", w=None, h=None, title="hwai.ai"):

@@ -4,7 +4,7 @@ import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
-import { avatarSvg, IMAGE_MAX_BYTES, loadParams, phash64 } from "@divvy/shared";
+import { avatarSvg, IMAGE_MAX_BYTES, loadParams, phash64, BRAND } from "@divvy/shared";
 import type { Env } from "./env";
 import { sendError } from "./errors";
 import { memoryKv, redisKv, type Kv } from "./kv";
@@ -59,7 +59,7 @@ export async function buildApp({ env, store, kv, live }: BuildOptions): Promise<
   app.addHook("onRequest", async (req, reply) => {
     if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
     const o = req.headers.origin;
-    if (o && o !== allowedOrigin) return sendError(reply, 403, "BAD_ORIGIN", "Requests must come from the uspad app");
+    if (o && o !== allowedOrigin) return sendError(reply, 403, "BAD_ORIGIN", `Requests must come from the ${BRAND} app`);
   });
 
   if (env.API_MODE === "live") {

@@ -23,6 +23,7 @@ import { LAUNCHLAB_DEFAULT_CURVE } from "@divvy/solana";
 import { assertCanSend, createTransaction, CreateTooLargeError, decodePool, MainnetDisabledError, poolAddresses, poolPriceSol, signatureOf } from "@divvy/solana/live";
 import type { WorkerDeps } from "./deps";
 import { putCoinStats } from "./stats";
+import { DOMAIN } from "@divvy/shared";
 
 /** Creates sent per launch (each needs the creator's signature). */
 const MAX_ATTEMPTS = 3;
@@ -67,7 +68,7 @@ export async function processLaunch(d: WorkerDeps, launchId: string): Promise<vo
       ...(links.website ? { website: links.website } : {}),
       ...(links.telegram ? { telegram: links.telegram } : {}),
       ...(links.x ? { twitter: links.x } : {}),
-      createdOn: "uspad.fun",
+      createdOn: DOMAIN,
     };
     const metadataUri = await d.storage.put(`meta/${coin.id}.json`, Buffer.from(JSON.stringify(meta)), "application/json");
 

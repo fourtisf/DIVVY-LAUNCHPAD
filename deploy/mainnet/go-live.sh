@@ -36,8 +36,10 @@
 #   go-live.sh payouts dry-run    back to computing without sending.
 #   go-live.sh payouts minimum <USD>
 #                                 a coin's hourly holders' share under this waits for the next hour ($1).
-#   go-live.sh token-ca <address> shows the uspad token's contract address in the hero; token-ca off
+#   go-live.sh token-ca <address> shows the platform token's contract address in the hero; token-ca off
 #                                 puts back "CA: coming soon" (rebuilds the site: it is a NEXT_PUBLIC_ value).
+#   go-live.sh socials <x> <tg>   the official X and Telegram handles (without @, or "off"), shown in the hero
+#                                 and footer; rebuilds the site. Unset, the site shows no X or Telegram links.
 #   go-live.sh update             deploys the latest commit (demo or live, whichever is running).
 #   go-live.sh status             apps, health, wallet addresses and balances.
 #
@@ -313,6 +315,8 @@ NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta
 NEXT_PUBLIC_SOLANA_RPC_URL=$BROWSER_RPC
 NEXT_PUBLIC_TERMS_FINAL=false
 NEXT_PUBLIC_TOKEN_CA=
+NEXT_PUBLIC_X_HANDLE=
+NEXT_PUBLIC_TELEGRAM_HANDLE=
 EOF
   write_env $ENV_DIR/web.env divvy-web <<EOF
 WEB_ORIGIN=https://$DOMAIN
@@ -905,7 +909,7 @@ payouts() {
 
 # --------------------------------------------------------------------------------------------------
 token_ca() {
-  [[ ${1:-} =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$|^off$ ]] || die "pakai: go-live.sh token-ca <alamat mint uspad token> | off"
+  [[ ${1:-} =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$|^off$ ]] || die "pakai: go-live.sh token-ca <alamat mint token platform> | off"
   [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
   if [ "$1" = off ]; then
     set_env $ENV_DIR/build.env NEXT_PUBLIC_TOKEN_CA ""
@@ -916,6 +920,21 @@ token_ca() {
     update
     note "CA di situs: $1"
   fi
+}
+
+# --------------------------------------------------------------------------------------------------
+# The official X and Telegram handles (web/src/lib/social.ts). "off" hides that account's links.
+socials() {
+  local ok='^([A-Za-z0-9_]{1,32}|off)$'
+  [[ ${1:-} =~ $ok && ${2:-} =~ $ok ]] || die "pakai: go-live.sh socials <handle X | off> <handle Telegram | off>, tanpa @"
+  [ -f "$LIVE_MARK" ] || die "jalankan 'go-live.sh switch' dulu"
+  local x=$1 tg=$2
+  [ "$x" = off ] && x=""
+  [ "$tg" = off ] && tg=""
+  set_env $ENV_DIR/build.env NEXT_PUBLIC_X_HANDLE "$x"
+  set_env $ENV_DIR/build.env NEXT_PUBLIC_TELEGRAM_HANDLE "$tg"
+  update
+  note "X: ${x:-tidak ditampilkan}, Telegram: ${tg:-tidak ditampilkan}"
 }
 
 # --------------------------------------------------------------------------------------------------
@@ -963,6 +982,7 @@ case "${1:-}" in
   fee-rate) fee_rate "${2:-}" ;;
   payouts) payouts "${2:-}" "${3:-}" ;;
   token-ca) token_ca "${2:-}" ;;
+  socials) socials "${2:-}" "${3:-}" ;;
   status) status ;;
   *) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 1 ;;
 esac

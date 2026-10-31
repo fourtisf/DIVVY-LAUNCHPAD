@@ -10,6 +10,7 @@ import { Prisma } from "@divvy/db";
 import { getTransactionAnyVersion } from "@divvy/solana/live";
 import { sendError } from "../errors";
 import type { LiveDeps } from "./deps";
+import { BRAND } from "@divvy/shared";
 
 type Reply = Parameters<typeof sendError>[0];
 
@@ -43,7 +44,7 @@ export function feePaymentProblem(tx: VersionedTransactionResponse, payer: strin
   }
   let i = 0;
   while (i < keys.length && keys.get(i)!.toBase58() !== to) i++;
-  if (i === keys.length) return "That payment didn't go to uspad's launch wallet";
+  if (i === keys.length) return `That payment didn't go to ${BRAND}'s launch wallet`;
   const received = BigInt(meta.postBalances[i] ?? 0) - BigInt(meta.preBalances[i] ?? 0);
   if (received < lamports) return `That payment is ${Number(received) / 1e9} SOL; launching costs ${Number(lamports) / 1e9} SOL`;
   return null;

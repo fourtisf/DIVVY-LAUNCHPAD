@@ -1,4 +1,5 @@
-// hwai.ai share image (the site's opengraph-image.png and twitter-image.png), X profile photo and X header.
+// hwai.ai share image (the site's opengraph-image.png and twitter-image.png), X profile photo, X header,
+// and the PNG icons: mark-512.png, app-icon-512.png, apple-icon-180.png and favicon-32.png.
 // Usage (repo root): node brand/hwai/src/social.cjs brand/hwai
 // Same layout as brand/uspad/src/social.cjs; the headline is the Chinese hero line with the English one
 // under it. Noto Sans SC comes from Google Fonts, so this needs network access.
@@ -83,5 +84,16 @@ const og = `<div style="width:1200px;height:630px;position:relative;overflow:hid
   await down("x-profile-2000.png", 400, 400, "x-profile-400.png");
   await down("x-header-3000x1000.png", 1500, 500, "x-header-1500x500.png");
   await down("og-2400x1260.png", 1200, 630, "og-1200x630.png");
+  // Icons, transparent where the SVG is.
+  const png = async (svgFile, file, size) => {
+    const p = await b.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
+    await p.setContent(`<style>html,body{margin:0;background:transparent}</style>${sized(read(svgFile), size)}`);
+    await p.screenshot({ path: path.join(DIR, file), omitBackground: true });
+    await p.close();
+  };
+  await png("mark.svg", "mark-512.png", 512);
+  await png("app-icon.svg", "app-icon-512.png", 512);
+  await png("app-icon.svg", "apple-icon-180.png", 180);
+  await png("mark.svg", "favicon-32.png", 32);
   await b.close();
 })();

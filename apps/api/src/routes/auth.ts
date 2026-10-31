@@ -8,7 +8,7 @@
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import bs58 from "bs58";
-import { VerifyRequestSchema, type Me, type SiwsInput } from "@divvy/shared";
+import { VerifyRequestSchema, type Me, type SiwsInput, BRAND } from "@divvy/shared";
 import type { Env } from "../env";
 import { sendError } from "../errors";
 import type { Kv } from "../kv";
@@ -31,7 +31,7 @@ export function verifyEd25519(message: string, signature: Uint8Array, publicKey:
 
 /** The SIWS fields for one sign-in; `siwsText` renders them in the standard (wallet `signIn`) layout. */
 export function siwsInput(domain: string, uri: string, address: string, nonce: string, issuedAt: Date, expiresAt: Date, chainId = "mainnet"): SiwsInput {
-  return { domain, address, statement: "Sign in to uspad.", uri, version: "1", chainId, nonce, issuedAt: issuedAt.toISOString(), expirationTime: expiresAt.toISOString() };
+  return { domain, address, statement: `Sign in to ${BRAND}.`, uri, version: "1", chainId, nonce, issuedAt: issuedAt.toISOString(), expirationTime: expiresAt.toISOString() };
 }
 
 export function siwsText(i: SiwsInput): string {

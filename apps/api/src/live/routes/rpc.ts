@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { sendError } from "../../errors";
 import type { LiveDeps } from "../deps";
+import { BRAND } from "@divvy/shared";
 
 const ALLOWED = new Set([
   "getLatestBlockhash", // lib/tx.ts, and wallets that send through the page's connection
@@ -56,7 +57,7 @@ export async function liveRpcRoutes(app: FastifyInstance, { d }: { d: LiveDeps }
   app.post("/api/rpc", { bodyLimit: 64 * 1024, config: { rateLimit: { max: 300, timeWindow: "1 minute" } } }, async (req, reply) => {
     // Browsers always send Origin on a POST; a script without it gets nothing (the app-wide check only
     // refuses a wrong one, audit).
-    if (req.headers.origin !== site) return sendError(reply, 403, "BAD_ORIGIN", "Requests must come from the uspad app");
+    if (req.headers.origin !== site) return sendError(reply, 403, "BAD_ORIGIN", `Requests must come from the ${BRAND} app`);
     const body = RpcRequest.safeParse(req.body);
     if (!body.success) return sendError(reply, 400, "BAD_RPC_REQUEST", "One JSON-RPC 2.0 request per call");
     if (!ALLOWED.has(body.data.method)) return sendError(reply, 403, "RPC_METHOD_NOT_ALLOWED", `${body.data.method} isn't available here`);

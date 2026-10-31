@@ -21,13 +21,13 @@ const ParamsSchema = z.object({
    * "<slot>:<holders bps>:<uspad bps>": trades up to this slot paid the previous platform fee and are
    * split at its weights. go-live.sh fee-rate sets it when the PlatformConfig's fee_rate changes.
    */
-  FEE_SPLIT_BEFORE: z.string().regex(/^\d+:\d+:\d+$/, "FEE_SPLIT_BEFORE is <slot>:<holders bps>:<uspad bps>").optional(),
+  FEE_SPLIT_BEFORE: z.string().regex(/^\d+:\d+:\d+$/, "FEE_SPLIT_BEFORE is <slot>:<holders bps>:<platform bps>").optional(),
   /**
    * Fees collected after graduation (the pool's creator fee, the locked LP's fees), split
    * holders : creator : uspad. 50 : 15 : 10 is the curve's old split, kept when the curve's uspad share
    * went to 0.35% so holders of graduated coins get the same (owner decision 2026-10-27).
    */
-  POOL_FEE_SPLIT: z.string().regex(/^\d+:\d+:\d+$/, "POOL_FEE_SPLIT is <holders>:<creator>:<uspad>").default("50:15:10"),
+  POOL_FEE_SPLIT: z.string().regex(/^\d+:\d+:\d+$/, "POOL_FEE_SPLIT is <holders>:<creator>:<platform>").default("50:15:10"),
   /** "push" sends every round; "claim" credits a ledger (HANDOFF §3.4). Copy follows this switch. */
   PAYOUT_DELIVERY: z.enum(["push", "claim"]).default("push"),
   PAYOUTS_DRY_RUN: z.enum(["true", "false"]).default("true"),

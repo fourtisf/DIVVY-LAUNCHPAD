@@ -33,8 +33,8 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(process.env.WEB_ORIGIN || "http://localhost:3000"),
     ...META[await getLang()],
-    // Link cards on X credit the official account.
-    twitter: { card: "summary_large_image", site: `@${X_HANDLE}`, creator: `@${X_HANDLE}` },
+    // Link cards on X credit the official account, once its handle is set (lib/social.ts).
+    twitter: { card: "summary_large_image", ...(X_HANDLE ? { site: `@${X_HANDLE}`, creator: `@${X_HANDLE}` } : {}) },
   };
 }
 

@@ -16,6 +16,7 @@ export function XLogo({ size = 12 }: { size?: number }) {
 /** "Follow @<handle>" in the hero, next to the contract address badge. */
 export function XFollow() {
   const t = useMsgs(hero);
+  if (!X_HANDLE) return null;
   return (
     <a className="eyecatch ca-pill x-pill" href={X_URL} target="_blank" rel="noopener noreferrer" aria-label={t.followOnX(X_HANDLE)}>
       <XLogo />
@@ -38,6 +39,7 @@ export function TelegramLogo({ size = 13 }: { size?: number }) {
 /** "Join @<handle>" on Telegram, next to the X pill. */
 export function TelegramJoin() {
   const t = useMsgs(hero);
+  if (!TELEGRAM_HANDLE) return null;
   return (
     <a className="eyecatch ca-pill x-pill" href={TELEGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label={t.joinOnTelegram(TELEGRAM_HANDLE)}>
       <TelegramLogo />
